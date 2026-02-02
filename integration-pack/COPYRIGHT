@@ -1,0 +1,10 @@
+SPDX-FileCopyrightText: 2025 Frogfish
+Copyright (c) 2025 Frogfish
+
+All files in this repository are Copyright (c) 2025 Frogfish, unless otherwise stated in an individual file header or in a third-party notice.
+
+This project is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. Assembly examples and libraries (`examples/*.asm`, `lib/*.asm`) are MIT licensed (see `LICENSE-ASM`).
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+“zASM” is a name used by Frogfish and may be a trademark (registered or unregistered). This repository’s license does not grant permission to use Frogfish trademarks (including the name “zASM” and associated logos) except as required for reasonable and customary use in describing the origin of the work and reproducing the content of notices.

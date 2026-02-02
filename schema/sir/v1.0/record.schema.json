@@ -1,0 +1,426 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frogfish.io/grit/schema/sir/v1.0/record.schema.json",
+  "title": "SIR v1.0 JSONL record",
+  "description": "SIR (Semantic IR) v1.0 is a streaming, line-delimited JSON (JSONL) interchange format for declarative compilers. One JSON object per line. Each line MUST validate against one of the record variants below. SIR is designed to be: (1) language-agnostic at the semantic layer, (2) tooling-friendly (meta/src/diag), and (3) extensible via explicit extension records rather than schema loosening. Additive extensions should prefer `ext` or `node` records; meaning-changing extensions require a new SIR version.",
+  "oneOf": [
+    { "$ref": "#/$defs/MetaRecord" },
+    { "$ref": "#/$defs/SrcRecord" },
+    { "$ref": "#/$defs/DiagRecord" },
+
+    { "$ref": "#/$defs/SymRecord" },
+    { "$ref": "#/$defs/TypeRecord" },
+    { "$ref": "#/$defs/NodeRecord" },
+    { "$ref": "#/$defs/ExtRecord" },
+
+    { "$ref": "#/$defs/LabelRecord" },
+    { "$ref": "#/$defs/InstrRecord" },
+    { "$ref": "#/$defs/DirRecord" }
+  ],
+  "$defs": {
+    "IrTag": {
+      "type": "string",
+      "const": "sir-v1.0"
+    },
+
+    "Ident": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z_.$][A-Za-z0-9_.$]*$"
+    },
+
+    "ExtName": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_.-]+$",
+      "description": "Extension identifier (namespace-friendly). Examples: `dbg.cfg`, `lower.wasm`, `x.mytool.note`."
+    },
+
+    "SrcId": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Source record identifier; MUST be unique within a stream; src_ref MUST reference a prior SrcRecord.id."
+    },
+
+    "RecordId": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional record identifier; if present, SHOULD be unique across the stream."
+    },
+
+    "NodeId": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Semantic node identifier; MUST be unique within a stream for records that carry semantic graph identity (sym/type/node)."
+    },
+
+    "TypeId": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Type identifier; MUST reference a prior TypeRecord.id (or be resolvable within the same unit by the consumer)."
+    },
+
+    "Loc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["line"],
+      "properties": {
+        "line": { "type": "integer", "minimum": 1 },
+        "col": { "type": "integer", "minimum": 1, "description": "1-based column; omit if unknown." },
+        "unit": { "type": "string", "description": "Optional compilation unit / filename hint." }
+      }
+    },
+
+    "Section": {
+      "type": "string",
+      "enum": ["text", "rodata", "data", "bss"],
+      "description": "Optional low-level section hint for data/layout oriented records."
+    },
+
+    "Sym": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "v"],
+      "properties": {
+        "t": { "const": "sym" },
+        "v": { "$ref": "#/$defs/Ident" }
+      },
+      "description": "Symbol name (human-readable identifier). Semantic identity should prefer SymRecord (id) when available."
+    },
+
+    "Lbl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "v"],
+      "properties": {
+        "t": { "const": "lbl" },
+        "v": { "$ref": "#/$defs/Ident" }
+      },
+      "description": "Local control-flow target within the current unit/stream (legacy/low-level compatibility)."
+    },
+
+    "Reg": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "v"],
+      "properties": {
+        "t": { "const": "reg" },
+        "v": { "$ref": "#/$defs/Ident" }
+      },
+      "description": "Register operand (only used by low-level/compat records such as `instr`)."
+    },
+
+    "Num": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "v"],
+      "properties": {
+        "t": { "const": "num" },
+        "v": { "type": "integer" }
+      }
+    },
+
+    "Str": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "v"],
+      "properties": {
+        "t": { "const": "str" },
+        "v": { "type": "string" }
+      }
+    },
+
+    "Mem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "base"],
+      "properties": {
+        "t": { "const": "mem" },
+        "base": {
+          "oneOf": [
+            { "$ref": "#/$defs/Reg" },
+            { "$ref": "#/$defs/Sym" }
+          ]
+        },
+        "disp": { "type": "integer", "description": "Optional displacement in bytes relative to base." },
+        "size": { "type": "integer", "enum": [1, 2, 4, 8, 16], "description": "Optional width hint in bytes." }
+      }
+    },
+
+    "NodeRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "id"],
+      "properties": {
+        "t": { "const": "ref" },
+        "id": { "$ref": "#/$defs/NodeId" },
+        "k": {
+          "type": "string",
+          "enum": ["sym", "type", "node"],
+          "description": "Optional hint for the referenced record kind."
+        }
+      },
+      "description": "Reference to a semantic identity record by NodeId."
+    },
+
+    "Value": {
+      "description": "A typed leaf value used across SIR records.",
+      "oneOf": [
+        { "$ref": "#/$defs/Sym" },
+        { "$ref": "#/$defs/Lbl" },
+        { "$ref": "#/$defs/Reg" },
+        { "$ref": "#/$defs/Num" },
+        { "$ref": "#/$defs/Str" },
+        { "$ref": "#/$defs/Mem" },
+        { "$ref": "#/$defs/NodeRef" }
+      ]
+    },
+
+    "MetaRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ir", "k"],
+      "properties": {
+        "ir": { "$ref": "#/$defs/IrTag" },
+        "k": { "const": "meta" },
+        "producer": { "type": "string", "description": "Producer string (tool name/version)." },
+        "ts": { "type": "string", "description": "Optional timestamp or build id." },
+        "unit": { "type": "string", "description": "Optional unit/module name for the following stream segment." },
+        "id": { "$ref": "#/$defs/RecordId" },
+        "ext": { "type": "object", "additionalProperties": true, "description": "Optional producer-defined metadata (non-semantic)." }
+      }
+    },
+
+    "SrcRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ir", "k", "id", "line"],
+      "properties": {
+        "ir": { "$ref": "#/$defs/IrTag" },
+        "k": { "const": "src" },
+        "id": { "$ref": "#/$defs/SrcId" },
+        "file": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "col": { "type": "integer", "minimum": 1, "description": "1-based column; omit if unknown." },
+        "end_line": { "type": "integer", "minimum": 1 },
+        "end_col": { "type": "integer", "minimum": 1 },
+        "text": { "type": "string" }
+      },
+      "allOf": [
+        { "if": { "required": ["end_line"] }, "then": { "required": ["end_col"] } },
+        { "if": { "required": ["end_col"] }, "then": { "required": ["end_line"] } }
+      ]
+    },
+
+    "DiagRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ir", "k", "level", "msg"],
+      "properties": {
+        "ir": { "$ref": "#/$defs/IrTag" },
+        "k": { "const": "diag" },
+        "level": { "type": "string", "enum": ["info", "warn", "error"] },
+        "msg": { "type": "string" },
+        "code": { "type": "string", "description": "Optional stable diagnostic code." },
+        "notes": { "type": "array", "items": { "type": "string" }, "description": "Optional supplementary context lines." },
+        "help": { "type": "string", "description": "Optional actionable hint." },
+        "src_ref": { "$ref": "#/$defs/SrcId" },
+        "loc": { "$ref": "#/$defs/Loc" },
+        "id": { "$ref": "#/$defs/RecordId" },
+        "about": { "$ref": "#/$defs/NodeRef", "description": "Optional reference to the semantic node/symbol/type this diagnostic is about." }
+      }
+    },
+
+    "SymRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ir", "k", "id", "name", "kind"],
+      "properties": {
+        "ir": { "$ref": "#/$defs/IrTag" },
+        "k": { "const": "sym" },
+        "id": { "$ref": "#/$defs/NodeId" },
+        "name": { "$ref": "#/$defs/Ident" },
+        "kind": {
+          "type": "string",
+          "enum": ["fn", "var", "const", "type", "param", "field", "label"],
+          "description": "Semantic role of the symbol." 
+        },
+        "linkage": {
+          "type": "string",
+          "enum": ["local", "public", "extern"],
+          "default": "local",
+          "description": "Linkage intent (language-agnostic)."
+        },
+        "type_ref": { "$ref": "#/$defs/TypeId", "description": "Optional type id for this symbol." },
+        "value": { "$ref": "#/$defs/Value", "description": "Optional constant value (for `const` symbols)." },
+        "attrs": { "type": "object", "additionalProperties": true, "description": "Optional attributes (calling convention, storage class hints, etc.)." },
+        "src_ref": { "$ref": "#/$defs/SrcId" },
+        "loc": { "$ref": "#/$defs/Loc" }
+      }
+    },
+
+    "TypeRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ir", "k", "id", "kind"],
+      "properties": {
+        "ir": { "$ref": "#/$defs/IrTag" },
+        "k": { "const": "type" },
+        "id": { "$ref": "#/$defs/NodeId" },
+        "kind": {
+          "type": "string",
+          "enum": ["prim", "ptr", "array", "fn", "struct", "union", "enum", "named", "opaque"],
+          "description": "Type constructor. The schema is intentionally permissive; meaning-changing fields require a new SIR version."
+        },
+
+        "name": { "$ref": "#/$defs/Ident", "description": "Optional name for `named`/`struct`/`union`/`enum` types." },
+        "prim": { "type": "string", "description": "For kind=prim: a producer-defined primitive name (e.g. i32, u64, bool, char, void)." },
+
+        "of": { "$ref": "#/$defs/TypeId", "description": "For kind=ptr/array/named: referenced element or aliased type." },
+        "len": { "type": "integer", "minimum": 0, "description": "For kind=array: element count (0 allowed for unknown/unsized by convention)." },
+
+        "params": { "type": "array", "items": { "$ref": "#/$defs/TypeId" }, "description": "For kind=fn: parameter types." },
+        "ret": { "$ref": "#/$defs/TypeId", "description": "For kind=fn: return type." },
+        "varargs": { "type": "boolean", "description": "For kind=fn: whether the function is variadic." },
+
+        "fields": {
+          "type": "array",
+          "description": "For kind=struct/union: field list.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "type_ref"],
+            "properties": {
+              "name": { "$ref": "#/$defs/Ident" },
+              "type_ref": { "$ref": "#/$defs/TypeId" },
+              "attrs": { "type": "object", "additionalProperties": true }
+            }
+          }
+        },
+
+        "variants": {
+          "type": "array",
+          "description": "For kind=enum: variant list.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "name": { "$ref": "#/$defs/Ident" },
+              "value": { "$ref": "#/$defs/Value" }
+            }
+          }
+        },
+
+        "attrs": { "type": "object", "additionalProperties": true },
+        "src_ref": { "$ref": "#/$defs/SrcId" },
+        "loc": { "$ref": "#/$defs/Loc" }
+      }
+    },
+
+    "NodeRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ir", "k", "id", "tag"],
+      "properties": {
+        "ir": { "$ref": "#/$defs/IrTag" },
+        "k": { "const": "node" },
+        "id": { "$ref": "#/$defs/NodeId" },
+        "tag": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Semantic node tag (e.g. `fn`, `block`, `stmt.return`, `expr.call`, `decl`, `pattern`, etc.)."
+        },
+        "type_ref": { "$ref": "#/$defs/TypeId", "description": "Optional type of the node (especially for expressions)." },
+        "inputs": { "type": "array", "items": { "$ref": "#/$defs/NodeRef" }, "description": "Optional node inputs/dependencies." },
+        "fields": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Tag-specific payload. Prefer stable, small keys; put tool/debug data in ExtRecord instead."
+        },
+        "src_ref": { "$ref": "#/$defs/SrcId" },
+        "loc": { "$ref": "#/$defs/Loc" }
+      }
+    },
+
+    "ExtRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ir", "k", "name", "payload"],
+      "properties": {
+        "ir": { "$ref": "#/$defs/IrTag" },
+        "k": { "const": "ext" },
+        "name": { "$ref": "#/$defs/ExtName" },
+        "about": { "$ref": "#/$defs/NodeRef", "description": "Optional reference to what this extension data is about." },
+        "payload": { "type": "object", "additionalProperties": true },
+        "src_ref": { "$ref": "#/$defs/SrcId" },
+        "loc": { "$ref": "#/$defs/Loc" },
+        "id": { "$ref": "#/$defs/RecordId" }
+      },
+      "description": "Explicit extension record for tooling/debugging/experimentation. Using `ext` preserves strict validation while allowing arbitrary producer-defined data."
+    },
+
+    "Operand": {
+      "description": "Legacy/low-level typed operand (kept for compatibility).",
+      "$ref": "#/$defs/Value"
+    },
+
+    "Arg": {
+      "description": "Directive argument (typed). Same shapes as operands.",
+      "$ref": "#/$defs/Operand"
+    },
+
+    "LabelRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ir", "k", "name"],
+      "properties": {
+        "ir": { "$ref": "#/$defs/IrTag" },
+        "k": { "const": "label" },
+        "name": { "$ref": "#/$defs/Ident" },
+        "loc": { "$ref": "#/$defs/Loc" },
+        "id": { "$ref": "#/$defs/RecordId" }
+      },
+      "description": "Legacy/low-level label record. Prefer SymRecord(kind=label) + NodeRecord for semantic CFG when applicable."
+    },
+
+    "InstrRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ir", "k", "m", "ops"],
+      "properties": {
+        "ir": { "$ref": "#/$defs/IrTag" },
+        "k": { "const": "instr" },
+        "m": { "type": "string", "minLength": 1, "description": "Mnemonic (case-sensitive)." },
+        "ops": { "type": "array", "items": { "$ref": "#/$defs/Operand" } },
+        "src_ref": { "$ref": "#/$defs/SrcId" },
+        "loc": { "$ref": "#/$defs/Loc" },
+        "id": { "$ref": "#/$defs/RecordId" }
+      },
+      "description": "Legacy/low-level instruction record (useful as a lowering target, debugging view, or interop with ZIR-like streams)."
+    },
+
+    "DirRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ir", "k", "d", "args"],
+      "properties": {
+        "ir": { "$ref": "#/$defs/IrTag" },
+        "k": { "const": "dir" },
+        "d": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Directive name (case-sensitive). In SIR, this is intentionally open to support multiple backends and toolchains."
+        },
+        "name": { "$ref": "#/$defs/Ident", "description": "Optional label associated with this directive (e.g. msg: DB ...)." },
+        "args": { "type": "array", "items": { "$ref": "#/$defs/Arg" } },
+        "section": { "$ref": "#/$defs/Section", "description": "Optional section hint for data layout." },
+        "sig": { "type": "string", "description": "Optional human-readable signature metadata (ignored by semantic consumers)." },
+        "src_ref": { "$ref": "#/$defs/SrcId" },
+        "loc": { "$ref": "#/$defs/Loc" },
+        "id": { "$ref": "#/$defs/RecordId" }
+      },
+      "description": "Legacy/low-level directive record (useful for data/layout/back-end interop)."
+    }
+  }
+}

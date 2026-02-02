@@ -1,0 +1,3281 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SIR 1.0 Mnemonics (Record Vocabulary)</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&display=swap");
+      :root {
+        --bg: #0f1828;
+        --card: rgba(255, 255, 255, 0.08);
+        --text: #f4f7ff;
+        --muted: #a8b3cf;
+        --accent: #f6c343;
+        --border: rgba(244, 247, 255, 0.2);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+        background: radial-gradient(circle at top left, #1f3158, #0b1321 70%);
+        color: var(--text);
+        padding: 3rem 1.5rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      h1 {
+        font-size: 2.25rem;
+        margin: 0 0 0.5rem;
+        width: 100%;
+        max-width: 1200px;
+      }
+      h2 {
+        font-size: 1.25rem;
+        margin: 1.75rem 0 0.5rem;
+        color: var(--accent);
+      }
+      p.lede {
+        width: 100%;
+        max-width: 1200px;
+        color: var(--muted);
+        line-height: 1.6;
+        margin: 0 auto 2rem;
+      }
+      .spec {
+        width: 100%;
+        max-width: 1200px;
+        background: rgba(15, 24, 40, 0.45);
+        border: 1px solid var(--border);
+        border-radius: 1rem;
+        padding: 1.5rem 1.6rem;
+        margin: 0 auto 2rem;
+      }
+      .spec p {
+        margin: 0.5rem 0 0.75rem;
+        color: var(--text);
+        line-height: 1.6;
+      }
+      .spec ul {
+        margin: 0.5rem 0 0.75rem 1.2rem;
+        padding: 0;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+      .spec code {
+        font-family: "JetBrains Mono", "Fira Code", monospace;
+        font-size: 0.9em;
+        color: var(--text);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 1rem;
+        overflow: hidden;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+      }
+      .table-wrap {
+        width: 100%;
+        overflow-x: auto;
+        border-radius: 1rem;
+      }
+      .table-wrap table {
+        min-width: 1100px;
+      }
+      thead {
+        background: rgba(15, 24, 40, 0.65);
+        backdrop-filter: blur(6px);
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 0.9rem 1rem;
+        border-bottom: 1px solid var(--border);
+        vertical-align: top;
+      }
+      th {
+        font-weight: 600;
+        color: var(--accent);
+        letter-spacing: 0.05em;
+        font-size: 0.9rem;
+        text-transform: uppercase;
+      }
+      tbody tr:nth-child(odd) {
+        background: rgba(255, 255, 255, 0.02);
+      }
+      tbody tr:hover {
+        background: rgba(246, 195, 67, 0.07);
+      }
+      td:nth-child(1) {
+        font-weight: 600;
+      }
+      pre {
+        margin: 0;
+        font-family: "JetBrains Mono", "Fira Code", monospace;
+        font-size: 0.78rem;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        word-break: break-all;
+        color: #fefefe;
+      }
+      @media (max-width: 960px) {
+        table,
+        thead,
+        tbody,
+        th,
+        td,
+        tr {
+          display: block;
+        }
+        thead {
+          display: none;
+        }
+        tbody tr {
+          padding: 1rem;
+          border-bottom: 1px solid var(--border);
+        }
+        td {
+          border: none;
+          padding: 0.65rem 0;
+        }
+        td::before {
+          content: attr(data-label);
+          display: block;
+          color: var(--muted);
+          text-transform: uppercase;
+          font-size: 0.75rem;
+          letter-spacing: 0.05em;
+          margin-bottom: 0.25rem;
+        }
+        .table-wrap table {
+          min-width: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>SIR 1.0 Mnemonics</h1>
+    <p class="lede">
+      Normative specification of SIR v1.0 record kinds (“mnemonics”), required
+      fields, value shapes, and JSONL emission. This document is prescriptive: a
+      SIR stream is valid only if it conforms to the rules below and the table
+      that follows.
+    </p>
+
+    <section class="spec">
+      <h2>Status and scope</h2>
+      <p>
+        This document defines the complete, authoritative SIR v1.0 JSONL
+        vocabulary. A consumer MUST reject any record that violates the
+        envelope, required fields, or shape rules below.
+      </p>
+      <p>
+        Records with <code>k:"diag"</code> are non-semantic and MUST be ignored
+        for program meaning. Records with <code>k:"ext"</code> provide optional
+        debugging and tooling extensions. In SIR v1.0 they are non-semantic:
+        consumers MUST ignore unknown <code>ns</code> namespaces without failing
+        the stream.
+      </p>
+      <p>
+        When this document conflicts with any other source, this document is the
+        standard.
+      </p>
+
+      <h2>Record stream model</h2>
+      <ul>
+        <li>
+          SIR is a sequence of independent JSON objects, one per line (JSONL).
+          Each line is a single record.
+        </li>
+        <li>
+          The stream is append-only and stable: producers SHOULD preserve record
+          order as written.
+        </li>
+        <li>
+          Unless otherwise stated, <code>id</code> values are unique within a
+          stream and are referenced by other records using a
+          <code>ref</code> value.
+        </li>
+        <li>
+          All <code>{"t":"ref","id":...}</code> cross-references MUST be
+          backward references: a <code>{"t":"ref","id":...}</code> MUST refer to
+          a record defined earlier in the stream.
+        </li>
+        <li>
+          SSA value references (<code>{"t":"val","id":...}</code>) are scoped to
+          a function and MUST refer to a value defined earlier in the same
+          function, except for block parameters which are defined by the block
+          header.
+        </li>
+      </ul>
+
+      <h2>Envelope (normative)</h2>
+      <ul>
+        <li>
+          Every record MUST include <code>"ir":"sir-v1.0"</code> and a kind
+          discriminator <code>"k"</code>.
+        </li>
+        <li>
+          Every semantic record (any <code>k</code> other than
+          <code>diag</code> and <code>ext</code>) SHOULD include
+          <code>"id"</code> (a unique string identifier) unless the table states
+          otherwise.
+        </li>
+        <li>
+          Records MAY include <code>"loc"</code> for source mapping:
+          <code>{"file":STR,"line":NUM,"col":NUM}</code>. Line/col are 1-based.
+        </li>
+        <li>
+          Records MAY include <code>"meta"</code> (an object) for producer
+          metadata. Consumers MUST ignore unknown keys inside <code>meta</code>.
+        </li>
+      </ul>
+
+      <h2>Value encoding (normative)</h2>
+      <p>
+        Fields that accept a “value” use a tagged encoding to distinguish
+        literals from references.
+      </p>
+      <ul>
+        <li>
+          <strong>Record reference:</strong>
+          <code>{"t":"ref","id":ID}</code> points at another record’s
+          <code>id</code> and MUST be a backward reference.
+        </li>
+        <li>
+          <strong>SSA value reference:</strong>
+          <code>{"t":"val","id":ID}</code> refers to an SSA value id defined by
+          <code>op.dst</code>, <code>eff.results[*].id</code>, or a block
+          parameter <code>block.params[*].id</code>.
+        </li>
+        <li>
+          <strong>Symbol reference:</strong>
+          <code>{"t":"sym","name":ID}</code> refers to a symbol by name
+          (late-bound). A producer SHOULD also emit a corresponding
+          <code>sym</code> record.
+        </li>
+        <li>
+          <strong>Integer literals:</strong> <code>{"t":"i32","v":NUM}</code> or
+          <code>{"t":"i64","v":NUM}</code>.
+        </li>
+        <li>
+          <strong>Float literals:</strong>
+          <code>{"t":"f32","bits":HEX}</code> or
+          <code>{"t":"f64","bits":HEX}</code>, where <code>bits</code> is a hex
+          string (<code>0x</code>-prefixed) encoding the IEEE-754 bit pattern.
+          Producers MUST use canonical quiet-NaN bit patterns when emitting NaNs
+          and MUST NOT emit NaN payloads. (Rationale: JSON does not support
+          NaN/±Inf numbers, and bit-pattern encoding avoids ambient target
+          differences.)
+        </li>
+        <li>
+          <strong>Byte/string literals:</strong>
+          <code>{"t":"bytes","v":STR}</code> (base64) and
+          <code>{"t":"str","v":STR}</code> (UTF-8 string).
+        </li>
+        <li>
+          <strong>Boolean:</strong> <code>{"t":"bool","v":true|false}</code>.
+        </li>
+      </ul>
+
+      <h2>Block scoping and instruction placement (normative)</h2>
+      <ul>
+        <li>
+          A <code>block</code> record begins a basic block. All subsequent
+          <code>op</code> and <code>eff</code> records belong to the most
+          recently opened block until the next <code>block</code> record
+          appears.
+        </li>
+        <li>
+          Each block MUST end with exactly one <code>term</code> record before
+          the next <code>block</code> record (or before the function ends).
+        </li>
+        <li>
+          Within a function, any <code>{"t":"val","id":...}</code> use MUST be
+          dominated by its definition in the record stream order (single-pass
+          validity). Block parameters are considered defined at the start of the
+          block.
+        </li>
+      </ul>
+
+      <h2>Validation and forward compatibility</h2>
+      <ul>
+        <li>
+          Unknown record kinds (<code>k</code>) MUST be rejected, except
+          <code>diag</code> and <code>ext</code> which are always allowed.
+        </li>
+        <li>
+          Even if a consumer rejects other unknown <code>k</code> values, it
+          MUST still accept and ignore <code>k:"ext"</code> records with unknown
+          <code>ns</code> and/or <code>tag</code> values (extensions MUST NOT be
+          required for correctness in v1.0).
+        </li>
+        <li>
+          Consumers MUST ignore unknown fields on any record kind
+          (forward-compatible), except when a field is explicitly marked
+          “closed” in the table.
+        </li>
+        <li>
+          Producers SHOULD include <code>k:"unit"</code> as the first semantic
+          record to declare stream-wide defaults and capabilities. Producers
+          SHOULD also emit declarations (<code>type</code>, <code>sig</code>,
+          <code>sym</code>, <code>const</code>, <code>global</code>) before
+          first use by <code>{"t":"ref"}</code>.
+        </li>
+      </ul>
+
+      <h2>Determinism and canonical form (normative)</h2>
+      <p>
+        Correctness and reproducibility are primary goals of SIR. A SIR producer
+        MUST be deterministic: given the same semantic input program and the
+        same SIR version, it MUST emit a byte-identical semantic stream.
+      </p>
+
+      <h3>Semantic vs non-semantic fields</h3>
+      <ul>
+        <li>
+          <strong>Semantic records</strong> are all records except
+          <code>diag</code> and <code>ext</code>.
+        </li>
+        <li>
+          <code>loc</code> and <code>meta</code> are
+          <strong>non-semantic</strong> on all record kinds. They MUST NOT
+          affect program meaning.
+        </li>
+        <li>
+          <code>diag</code> records are non-semantic and MUST be ignored for
+          program meaning.
+        </li>
+        <li>
+          <code>ext</code> records are non-semantic in SIR v1.0. Consumers MUST
+          ignore unknown <code>ns</code> namespaces and MUST NOT treat
+          <code>ext</code> as required for correctness.
+        </li>
+      </ul>
+
+      <h3>Canonical JSON (semantic stream)</h3>
+      <ul>
+        <li>
+          For the purpose of determinism, the <em>semantic stream</em> is the
+          sequence of semantic records only (i.e., excluding
+          <code>diag</code> and <code>ext</code>).
+        </li>
+        <li>
+          Producers MUST emit semantic records in a deterministic order defined
+          by this spec (see “Record stream model”). They MUST NOT rely on JSON
+          object key iteration order for semantics.
+        </li>
+        <li>
+          Producers SHOULD emit JSON objects with a consistent key order and
+          stable formatting (recommended: lexicographic key order, no trailing
+          whitespace). Consumers MUST NOT require a particular key order.
+        </li>
+      </ul>
+
+      <h3>Deterministic identifiers</h3>
+      <ul>
+        <li>
+          All <code>id</code> values in semantic records MUST be reproducible.
+          Producers MUST NOT incorporate ambient sources of variation
+          (timestamps, random numbers, memory addresses, hash-map iteration
+          order, thread scheduling) into identifiers.
+        </li>
+        <li>
+          When a producer generates fresh ids, it SHOULD do so by a
+          deterministic traversal with stable tie-break rules (e.g., preorder
+          traversal of the source tree with source-location tie-breakers) or by
+          content addressing over canonicalized payloads.
+        </li>
+        <li>
+          Reference integrity is mandatory: any
+          <code>{"t":"ref","id":...}</code> MUST point to exactly one prior
+          definition of that <code>id</code> within the stream.
+        </li>
+      </ul>
+
+      <h3>Order and sets</h3>
+      <ul>
+        <li>
+          Whenever ordering is semantically relevant, it MUST be represented
+          with arrays.
+        </li>
+        <li>
+          Whenever a field represents an unordered set/map conceptually, it MUST
+          still be encoded as an array with a specified deterministic order
+          (recommended: lexicographic by <code>id</code> or by source order).
+          Producers MUST choose a deterministic ordering and apply it
+          consistently.
+        </li>
+      </ul>
+
+      <h3>Deterministic semantics hash (recommended)</h3>
+      <ul>
+        <li>
+          Producers SHOULD be able to compute a stable “semantic hash” over the
+          semantic stream that ignores <code>loc</code>, <code>meta</code>,
+          <code>diag</code>, and <code>ext</code>. This enables reproducibility
+          checks and cache keys.
+        </li>
+      </ul>
+
+      <h2>Structured constants and aggregates (agg:v1)</h2>
+      <p>
+        SIR v1.0 supports deterministic, target-explicit structured constants
+        for arrays/structs via the <code>const</code> record. These forms are
+        used for global initializers and to avoid duplication of large literal
+        payloads.
+      </p>
+
+      <h3>Feature gating</h3>
+      <ul>
+        <li>
+          Structured constant objects (i.e., <code>const.value</code> where
+          <code>value</code> is an object with <code>kind</code>) are only valid
+          if <code>unit.features</code> includes <code>agg:v1</code>.
+        </li>
+        <li>
+          If <code>agg:v1</code> is not enabled, consumers MUST reject any
+          <code>const</code> whose <code>value</code> is a structured object.
+        </li>
+      </ul>
+
+      <h3>Closed set of structured constant forms (normative)</h3>
+      <p>
+        When <code>agg:v1</code> is enabled, structured constant objects are a
+        closed set. Consumers MUST reject unknown <code>kind</code> values.
+      </p>
+      <ul>
+        <li>
+          <code>{"kind":"zero"}</code>: all-zero bit-pattern for
+          <code>ty</code>.
+        </li>
+        <li>
+          <code>{"kind":"array","elems":[...]}</code>: element list initializer.
+          Length MUST match the array type length.
+        </li>
+        <li>
+          <code>{"kind":"repeat","count":NUM,"elem":VALUE}</code>: repeat
+          initializer. Equivalent to an array of <code>count</code> copies of
+          <code>elem</code>. <code>count</code> MUST match the array type
+          length.
+        </li>
+        <li>
+          <code>{"kind":"struct","fields":[...]}</code>: struct initializer.
+          <code>fields</code> is an array of field assignments in field-index
+          order; each entry is <code>{"i":NUM,"v":VALUE}</code>.
+        </li>
+      </ul>
+
+      <h3>Determinism rules for structured constants</h3>
+      <ul>
+        <li>
+          Padding bytes (if any) introduced by <code>unit.target</code> layout
+          rules MUST be treated as zero unless a future negotiated feature
+          explicitly allows raw padding specification.
+        </li>
+        <li>
+          For <code>struct.fields</code>, the <code>fields</code> array MUST be
+          strictly increasing by <code>i</code> and MUST NOT contain duplicates.
+          Omitted fields default to zero.
+        </li>
+        <li>
+          All nested <code>VALUE</code> entries MAY be either scalar tagged
+          values (e.g. <code>{"t":"i32","v":1}</code>) or
+          <code>{"t":"ref","id":...}</code> pointing to another
+          <code>const</code> record, or another structured constant object
+          (recursive).
+        </li>
+      </ul>
+
+      <h2>Types and target layout contract (normative)</h2>
+      <p>
+        SIR is designed to be deterministic and target-explicit. Any semantic
+        that depends on machine properties (pointer width, endianness, alignment
+        and layout rules) MUST be declared by the
+        <code>unit.target</code> contract and the explicit
+        <code>type</code> records used by a program. Consumers MUST NOT consult
+        ambient host properties.
+      </p>
+
+      <h3>Target contract</h3>
+      <ul>
+        <li>
+          <code>unit.target</code> MAY be a string alias (e.g.
+          <code>"wasm32"</code>) or an explicit object. For maximum determinism,
+          producers SHOULD emit an explicit object.
+        </li>
+        <li>
+          If <code>unit.target</code> is a string alias, consumers MUST map it
+          via a stable, versioned table of known targets for SIR v1.0. If the
+          alias is unknown, consumers MUST reject the stream.
+        </li>
+        <li>
+          If <code>unit.target</code> is an object, consumers MUST validate that
+          all required fields are present and MUST use only these declared
+          properties when interpreting layout- or pointer-dependent operations.
+        </li>
+      </ul>
+
+      <h3>Required target fields (v1.0)</h3>
+      <ul>
+        <li>
+          <code>arch</code>: string identifier for the compilation target family
+          (e.g. <code>"wasm"</code>, <code>"x86"</code>, <code>"arm"</code>).
+          Used for diagnostics only; it MUST NOT change semantics except where
+          explicitly stated.
+        </li>
+        <li>
+          <code>ptrBits</code>: pointer bit-width (e.g. 32 or 64). This defines
+          the width of <code>ptr</code> values and the modulo for pointer
+          arithmetic.
+        </li>
+        <li>
+          <code>endian</code>: <code>"le"</code> or <code>"be"</code>. Defines
+          byte order for multi-byte loads/stores and for materializing constants
+          in memory.
+        </li>
+        <li>
+          <code>intAlign</code>: map from integer type name to ABI alignment in
+          bytes (keys: <code>i8</code>, <code>i16</code>, <code>i32</code>,
+          <code>i64</code>, <code>ptr</code>). Missing keys MUST be rejected.
+        </li>
+        <li>
+          <code>floatAlign</code>: map from float type name to ABI alignment in
+          bytes (keys: <code>f32</code>, <code>f64</code>). Missing keys MUST be
+          rejected.
+        </li>
+        <li>
+          <code>structAlign</code>: ABI alignment rule for structs:
+          <code>"max"</code> (struct alignment is max field alignment) or
+          <code>"packed1"</code> (default packed). In v1.0, producers SHOULD use
+          <code>"max"</code>.
+        </li>
+      </ul>
+
+      <h3>Layout rules (v1.0)</h3>
+      <ul>
+        <li>
+          <strong>Sizes:</strong> <code>sizeof(i8)=1</code>,
+          <code>sizeof(i16)=2</code>, <code>sizeof(i32)=4</code>,
+          <code>sizeof(i64)=8</code>, <code>sizeof(f32)=4</code>,
+          <code>sizeof(f64)=8</code>, <code>sizeof(ptr)=ptrBits/8</code>.
+        </li>
+        <li>
+          <strong>Alignments:</strong> scalar type alignments are taken from
+          <code>unit.target.intAlign</code> and
+          <code>unit.target.floatAlign</code>. Pointer alignment is
+          <code>unit.target.intAlign.ptr</code>.
+        </li>
+        <li>
+          <strong>Arrays:</strong>
+          <code>sizeof(array(elem,len)) = sizeof(elem)*len</code>. Array
+          alignment is the alignment of <code>elem</code>.
+        </li>
+        <li>
+          <strong>Structs (default):</strong> fields are laid out in declared
+          order. Each field starts at the lowest offset &gt;= current offset
+          that is a multiple of the field alignment. Struct size is rounded up
+          to a multiple of struct alignment. Struct alignment is determined by
+          <code>unit.target.structAlign</code> (recommended <code>"max"</code> =
+          max field alignment).
+        </li>
+        <li>
+          <strong>Padding bytes:</strong> any padding introduced by layout is
+          semantic only for address computation; its contents MUST be treated as
+          zero for structured constants (<code>agg:v1</code>) unless a future
+          feature negotiates explicit padding initialization.
+        </li>
+      </ul>
+
+      <h3>Closed set of type kinds (v1.0)</h3>
+      <p>
+        The <code>type.def.kind</code> field is a closed set in SIR v1.0.
+        Consumers MUST reject unknown <code>kind</code> values (forward
+        compatibility is achieved by bumping the SIR version or enabling a
+        negotiated feature flag).
+      </p>
+      <ul>
+        <li><code>{kind:"bool"}</code></li>
+        <li>
+          <code>{kind:"i8"}</code>, <code>{kind:"i16"}</code>,
+          <code>{kind:"i32"}</code>, <code>{kind:"i64"}</code>
+        </li>
+        <li><code>{kind:"f32"}</code>, <code>{kind:"f64"}</code></li>
+        <li>
+          <code>{kind:"ptr"}</code> (opaque pointer value with width
+          <code>unit.target.ptrBits</code>)
+        </li>
+        <li><code>{kind:"array", elem: ref, len: NUM}</code></li>
+        <li>
+          <code
+            >{kind:"struct", fields:[{name?:STR, ty:ref, align?:NUM}],
+            packed?:bool, align?:NUM}</code
+          >
+        </li>
+      </ul>
+      <p>
+        <strong>Feature-gated additions:</strong> When a negotiated feature pack
+        is enabled, additional <code>type.def.kind</code> values may be admitted
+        beyond the base v1.0 set. For example, <code>simd:v1</code> adds
+        <code>{kind:"vec", lane:ref, lanes:NUM}</code>; <code>adt:v1</code> adds
+        <code>{kind:"sum", variants:[...]}</code>; <code>fun:v1</code> adds
+        <code>{kind:"fun", sig:ref}</code>; <code>closure:v1</code> adds
+        <code>{kind:"closure", callSig:ref, env:ref}</code>;
+        <code>coro:v1</code> adds
+        <code>{kind:"coro", startSig:ref, yieldTy?:ref, retTy?:ref}</code>; and
+        <code>gc:v1</code> adds GC-managed reference kinds (see the
+        <code>gc:v1</code> section). This document lists any such additions in
+        the relevant feature pack sections below; consumers MUST reject a kind
+        that is not in the base set and not enabled by an active feature pack.
+      </p>
+
+      <h3>Type validation rules (v1.0)</h3>
+      <ul>
+        <li>
+          For <code>array</code>, <code>len</code> MUST be a non-negative
+          integer that fits in 32-bit unsigned. <code>elem</code> MUST be a
+          valid <code>type</code> reference.
+        </li>
+        <li>
+          For <code>struct</code>, <code>fields</code> order is semantic. If
+          present, <code>align</code> overrides the computed alignment and MUST
+          be a power of two. If <code>packed</code> is true, field alignment is
+          treated as 1 unless a field has an explicit <code>align</code>.
+        </li>
+        <li>
+          Type records MUST be deterministic and SHOULD be emitted before first
+          use. Consumers MUST reject recursive type definitions in v1.0 (future
+          feature may allow them).
+        </li>
+      </ul>
+
+      <p>
+        <strong>Rationale:</strong> With this contract, <code>ptr.sizeof</code>,
+        <code>ptr.alignof</code>, <code>ptr.offset</code>, and global/const
+        layout are deterministic and do not depend on the host platform
+        consuming the stream.
+      </p>
+
+      <h2>Core operation mnemonics (typed, normative)</h2>
+      <p>
+        SIR uses typed operation mnemonics to remove ambiguity and eliminate
+        “ambient” semantic defaults. A typed mnemonic fully determines
+        operand/result interpretation (including overflow, trapping, and
+        comparison mode) without consulting target state beyond what is
+        explicitly declared in <code>unit</code>.
+      </p>
+
+      <h3>Naming scheme</h3>
+      <ul>
+        <li>
+          Typed mnemonics are dot-separated identifiers:
+          <code>&lt;type&gt;.&lt;op&gt;[.&lt;mode&gt;...]</code> (examples:
+          <code>i32.add</code>, <code>i64.mul</code>, <code>i32.cmp.slt</code>).
+        </li>
+        <li>
+          The <code>&lt;type&gt;</code> prefix is one of: <code>bool</code>,
+          <code>i8</code>, <code>i16</code>, <code>i32</code>, <code>i64</code>,
+          <code>ptr</code>, <code>f32</code>, <code>f64</code>.
+        </li>
+        <li>
+          Unless explicitly stated otherwise, integer arithmetic uses
+          <strong>two’s-complement wraparound</strong> (no implicit trapping on
+          overflow). If trapping or checked arithmetic is needed, use explicit
+          mnemonics (e.g., <code>i32.add.checked</code>) or an effect
+          <code>eff</code> op that can produce diagnostics.
+        </li>
+        <li>
+          Comparison ops return a boolean SSA value (type <code>bool</code>).
+        </li>
+        <li>
+          Producers MUST NOT invent target-dependent behavior for a mnemonic. If
+          behavior depends on target properties (pointer width, alignment
+          rules), it MUST be declared by <code>unit.target</code> and/or
+          explicit fields on the record.
+        </li>
+      </ul>
+
+      <h3>Minimal core vocabulary (v1.0)</h3>
+      <p>
+        The table below is normative for SIR v1.0. Consumers MUST reject unknown
+        typed mnemonics in semantic records
+        (<code>op</code>/<code>eff</code>/<code>term</code>), except where
+        explicitly marked “extensible”. Some mnemonics are defined by a closed
+        grammar (e.g., <code>i&lt;dst&gt;.zext.i&lt;src&gt;</code>); these are
+        still part of the closed v1.0 set and MUST be validated against the
+        grammar and type rules below.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Mnemonic</th>
+              <th>Kind</th>
+              <th>Shape</th>
+              <th>Type rule</th>
+              <th>Semantics</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Integer arithmetic and bitwise (pure)</strong
+                ><br /><span style="color: var(--muted)"
+                  >All integer arithmetic is two’s-complement wraparound unless
+                  the mnemonic explicitly says otherwise. No implicit UB.</span
+                >
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.add / i16.add / i32.add / i64.add
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : iN → dst : iN</td>
+              <td data-label="Semantics">Wraparound add.</td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.sub / i16.sub / i32.sub / i64.sub
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : iN → dst : iN</td>
+              <td data-label="Semantics">Wraparound subtract.</td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.mul / i16.mul / i32.mul / i64.mul
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : iN → dst : iN</td>
+              <td data-label="Semantics">Low-word multiply (wraparound).</td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.and / i16.and / i32.and / i64.and
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : iN → dst : iN</td>
+              <td data-label="Semantics">Bitwise AND.</td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">i8.or / i16.or / i32.or / i64.or</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : iN → dst : iN</td>
+              <td data-label="Semantics">Bitwise OR.</td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.xor / i16.xor / i32.xor / i64.xor
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : iN → dst : iN</td>
+              <td data-label="Semantics">Bitwise XOR.</td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.not / i16.not / i32.not / i64.not
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x]</code></td>
+              <td data-label="Type rule">x : iN → dst : iN</td>
+              <td data-label="Semantics">Bitwise NOT (~x).</td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.neg / i16.neg / i32.neg / i64.neg
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x]</code></td>
+              <td data-label="Type rule">x : iN → dst : iN</td>
+              <td data-label="Semantics">Wraparound negate (0 - x).</td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.shl / i16.shl / i32.shl / i64.shl
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x,shift]</code></td>
+              <td data-label="Type rule">x : iN, shift : i32 → dst : iN</td>
+              <td data-label="Semantics">
+                Shift-left. Shift count is masked (i8:&amp;7, i16:&amp;15,
+                i32:&amp;31, i64:&amp;63).
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.shr.s / i16.shr.s / i32.shr.s / i64.shr.s
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x,shift]</code></td>
+              <td data-label="Type rule">x : iN, shift : i32 → dst : iN</td>
+              <td data-label="Semantics">
+                Arithmetic shift-right. Shift count masked as above.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.shr.u / i16.shr.u / i32.shr.u / i64.shr.u
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x,shift]</code></td>
+              <td data-label="Type rule">x : iN, shift : i32 → dst : iN</td>
+              <td data-label="Semantics">
+                Logical shift-right. Shift count masked as above.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.rotl / i16.rotl / i32.rotl / i64.rotl
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x,shift]</code></td>
+              <td data-label="Type rule">x : iN, shift : i32 → dst : iN</td>
+              <td data-label="Semantics">
+                Rotate-left. Shift count is masked (i8:&amp;7, i16:&amp;15,
+                i32:&amp;31, i64:&amp;63). Equivalent to
+                <code>(x&lt;&lt;k) | (x&gt;&gt;(N-k))</code> with masked k,
+                computed in iN.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.rotr / i16.rotr / i32.rotr / i64.rotr
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x,shift]</code></td>
+              <td data-label="Type rule">x : iN, shift : i32 → dst : iN</td>
+              <td data-label="Semantics">
+                Rotate-right. Shift count is masked as for shifts. Equivalent to
+                <code>(x&gt;&gt;k) | (x&lt;&lt;(N-k))</code> with masked k,
+                computed in iN.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.eqz / i16.eqz / i32.eqz / i64.eqz
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x]</code></td>
+              <td data-label="Type rule">x : iN → dst : bool</td>
+              <td data-label="Semantics">True iff <code>x == 0</code>.</td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.min.s / i16.min.s / i32.min.s / i64.min.s
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : iN → dst : iN</td>
+              <td data-label="Semantics">
+                Signed minimum. Deterministic tie-break: if <code>a == b</code>,
+                result is <code>a</code>.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.max.s / i16.max.s / i32.max.s / i64.max.s
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : iN → dst : iN</td>
+              <td data-label="Semantics">
+                Signed maximum. Deterministic tie-break: if <code>a == b</code>,
+                result is <code>a</code>.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.min.u / i16.min.u / i32.min.u / i64.min.u
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : iN → dst : iN</td>
+              <td data-label="Semantics">
+                Unsigned minimum. Deterministic tie-break: if
+                <code>a == b</code>, result is <code>a</code>.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.max.u / i16.max.u / i32.max.u / i64.max.u
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : iN → dst : iN</td>
+              <td data-label="Semantics">
+                Unsigned maximum. Deterministic tie-break: if
+                <code>a == b</code>, result is <code>a</code>.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong
+                  >Integer division and remainder (pure; explicit
+                  behavior)</strong
+                ><br /><span style="color: var(--muted)"
+                  >Division-by-zero and overflow cases MUST be made explicit by
+                  mnemonic. No ambient UB. No ambient randomness.</span
+                >
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.div.s.trap / i8.div.u.trap (and i16/i32/i64.*)
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : iN → dst : iN</td>
+              <td data-label="Semantics">
+                Division. If b==0, trap (use <code>term.trap</code> semantics at
+                this point). For signed div, if a==MIN and b==-1, trap as well.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.div.s.sat / i8.div.u.sat (and i16/i32/i64.*)
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : iN → dst : iN</td>
+              <td data-label="Semantics">
+                Total (non-trapping) division with deterministic
+                exceptional-case results. Integer division rounds toward zero.
+                If <code>b==0</code>, result is 0. For signed div, if
+                <code>a==MIN</code> and <code>b==-1</code>, result is
+                <code>MIN</code>. Producers SHOULD emit a
+                <code>diag</code> record (level <code>warn</code> or
+                <code>error</code>) when an exceptional case occurs.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.rem.s.trap / i8.rem.u.trap (and i16/i32/i64.*)
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : iN → dst : iN</td>
+              <td data-label="Semantics">
+                Remainder. If b==0, trap. For signed rem, if a==MIN and b==-1,
+                result is 0 (no trap).
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.rem.s.sat / i8.rem.u.sat (and i16/i32/i64.*)
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : iN → dst : iN</td>
+              <td data-label="Semantics">
+                Total (non-trapping) remainder with deterministic
+                exceptional-case results. Remainder is defined as
+                <code>a - trunc(a/b)*b</code> where <code>trunc</code> rounds
+                toward zero. If <code>b==0</code>, result is 0. For signed rem,
+                if <code>a==MIN</code> and <code>b==-1</code>, result is 0.
+                Producers SHOULD emit a <code>diag</code> record (level
+                <code>warn</code> or <code>error</code>) when
+                <code>b==0</code> occurs.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Integer comparisons (pure)</strong>
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.cmp.eq / ne / slt / sle / sgt / sge / ult / ule / ugt / uge
+                (and i16/i32/i64.*)
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : iN → dst : bool</td>
+              <td data-label="Semantics">
+                Integer comparisons; signedness is encoded in the mnemonic.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Bit-twiddling (pure)</strong>
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.clz / i16.clz / i32.clz / i64.clz
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x]</code></td>
+              <td data-label="Type rule">x : iN → dst : i32</td>
+              <td data-label="Semantics">
+                Count leading zeros. Result is in i32.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.ctz / i16.ctz / i32.ctz / i64.ctz
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x]</code></td>
+              <td data-label="Type rule">x : iN → dst : i32</td>
+              <td data-label="Semantics">
+                Count trailing zeros. Result is in i32.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i8.popc / i16.popc / i32.popc / i64.popc
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x]</code></td>
+              <td data-label="Type rule">x : iN → dst : i32</td>
+              <td data-label="Semantics">
+                Population count (number of set bits). Result is in i32.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Boolean ops (pure)</strong>
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">bool.not</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x]</code></td>
+              <td data-label="Type rule">x : bool → dst : bool</td>
+              <td data-label="Semantics">Logical negation.</td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">bool.and / bool.or / bool.xor</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : bool → dst : bool</td>
+              <td data-label="Semantics">
+                Boolean logic (non-short-circuit; use control flow for
+                short-circuit).
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong
+                  >Floating point (pure; deterministic IEEE-754 subset)</strong
+                ><br /><span style="color: var(--muted)"
+                  >Float ops use IEEE-754 roundTiesToEven. NaN results MUST be
+                  canonical quiet NaNs (no payload propagation) to avoid
+                  target-dependent nondeterminism.</span
+                >
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">f32.add / f64.add</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : f32/f64 → dst : same</td>
+              <td data-label="Semantics">
+                Floating add. If either operand is NaN, result is the canonical
+                quiet NaN of the destination type.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">f32.sub / f64.sub</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : f32/f64 → dst : same</td>
+              <td data-label="Semantics">
+                Floating subtract. NaN handling as above.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">f32.mul / f64.mul</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : f32/f64 → dst : same</td>
+              <td data-label="Semantics">
+                Floating multiply. NaN handling as above.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">f32.div / f64.div</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : f32/f64 → dst : same</td>
+              <td data-label="Semantics">
+                Floating divide. Division by ±0 yields ±Inf per IEEE-754; 0/0
+                yields NaN (canonical).
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">f32.neg / f64.neg</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x]</code></td>
+              <td data-label="Type rule">x : f32/f64 → dst : same</td>
+              <td data-label="Semantics">
+                Negate (flip sign bit). NaN becomes canonical quiet NaN of the
+                destination type.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">f32.abs / f64.abs</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x]</code></td>
+              <td data-label="Type rule">x : f32/f64 → dst : same</td>
+              <td data-label="Semantics">
+                Absolute value (clear sign bit). NaN becomes canonical quiet NaN
+                of the destination type.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                f32.cmp.oeq / one / olt / ole / ogt / oge (and f64.*)
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : f32/f64 → dst : bool</td>
+              <td data-label="Semantics">
+                Ordered comparisons: if either operand is NaN, result is false.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                f32.cmp.ueq / une / ult / ule / ugt / uge (and f64.*)
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : f32/f64 → dst : bool</td>
+              <td data-label="Semantics">
+                Unordered comparisons: if either operand is NaN, the predicate
+                is evaluated as unordered (e.g., <code>ueq</code> is true if
+                unordered or equal).
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                f32.from_i32.s / f32.from_i32.u / f32.from_i64.s /
+                f32.from_i64.u (and f64.*)
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x]</code></td>
+              <td data-label="Type rule">x : i32/i64 → dst : f32/f64</td>
+              <td data-label="Semantics">
+                Convert integer to float using roundTiesToEven. Results are
+                deterministic.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                i32.trunc_sat_f32.s / i32.trunc_sat_f32.u (and i64.*, f64.*)
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x]</code></td>
+              <td data-label="Type rule">x : f32/f64 → dst : i32/i64</td>
+              <td data-label="Semantics">
+                Saturating float-to-int conversion. If NaN, returns 0. If out of
+                range, clamps to MIN/MAX. This avoids target-dependent traps.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Value-level conditional (pure)</strong>
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">select</td>
+              <td data-label="Kind"><code>op</code> (extensible)</td>
+              <td data-label="Shape"><code>ty:ref, args:[cond, a, b]</code></td>
+              <td data-label="Type rule">cond: bool, a:ty, b:ty → dst: ty</td>
+              <td data-label="Semantics">
+                Value-level conditional (no control-flow). Requires explicit
+                <code>ty</code>.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong
+                  >Conversions and casts (pure; grammar-defined, closed)</strong
+                ><br /><span style="color: var(--muted)"
+                  >These mnemonics are part of the closed v1.0 set by grammar.
+                  Consumers MUST validate the name pattern and width
+                  relationship.</span
+                >
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                <code>i&lt;dst&gt;.zext.i&lt;src&gt;</code>
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x]</code></td>
+              <td data-label="Type rule">
+                x : i&lt;src&gt;, src&lt;dst → dst : i&lt;dst&gt;
+              </td>
+              <td data-label="Semantics">Zero-extend.</td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                <code>i&lt;dst&gt;.sext.i&lt;src&gt;</code>
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x]</code></td>
+              <td data-label="Type rule">
+                x : i&lt;src&gt;, src&lt;dst → dst : i&lt;dst&gt;
+              </td>
+              <td data-label="Semantics">Sign-extend.</td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                <code>i&lt;dst&gt;.trunc.i&lt;src&gt;</code>
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x]</code></td>
+              <td data-label="Type rule">
+                x : i&lt;src&gt;, src&gt;dst → dst : i&lt;dst&gt;
+              </td>
+              <td data-label="Semantics">Truncate (low bits).</td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Pointer ops (pure)</strong><br /><span
+                  style="color: var(--muted)"
+                  >Pointer width/behavior is declared by
+                  <code>unit.target</code>. Pointer arithmetic is modulo
+                  2^ptrBits (wraparound), so it is deterministic.</span
+                >
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">ptr.sym</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[sym]</code></td>
+              <td data-label="Type rule">sym : sym → dst : ptr</td>
+              <td data-label="Semantics">
+                Address of a symbol as a pointer value. Symbol resolution is
+                target/linker-defined but the IR value is deterministic.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">ptr.add / ptr.sub</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[base, offset]</code></td>
+              <td data-label="Type rule">
+                base : ptr, offset : i64 → dst : ptr
+              </td>
+              <td data-label="Semantics">
+                Pointer arithmetic by byte offset (signed). Wraparound modulo
+                2^ptrBits.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">ptr.cmp.eq / ptr.cmp.ne</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">a,b : ptr → dst : bool</td>
+              <td data-label="Semantics">Pointer equality/inequality.</td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">ptr.to_i64 / ptr.from_i64</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x]</code></td>
+              <td data-label="Type rule">
+                x : ptr → dst : i64, and x : i64 → dst : ptr
+              </td>
+              <td data-label="Semantics">
+                Bit-preserving cast between pointer and i64. For
+                <code>ptr.to_i64</code>, the result is the pointer bits
+                zero-extended to i64. For <code>ptr.from_i64</code>, the result
+                is the low <code>ptrBits</code> of <code>x</code> interpreted as
+                a <code>ptr</code> (wrap modulo 2^ptrBits). Deterministic given
+                <code>unit.target.ptrBits</code>.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong
+                  >Address calculation and layout (pure;
+                  target-explicit)</strong
+                ><br /><span style="color: var(--muted)"
+                  >These ops expose layout deterministically. Any target
+                  dependence MUST be declared by <code>unit.target</code> and/or
+                  explicit type records used by <code>ty</code>.</span
+                >
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">ptr.offset</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape">
+                <code>ty:ref, args:[base, index]</code>
+              </td>
+              <td data-label="Type rule">base: ptr, index: i64 → dst: ptr</td>
+              <td data-label="Semantics">
+                Compute <code>base + index * sizeof(ty)</code>.
+                <code>sizeof(ty)</code> is determined by the referenced type and
+                <code>unit.target</code>. Arithmetic wraps modulo 2^ptrBits.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">ptr.alignof</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[]</code></td>
+              <td data-label="Type rule">— → dst: i32</td>
+              <td data-label="Semantics">
+                Alignment of <code>ty</code> in bytes for
+                <code>unit.target</code>. Deterministic given the declared
+                target.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">ptr.sizeof</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[]</code></td>
+              <td data-label="Type rule">— → dst: i64</td>
+              <td data-label="Semantics">
+                Size of <code>ty</code> in bytes for <code>unit.target</code>.
+                Deterministic given the declared target.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Memory effects</strong>
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                load.i8 / load.i16 / load.i32 / load.i64
+              </td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code>args:[addr]</code>, results:[{id,ty}], flags:{align?,
+                vol?}
+              </td>
+              <td data-label="Type rule">addr: ptr → result: i8/i16/i32/i64</td>
+              <td data-label="Semantics">
+                Load an integer of the specified width. No implicit sign/zero
+                extension; use explicit <code>zext/sext</code> as needed.
+                Alignment/trapping behavior MUST be specified by target +
+                explicit flags; no implicit UB.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                store.i8 / store.i16 / store.i32 / store.i64
+              </td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code>args:[addr,val]</code>, flags:{align?, vol?}
+              </td>
+              <td data-label="Type rule">
+                addr: ptr, val: i8/i16/i32/i64 → (no SSA result)
+              </td>
+              <td data-label="Semantics">
+                Store the low-width integer value to memory. Alignment/trapping
+                behavior MUST be specified by target + explicit flags; no
+                implicit UB.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">load.f32 / load.f64</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code>args:[addr]</code>, results:[{id,ty}], flags:{align?,
+                vol?}
+              </td>
+              <td data-label="Type rule">addr: ptr → result: f32/f64</td>
+              <td data-label="Semantics">
+                Load a float of the specified width. The loaded IEEE-754 bit
+                pattern is interpreted as a SIR float value. If the loaded
+                pattern is NaN (any payload), the resulting SSA value MUST be
+                the canonical quiet-NaN for the destination type (payloads MUST
+                NOT be observed/propagated). Alignment/trapping behavior MUST be
+                specified by target + explicit flags; no implicit UB.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">store.f32 / store.f64</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code>args:[addr,val]</code>, flags:{align?, vol?}
+              </td>
+              <td data-label="Type rule">
+                addr: ptr, val: f32/f64 → (no SSA result)
+              </td>
+              <td data-label="Semantics">
+                Store a float of the specified width to memory. If
+                <code>val</code> is NaN, producers MUST store the canonical
+                quiet-NaN bit pattern for the destination type (no payload).
+                Alignment/trapping behavior MUST be specified by target +
+                explicit flags; no implicit UB.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">load.ptr</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code>args:[addr]</code>, results:[{id,ty}], flags:{align?,
+                vol?}
+              </td>
+              <td data-label="Type rule">addr: ptr → result: ptr</td>
+              <td data-label="Semantics">
+                Load a pointer-sized value from memory and interpret it as a
+                <code>ptr</code> value. The byte width and endianness are
+                determined by <code>unit.target</code>. The resulting pointer
+                value is the loaded bits modulo 2^ptrBits. Alignment/trapping
+                behavior MUST be specified by target + explicit flags; no
+                implicit UB.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">store.ptr</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code>args:[addr,val]</code>, flags:{align?, vol?}
+              </td>
+              <td data-label="Type rule">
+                addr: ptr, val: ptr → (no SSA result)
+              </td>
+              <td data-label="Semantics">
+                Store a pointer-sized value to memory. The byte width and
+                endianness are determined by <code>unit.target</code>. The
+                stored bytes are the low ptrBits of <code>val</code>.
+                Alignment/trapping behavior MUST be specified by target +
+                explicit flags; no implicit UB.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">mem.copy</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code>args:[dst, src, len]</code>, flags:{alignDst?:i32,
+                alignSrc?:i32, vol?:bool, overlap?:"disallow"|"allow"}
+              </td>
+              <td data-label="Type rule">
+                dst: ptr, src: ptr, len: i64 → (no SSA result)
+              </td>
+              <td data-label="Semantics">
+                Copy <code>len</code> bytes from <code>src</code> to
+                <code>dst</code>. If <code>overlap</code> is
+                <code>"disallow"</code>, overlapping ranges are a deterministic
+                trap. If <code>overlap</code> is <code>"allow"</code>, semantics
+                are memmove (as-if temporary buffer). If omitted,
+                <code>overlap</code> defaults to <code>"disallow"</code> (no
+                ambient UB).
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">mem.fill</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code>args:[dst, byte, len]</code>, flags:{alignDst?:i32,
+                vol?:bool}
+              </td>
+              <td data-label="Type rule">
+                dst: ptr, byte: i8, len: i64 → (no SSA result)
+              </td>
+              <td data-label="Semantics">
+                Set <code>len</code> bytes at <code>dst</code> to
+                <code>byte</code>.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">alloca</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code>ty:ref, args:[]</code>, results:[{id,ty}],
+                flags:{count?:i64, align?:i32, zero?:bool}
+              </td>
+              <td data-label="Type rule">— → result: ptr</td>
+              <td data-label="Semantics">
+                Allocate stack storage for <code>count</code> elements of
+                <code>ty</code> (default count=1). Lifetime is the dynamic
+                extent of the function. If <code>zero</code> is true, storage is
+                zero-initialized deterministically.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">eff.fence</td>
+              <td data-label="Kind"><code>eff</code> (extensible)</td>
+              <td data-label="Shape"><code>args:[]</code>, flags:{mode:STR}</td>
+              <td data-label="Type rule">—</td>
+              <td data-label="Semantics">
+                Memory ordering barrier. The meaning of <code>mode</code> MUST
+                be declared by <code>unit.features</code> (e.g.,
+                <code>seqcst</code>, <code>acquire</code>,
+                <code>release</code>). If unsupported, consumers MAY reject the
+                stream.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Atomics (effects; feature-gated)</strong><br /><span
+                  style="color: var(--muted)"
+                  >Atomic operations are only valid if
+                  <code>unit.features</code> includes <code>atomics:v1</code>.
+                  All atomic ops MUST specify ordering via
+                  <code>flags.mode</code> (e.g., <code>relaxed</code>,
+                  <code>acquire</code>, <code>release</code>,
+                  <code>acqrel</code>, <code>seqcst</code>).</span
+                >
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">atomic.load.i8/i16/i32/i64</td>
+              <td data-label="Kind"><code>eff</code> (extensible)</td>
+              <td data-label="Shape">
+                <code>args:[addr]</code>, results:[{id,ty}], flags:{mode:STR,
+                align?:i32}
+              </td>
+              <td data-label="Type rule">addr: ptr → result: iN</td>
+              <td data-label="Semantics">
+                Atomic load with the specified ordering. Consumers MUST reject
+                if <code>atomics:v1</code> is not enabled.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">atomic.store.i8/i16/i32/i64</td>
+              <td data-label="Kind"><code>eff</code> (extensible)</td>
+              <td data-label="Shape">
+                <code>args:[addr,val]</code>, flags:{mode:STR, align?:i32}
+              </td>
+              <td data-label="Type rule">
+                addr: ptr, val: iN → (no SSA result)
+              </td>
+              <td data-label="Semantics">
+                Atomic store with the specified ordering. Consumers MUST reject
+                if <code>atomics:v1</code> is not enabled.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">
+                atomic.rmw.add / and / or / xor / xchg (i8/i16/i32/i64)
+              </td>
+              <td data-label="Kind"><code>eff</code> (extensible)</td>
+              <td data-label="Shape">
+                <code>args:[addr,val]</code>, results:[{id,ty}],
+                flags:{mode:STR, align?:i32}
+              </td>
+              <td data-label="Type rule">addr: ptr, val: iN → result: iN</td>
+              <td data-label="Semantics">
+                Atomic read-modify-write returning the prior value.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">atomic.cmpxchg (i8/i16/i32/i64)</td>
+              <td data-label="Kind"><code>eff</code> (extensible)</td>
+              <td data-label="Shape">
+                <code>args:[addr, expected, desired]</code>,
+                results:[{id,ty},{id,ty}], flags:{modeSucc:STR, modeFail:STR,
+                align?:i32}
+              </td>
+              <td data-label="Type rule">
+                addr: ptr, expected: iN, desired: iN → results: (old:iN,
+                ok:bool)
+              </td>
+              <td data-label="Semantics">
+                Compare-and-swap. Returns the loaded value and whether the swap
+                occurred.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Calls (effects)</strong>
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">call</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code>args:[callee, ...]</code>, results?:[...]
+              </td>
+              <td data-label="Type rule">
+                callee: sym/ref(sig) consistent with args/results
+              </td>
+              <td data-label="Semantics">
+                Direct call with explicit signature. Varargs requires explicit
+                ABI attrs.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">call.indirect</td>
+              <td data-label="Kind"><code>eff</code> (extensible)</td>
+              <td data-label="Shape">
+                <code>sig:ref, args:[callee_ptr, ...]</code>, results?:[...]
+              </td>
+              <td data-label="Type rule">
+                callee_ptr: ptr; <code>sig</code> consistent with args/results
+              </td>
+              <td data-label="Semantics">
+                Indirect call through a function pointer. Requires explicit
+                <code>sig</code> on the record; consumers MUST reject if
+                missing.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Control flow (terminators)</strong><br /><span
+                  style="color: var(--muted)"
+                  >Control flow is always explicit; no implicit
+                  fallthrough.</span
+                >
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">term.br</td>
+              <td data-label="Kind"><code>term</code></td>
+              <td data-label="Shape"><code>to:ref, args?:[value]</code></td>
+              <td data-label="Type rule">
+                args must match <code>to</code> block params (by position)
+              </td>
+              <td data-label="Semantics">
+                Unconditional branch to <code>to</code> passing optional block
+                arguments.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">term.cbr</td>
+              <td data-label="Kind"><code>term</code></td>
+              <td data-label="Shape">
+                <code
+                  >cond:value, then:{to:ref,args?:[value]},
+                  else:{to:ref,args?:[value]}</code
+                >
+              </td>
+              <td data-label="Type rule">
+                cond: bool; args must match target block params
+              </td>
+              <td data-label="Semantics">
+                Conditional branch. No implicit fallthrough.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">term.switch</td>
+              <td data-label="Kind"><code>term</code></td>
+              <td data-label="Shape">
+                <code
+                  >scrut:value, cases:[{lit:value,to:ref,args?:[value]}],
+                  default:{to:ref,args?:[value]}</code
+                >
+              </td>
+              <td data-label="Type rule">
+                scrut: iN or ptr; each <code>lit</code> must match scrut type;
+                args must match target block params
+              </td>
+              <td data-label="Semantics">
+                Multi-way branch. Case selection is exact-equality. If multiple
+                cases compare equal, the first in array order wins
+                (deterministic). Producers SHOULD sort cases by literal value
+                for canonical form.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">term.ret</td>
+              <td data-label="Kind"><code>term</code></td>
+              <td data-label="Shape"><code>value?:value</code></td>
+              <td data-label="Type rule">
+                value type must match function return type (or omitted for
+                void-like returns)
+              </td>
+              <td data-label="Semantics">Return from current function.</td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">term.trap</td>
+              <td data-label="Kind"><code>term</code></td>
+              <td data-label="Shape"><code>code?:ID, msg?:STR</code></td>
+              <td data-label="Type rule">—</td>
+              <td data-label="Semantics">
+                Deterministic immediate trap. If <code>code</code> is present it
+                is a stable tag for tooling/tests.
+              </td>
+            </tr>
+            <tr>
+              <td data-label="Mnemonic">term.unreachable</td>
+              <td data-label="Kind"><code>term</code></td>
+              <td data-label="Shape"><code>(no fields)</code></td>
+              <td data-label="Type rule">—</td>
+              <td data-label="Semantics">
+                Marks an impossible control-flow path. Reaching it is a
+                deterministic trap. Useful for lowering exhaustive matches and
+                asserting invariants.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2>Advanced feature vocabularies (feature-gated)</h2>
+      <p>
+        The following vocabularies (including <code>simd:v1</code>) are
+        <strong>normative</strong> when enabled by <code>unit.features</code>.
+        If a stream uses any mnemonic from a feature pack,
+        <code>unit.features</code> MUST include that pack; otherwise consumers
+        MUST reject the stream. These packs exist to avoid “free interpretation”
+        for higher-level language constructs while keeping the v1.0 core small
+        and deterministic.
+      </p>
+
+      <h3>SIMD / vector types and operations (simd:v1)</h3>
+      <p>
+        This pack adds a small, deterministic SIMD model suitable for lowering
+        modern compilers and VMs. It introduces a feature-gated vector type kind
+        and a closed set of lane-wise operations. It is designed to be
+        expressive enough for C#/Java intrinsics, Rust SIMD, and JIT IRs, while
+        remaining fully deterministic (no ambient target behavior beyond
+        <code>unit.target</code>).
+      </p>
+      <ul>
+        <li>
+          Enabled when <code>unit.features</code> includes <code>simd:v1</code>.
+        </li>
+        <li>
+          When enabled, <code>type.def.kind</code> gains the additional kind:
+          <code>{kind:"vec", lane:ref, lanes:NUM}</code>. The
+          <code>lane</code> type MUST be one of: <code>i8</code>,
+          <code>i16</code>, <code>i32</code>, <code>i64</code>,
+          <code>f32</code>, <code>f64</code>, or <code>bool</code>.
+          <code>lanes</code> MUST be a positive integer.
+        </li>
+        <li>
+          Vector operations are lane-wise unless otherwise stated. Floating NaN
+          rules follow the scalar float rules: any NaN result is a canonical
+          quiet-NaN with no payload.
+        </li>
+        <li>
+          Vector memory order is deterministic: lane 0 is stored at the lowest
+          address; lane <code>i</code> follows lane <code>i-1</code>. Byte order
+          within each lane follows <code>unit.target.endian</code>.
+        </li>
+        <li>
+          Consumers MUST reject <code>simd:v1</code> mnemonics if the pack is
+          not enabled.
+        </li>
+      </ul>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Mnemonic</th>
+              <th>Kind</th>
+              <th>Shape</th>
+              <th>Type rule</th>
+              <th>Semantics</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Vector construction and lanes (simd:v1)</strong
+                ><br /><span style="color: var(--muted)"
+                  >All ops below require an explicit vector type via
+                  <code>ty:ref</code> unless the mnemonic name fully determines
+                  it.</span
+                >
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">vec.splat</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[x]</code></td>
+              <td data-label="Type rule">
+                x : laneTy → dst : vec(laneTy,lanes)
+              </td>
+              <td data-label="Semantics">
+                Broadcast <code>x</code> into all lanes.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">vec.extract</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[v, idx]</code></td>
+              <td data-label="Type rule">
+                v : vec(laneTy,lanes), idx : i32 → dst : laneTy
+              </td>
+              <td data-label="Semantics">
+                Extract lane <code>idx</code>. If <code>idx</code> is out of
+                range, behavior is a deterministic trap (use
+                <code>term.trap</code> semantics at this point).
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">vec.replace</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[v, idx, x]</code></td>
+              <td data-label="Type rule">
+                v : vec(laneTy,lanes), idx : i32, x : laneTy → dst :
+                vec(laneTy,lanes)
+              </td>
+              <td data-label="Semantics">
+                Return a copy of <code>v</code> with lane
+                <code>idx</code> replaced by <code>x</code>. Out-of-range
+                <code>idx</code> is a deterministic trap.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">vec.shuffle</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape">
+                <code>ty:ref, args:[a, b], flags:{idx:[NUM...]}</code>
+              </td>
+              <td data-label="Type rule">
+                a,b : vec(laneTy,lanes) → dst : vec(laneTy,lanes)
+              </td>
+              <td data-label="Semantics">
+                Construct a new vector where lane <code>i</code> is taken from
+                <code>a</code> or <code>b</code> according to
+                <code>flags.idx[i]</code>. Indices are in
+                <code>[0, 2*lanes)</code>: values &lt; lanes select from
+                <code>a</code>, otherwise select from <code>b</code> at
+                <code>idx - lanes</code>. Any out-of-range index is a
+                deterministic trap. The <code>idx</code> array length MUST equal
+                <code>lanes</code>.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Lane-wise arithmetic and logic (simd:v1)</strong
+                ><br /><span style="color: var(--muted)"
+                  >The mnemonic family <code>vec.&lt;op&gt;</code> is closed in
+                  v1.0: only the operations listed below are valid.</span
+                >
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">vec.add / vec.sub / vec.mul</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[a,b]</code></td>
+              <td data-label="Type rule">
+                a,b : vec(laneTy,lanes) → dst : vec(laneTy,lanes)
+              </td>
+              <td data-label="Semantics">
+                Lane-wise arithmetic. For integer lanes, wraparound. For float
+                lanes, IEEE-754 with canonical NaNs.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">vec.and / vec.or / vec.xor</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[a,b]</code></td>
+              <td data-label="Type rule">
+                a,b : vec(laneTy,lanes) → dst : vec(laneTy,lanes) (laneTy MUST
+                be integer or bool)
+              </td>
+              <td data-label="Semantics">Lane-wise bitwise/boolean logic.</td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">vec.not</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[v]</code></td>
+              <td data-label="Type rule">
+                v : vec(laneTy,lanes) → dst : vec(laneTy,lanes) (laneTy MUST be
+                integer or bool)
+              </td>
+              <td data-label="Semantics">Lane-wise bitwise/boolean NOT.</td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">
+                vec.cmp.eq / vec.cmp.ne / vec.cmp.lt / vec.cmp.le / vec.cmp.gt /
+                vec.cmp.ge
+              </td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[a,b]</code></td>
+              <td data-label="Type rule">
+                a,b : vec(laneTy,lanes) → dst : vec(bool,lanes)
+              </td>
+              <td data-label="Semantics">
+                Lane-wise comparisons producing a boolean vector. For float
+                lanes, comparisons follow the scalar ordered rules (NaN compares
+                false for all ordered predicates).
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">vec.select</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[mask, a, b]</code></td>
+              <td data-label="Type rule">
+                mask : vec(bool,lanes), a,b : vec(laneTy,lanes) → dst :
+                vec(laneTy,lanes)
+              </td>
+              <td data-label="Semantics">
+                Lane-wise select: choose <code>a[i]</code> when
+                <code>mask[i]</code> is true, else <code>b[i]</code>.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Vector memory access (simd:v1)</strong>
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">load.vec</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code
+                  >ty:ref, args:[addr], results:[{id,ty}], flags:{align?:i32,
+                  vol?:bool}</code
+                >
+              </td>
+              <td data-label="Type rule">
+                addr: ptr → result: vec(laneTy,lanes)
+              </td>
+              <td data-label="Semantics">
+                Load a vector value from memory. Lane order is deterministic
+                (lane 0 at lowest address). Byte order within each lane follows
+                <code>unit.target.endian</code>. Alignment/volatility are
+                explicit; no implicit UB.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">store.vec</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code
+                  >ty:ref, args:[addr, v], flags:{align?:i32, vol?:bool}</code
+                >
+              </td>
+              <td data-label="Type rule">
+                addr: ptr, v: vec(laneTy,lanes) → (no SSA result)
+              </td>
+              <td data-label="Semantics">
+                Store a vector value to memory. Lane/byte order as for
+                <code>load.vec</code>. No implicit UB.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">vec.bitcast</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape">
+                <code>from:ref, to:ref, args:[v]</code>
+              </td>
+              <td data-label="Type rule">
+                v : fromVec → dst : toVec, where
+                <code>sizeof(fromVec) == sizeof(toVec)</code>
+              </td>
+              <td data-label="Semantics">
+                Bit-preserving reinterpret cast between equal-size vectors. No
+                numeric conversion is performed.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Algebraic data types (adt:v1)</h3>
+      <p>
+        This pack adds a deterministic model for algebraic data types (sum types
+        / tagged unions). It is intended to represent language-level
+        <code>enum</code>/<code>variant</code> types (Rust/Swift), discriminated
+        unions (F#/TypeScript), and pattern-matching constructs without relying
+        on ambient ABI conventions.
+      </p>
+      <ul>
+        <li>
+          Enabled when <code>unit.features</code> includes <code>adt:v1</code>.
+        </li>
+        <li>
+          When enabled, <code>type.def.kind</code> gains:
+          <code>{kind:"sum", variants:[{name?:STR, ty?:ref}]}</code>.
+        </li>
+        <li>
+          <code>variants</code> order is semantic. The
+          <strong>variant index</strong> (0-based) is the canonical discriminant
+          used by the ops below.
+        </li>
+        <li>
+          A variant with no payload uses <code>{ty: null}</code> by omission
+          (i.e., <code>ty</code> absent). Such variants are “nullary
+          constructors”.
+        </li>
+        <li>
+          <strong>Layout contract (normative):</strong> a <code>sum</code> value
+          in memory is represented as <code>{ tag:i32, payload:bytes }</code>,
+          where <code>tag</code> is the variant index and
+          <code>payload</code> stores the payload value of the active variant in
+          its in-memory encoding. The payload storage size is the maximum
+          <code>sizeof</code> of all payload types (treat nullary payload size
+          as 0). The payload starts at the lowest offset &gt;= 4 that satisfies
+          the maximum payload alignment. Unused payload bytes and padding are
+          treated as zero for determinism.
+        </li>
+        <li>
+          Consumers MUST reject <code>adt:v1</code> mnemonics if the pack is not
+          enabled.
+        </li>
+      </ul>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Mnemonic</th>
+              <th>Kind</th>
+              <th>Shape</th>
+              <th>Type rule</th>
+              <th>Semantics</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Sum type construction and inspection (adt:v1)</strong
+                ><br /><span style="color: var(--muted)"
+                  >All operations are closed and deterministic. Variant indices
+                  are 0-based in
+                  <code>type.def.kind.variants</code> order.</span
+                >
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">adt.make</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape">
+                <code>ty:ref, args:[payload?], flags:{variant:NUM}</code>
+              </td>
+              <td data-label="Type rule">
+                ty : sum; if variant has payload type P then payload:P is
+                required, else args must be empty → dst : ty
+              </td>
+              <td data-label="Semantics">
+                Construct a sum value of type <code>ty</code> with active
+                variant <code>flags.variant</code>. If <code>variant</code> is
+                out of range, deterministic trap.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">adt.tag</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[v]</code></td>
+              <td data-label="Type rule">v : sum → dst : i32</td>
+              <td data-label="Semantics">
+                Return the active variant index (0-based). Always total and
+                deterministic.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">adt.is</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape">
+                <code>args:[v], flags:{variant:NUM}</code>
+              </td>
+              <td data-label="Type rule">v : sum → dst : bool</td>
+              <td data-label="Semantics">
+                True iff <code>v</code>’s active variant index equals
+                <code>flags.variant</code>. Out-of-range <code>variant</code> is
+                a deterministic trap.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">adt.get</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape">
+                <code>ty:ref, args:[v], flags:{variant:NUM}</code>
+              </td>
+              <td data-label="Type rule">
+                ty : sum; v : ty; variant must name a payload-bearing variant P
+                → dst : P
+              </td>
+              <td data-label="Semantics">
+                Project the payload of variant <code>flags.variant</code>. If
+                <code>v</code> is not of that variant, deterministic trap.
+                Out-of-range <code>variant</code> is a deterministic trap.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Pattern matching lowering note (adt:v1)</strong
+                ><br /><span style="color: var(--muted)"
+                  >A producer SHOULD lower high-level pattern matching by using
+                  <code>adt.tag</code> followed by <code>term.switch</code> over
+                  the resulting <code>i32</code> tag (with stable, sorted case
+                  order). Payload extraction in each arm uses
+                  <code>adt.get</code>.</span
+                >
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>First-class function values (fun:v1)</h3>
+      <p>
+        This pack adds a deterministic, typed model for first-class function
+        values (closures without captured environment, or “function pointers
+        with signature”). It enables passing and returning callables as values
+        without treating them as raw <code>ptr</code> and without relying on
+        ambient ABI.
+      </p>
+      <ul>
+        <li>
+          Enabled when <code>unit.features</code> includes <code>fun:v1</code>.
+        </li>
+        <li>
+          When enabled, <code>type.def.kind</code> gains:
+          <code>{kind:"fun", sig:ref}</code>, where <code>sig</code> references
+          a <code>sig</code> record describing the callable’s parameter and
+          result types.
+        </li>
+        <li>
+          Function values are <strong>opaque</strong>: they may be passed around
+          and called, but MUST NOT be used with pointer arithmetic or raw
+          loads/stores. Equality is explicit and deterministic via
+          <code>fun.cmp.*</code> below.
+        </li>
+        <li>
+          Consumers MUST reject <code>fun:v1</code> mnemonics if the pack is not
+          enabled.
+        </li>
+      </ul>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Mnemonic</th>
+              <th>Kind</th>
+              <th>Shape</th>
+              <th>Type rule</th>
+              <th>Semantics</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Function values and calls (fun:v1)</strong><br /><span
+                  style="color: var(--muted)"
+                  >All behavior is explicit and signature-checked. No ambient
+                  calling convention beyond the declared <code>sig</code>.</span
+                >
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">fun.sym</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[sym]</code></td>
+              <td data-label="Type rule">
+                ty : fun(sig); sym : sym → dst : ty
+              </td>
+              <td data-label="Semantics">
+                Materialize a function value referencing the named symbol. The
+                symbol MUST refer to a function compatible with
+                <code>sig</code>; otherwise the stream is invalid.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">fun.cmp.eq / fun.cmp.ne</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">
+                a,b : fun(sig) (same sig) → dst : bool
+              </td>
+              <td data-label="Semantics">
+                Deterministic equality/inequality over function values. Two
+                values are equal iff they denote the same callable identity
+                under the declared link/runtime model.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">call.fun</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code>args:[callee, ...], results?:[...]</code>
+              </td>
+              <td data-label="Type rule">
+                callee : fun(sig); args/results MUST match <code>sig</code>
+              </td>
+              <td data-label="Semantics">
+                Call a function value. This is the first-class callable
+                equivalent of <code>call</code>/<code>call.indirect</code>, but
+                signature is carried by the callee type, so no separate
+                <code>sig</code> field is required on the record.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Capturing closures (closure:v1)</h3>
+      <p>
+        This pack adds a deterministic, typed model for
+        <em>capturing</em> closures: a first-class callable bundled with an
+        explicit environment value. It enables higher-order functions from
+        languages like Rust/Swift/ML/F# without smuggling captures through
+        implicit calling conventions.
+      </p>
+      <ul>
+        <li>
+          Enabled when <code>unit.features</code> includes
+          <code>closure:v1</code>.
+        </li>
+        <li>
+          <strong>Requires:</strong> <code>fun:v1</code> (and a compatible
+          <code>sig</code> model).
+        </li>
+        <li>
+          When enabled, <code>type.def.kind</code> gains:
+          <code>{kind:"closure", callSig:ref, env:ref}</code>.
+        </li>
+        <li>
+          <code>callSig</code> is the <em>user-visible</em> signature of the
+          closure (parameters/results excluding the environment).
+        </li>
+        <li>
+          The <em>code signature</em> is derived deterministically from
+          <code>callSig</code> by prepending <code>env</code> as the first
+          parameter and keeping the same results. (I.e.,
+          <code
+            >codeSig = (env, callSig.params...) -&gt; callSig.results...</code
+          >.)
+        </li>
+        <li>
+          Closure values are <strong>opaque</strong>: they may be passed,
+          compared, and called, but MUST NOT be used with pointer arithmetic or
+          raw loads/stores.
+        </li>
+        <li>
+          Consumers MUST reject <code>closure:v1</code> mnemonics if the pack is
+          not enabled.
+        </li>
+      </ul>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Mnemonic</th>
+              <th>Kind</th>
+              <th>Shape</th>
+              <th>Type rule</th>
+              <th>Semantics</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong
+                  >Capturing closure construction and calls (closure:v1)</strong
+                ><br /><span style="color: var(--muted)"
+                  >All behavior is explicit: the environment is a first
+                  parameter to the underlying code signature. No hidden calling
+                  convention.</span
+                >
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">closure.sym</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[sym, env]</code></td>
+              <td data-label="Type rule">
+                ty : closure(callSig, envTy); sym : sym; env : envTy → dst : ty
+              </td>
+              <td data-label="Semantics">
+                Materialize a capturing closure where <code>sym</code> names the
+                closure’s code and <code>env</code> is the captured environment
+                value. The named symbol MUST refer to a function compatible with
+                <code>codeSig</code> derived from <code>ty</code>; otherwise the
+                stream is invalid.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">closure.make</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[code, env]</code></td>
+              <td data-label="Type rule">
+                ty : closure(callSig, envTy); code : fun(codeSig); env : envTy →
+                dst : ty
+              </td>
+              <td data-label="Semantics">
+                Construct a closure value explicitly from a function value and
+                an environment value. The <code>code</code> function MUST have
+                <code>codeSig</code> derived from <code>ty</code>.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">closure.code</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[c]</code></td>
+              <td data-label="Type rule">
+                ty : closure(callSig, envTy); c : ty → dst : fun(codeSig)
+              </td>
+              <td data-label="Semantics">
+                Project the underlying code function value from a closure.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">closure.env</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[c]</code></td>
+              <td data-label="Type rule">
+                ty : closure(callSig, envTy); c : ty → dst : envTy
+              </td>
+              <td data-label="Semantics">
+                Project the captured environment value from a closure.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">closure.cmp.eq / closure.cmp.ne</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[a,b]</code></td>
+              <td data-label="Type rule">
+                ty : closure(callSig, envTy); a,b : ty → dst : bool
+              </td>
+              <td data-label="Semantics">
+                Deterministic equality/inequality over closures. Two closures
+                are equal iff they denote the same callable identity
+                <em>and</em> the same environment identity under the declared
+                runtime/link model. (A producer SHOULD avoid emitting equality
+                on closures unless the runtime model makes identity
+                well-defined.)
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">call.closure</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code>ty:ref, args:[callee, ...], results?:[...]</code>
+              </td>
+              <td data-label="Type rule">
+                ty : closure(callSig, envTy); callee : ty; args/results MUST
+                match <code>callSig</code>
+              </td>
+              <td data-label="Semantics">
+                Call a capturing closure. Semantically equivalent to extracting
+                <code>code = closure.code</code> and
+                <code>env = closure.env</code> then calling
+                <code>code(env, args...)</code> under <code>codeSig</code>. This
+                environment passing is <strong>semantic</strong> and MUST NOT be
+                reinterpreted by convention.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Coroutines and async (coro:v1)</h3>
+      <p>
+        This pack adds a deterministic interface for stackless coroutines/async
+        tasks as first-class values with explicit resume semantics. It is
+        designed to lower languages with <code>yield</code>/<code>await</code>
+        without relying on ambient runtime conventions.
+      </p>
+      <ul>
+        <li>
+          Enabled when <code>unit.features</code> includes <code>coro:v1</code>.
+        </li>
+        <li>
+          <strong>Requires:</strong> <code>adt:v1</code> (for explicit
+          resume-result sum types) and <code>closure:v1</code> (for capturing
+          coroutine entry points).
+        </li>
+        <li>
+          When enabled, <code>type.def.kind</code> gains:
+          <code>{kind:"coro", startSig:ref, yieldTy?:ref, retTy?:ref}</code>.
+        </li>
+        <li>
+          <code>startSig</code> is the signature for starting the coroutine
+          (parameters only; results are always a coroutine handle of that type).
+        </li>
+        <li>
+          Coroutine values are <strong>opaque</strong>. They may be resumed and
+          dropped, but MUST NOT be used with pointer arithmetic or raw
+          loads/stores.
+        </li>
+        <li>
+          Resume results are made explicit by a producer-supplied
+          <code>sum</code> type <code>resTy</code> with the canonical variant
+          order: <code>0</code>=<code>yield</code> (payload
+          <code>yieldTy</code>), <code>1</code>=<code>ret</code> (payload
+          <code>retTy</code>), <code>2</code>=<code>done</code> (nullary). This
+          makes control flow explicit and deterministic.
+        </li>
+        <li>
+          Consumers MUST reject <code>coro:v1</code> mnemonics if the pack is
+          not enabled.
+        </li>
+      </ul>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Mnemonic</th>
+              <th>Kind</th>
+              <th>Shape</th>
+              <th>Type rule</th>
+              <th>Semantics</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Coroutine values and resume protocol (coro:v1)</strong
+                ><br /><span style="color: var(--muted)"
+                  >All outcomes are explicit via an <code>adt:v1</code> sum type
+                  provided on the op. No implicit scheduler or hidden
+                  state.</span
+                >
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">coro.sym</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[sym]</code></td>
+              <td data-label="Type rule">
+                ty : coro(startSig, yieldTy?, retTy?); sym : sym → dst :
+                closure(startSig, envTy)
+              </td>
+              <td data-label="Semantics">
+                Materialize a coroutine <em>starter</em> as a capturing closure.
+                The symbol MUST refer to a function compatible with
+                <code>startSig</code> (with environment handling per
+                <code>closure:v1</code>). This op exists so coroutines can be
+                started deterministically from named entry points.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">coro.start</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code>ty:ref, args:[starter, ...]</code>, results:[{id,ty}]
+              </td>
+              <td data-label="Type rule">
+                ty : coro(startSig, yieldTy?, retTy?); starter :
+                closure(startSig, envTy); args MUST match
+                <code>startSig</code> → result : ty
+              </td>
+              <td data-label="Semantics">
+                Start a new coroutine instance and return an opaque coroutine
+                handle. Starting is deterministic given the semantic stream; any
+                allocation/runtime effects are captured as part of this effect.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">coro.resume</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code>ty:ref, resTy:ref, args:[c]</code>, results:[{id,ty}]
+              </td>
+              <td data-label="Type rule">
+                ty : coro(startSig, yieldTy?, retTy?); c : ty; resTy :
+                sum([yield(yieldTy?), ret(retTy?), done]) → result : resTy
+              </td>
+              <td data-label="Semantics">
+                Resume the coroutine once. The returned sum value indicates
+                whether the coroutine yielded a value, returned its final
+                result, or is already done. Resuming a done coroutine MUST
+                return the <code>done</code> variant (no trap).
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">coro.drop</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[c]</code></td>
+              <td data-label="Type rule">
+                ty : coro(...); c : ty → (no SSA result)
+              </td>
+              <td data-label="Semantics">
+                Release a coroutine handle early. After <code>coro.drop</code>,
+                the handle MUST NOT be used again. Dropping is deterministic and
+                may run cleanup as defined by the declared coroutine runtime
+                model.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Exceptions and unwinding (eh:v1)</h3>
+      <p>
+        This pack models structured exceptions with explicit unwind edges
+        (similar in spirit to “invoke + landing pad” IRs). It is required to
+        accurately lower languages with <code>try/throw/catch/finally</code>,
+        and to model unwind vs abort semantics deterministically.
+      </p>
+      <ul>
+        <li>
+          Enabled when <code>unit.features</code> includes <code>eh:v1</code>.
+        </li>
+        <li>
+          All unwind behavior MUST be explicit in the IR. Producers MUST NOT
+          rely on ambient target unwind conventions.
+        </li>
+        <li>
+          Consumers MUST reject <code>eh:v1</code> mnemonics if the pack is not
+          enabled.
+        </li>
+      </ul>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Mnemonic</th>
+              <th>Kind</th>
+              <th>Shape</th>
+              <th>Type rule</th>
+              <th>Semantics</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Unwind-capable call and raise (eh:v1)</strong
+                ><br /><span style="color: var(--muted)"
+                  >All exception control flow is explicit. Normal and unwind
+                  successors are required where applicable.</span
+                >
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">term.invoke</td>
+              <td data-label="Kind"><code>term</code></td>
+              <td data-label="Shape">
+                <code
+                  >callee:value, args:[value], results?:[{id,ty}],
+                  normal:{to:ref,args?:[value]},
+                  unwind:{to:ref,args?:[value]}</code
+                >
+              </td>
+              <td data-label="Type rule">
+                callee must be <code>sym</code> or compatible function pointer;
+                args/results must match an explicit <code>sig</code> declared on
+                the enclosing <code>fn</code> or via
+                <code>term.invoke.sig</code> (required if callee is indirect)
+              </td>
+              <td data-label="Semantics">
+                Invoke a call that may either return normally or unwind. On
+                normal return, branch to <code>normal.to</code> passing any
+                <code>args</code> (and optionally results via block params). On
+                exception, branch to <code>unwind.to</code>. No implicit
+                fallthrough. This is the only call form that may unwind.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">term.throw</td>
+              <td data-label="Kind"><code>term</code></td>
+              <td data-label="Shape">
+                <code>exc:value, code?:ID, msg?:STR</code>
+              </td>
+              <td data-label="Type rule">
+                exc type MUST be a reference-like type defined by the runtime
+                ABI (commonly <code>ptr</code> or a future
+                <code>ref</code> kind); the choice MUST be declared by
+                <code>unit.eh</code> (see schema)
+              </td>
+              <td data-label="Semantics">
+                Raise an exception object and begin unwinding. The unwind
+                destination is determined by dynamic stack search, but the IR
+                semantics are deterministic given the declared
+                <code>unit.eh</code> model. If the program has no handler,
+                behavior is a deterministic trap.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">term.resume</td>
+              <td data-label="Kind"><code>term</code></td>
+              <td data-label="Shape"><code>token:value</code></td>
+              <td data-label="Type rule">
+                token MUST be an <code>eh.token</code> produced by
+                <code>eh.landingpad</code>
+              </td>
+              <td data-label="Semantics">
+                Continue unwinding with an in-flight exception token. Used to
+                implement rethrow and to model <code>finally</code> paths that
+                do not handle the exception.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">eh.landingpad</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape">
+                <code
+                  >dst:ID, ty:ref, args:[],
+                  flags:{clauses:[{kind:"catch"|"filter", tag:ID}]}</code
+                >
+              </td>
+              <td data-label="Type rule">
+                dst MUST have type <code>eh.token</code> (a built-in type id
+                reserved by <code>eh:v1</code>, declared by the producer as a
+                <code>type</code> record)
+              </td>
+              <td data-label="Semantics">
+                Materialize the current exception into an opaque token at a
+                handler entry. Clause selection/matching rules are defined by
+                the declared <code>unit.eh</code> model. The produced token may
+                be inspected only via explicit <code>eh.*</code> ops.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">eh.extract</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape">
+                <code
+                  >dst:ID, ty:ref, args:[token],
+                  flags:{field:"exc"|"code"}</code
+                >
+              </td>
+              <td data-label="Type rule">
+                token: <code>eh.token</code> → dst: <code>ty</code> (ty MUST be
+                consistent with <code>field</code>)
+              </td>
+              <td data-label="Semantics">
+                Extract information from an exception token deterministically.
+                For <code>field:"exc"</code>, returns the exception object
+                reference; for <code>field:"code"</code>, returns a stable
+                numeric/tag representation as defined by <code>unit.eh</code>.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">eh.matches</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape">
+                <code>dst:ID, ty:ref, args:[token], flags:{tag:ID}</code>
+              </td>
+              <td data-label="Type rule">
+                token: <code>eh.token</code> → dst: <code>bool</code>
+              </td>
+              <td data-label="Semantics">
+                Return true iff the in-flight exception matches the handler tag
+                (catch class) according to <code>unit.eh</code> matching rules.
+                This enables front-ends to lower multi-catch using explicit
+                control flow without implicit personality magic.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>GC / managed references (gc:v1)</h3>
+      <p>
+        This pack provides a deterministic, target-explicit model for managed
+        heaps (GC languages). It makes rooting, safepoints, and barriers
+        <strong>semantic</strong> so that consumers do not rely on ambient
+        runtime conventions.
+      </p>
+      <ul>
+        <li>
+          Enabled when <code>unit.features</code> includes <code>gc:v1</code>.
+        </li>
+        <li>
+          <strong>GC contract (required):</strong> when <code>gc:v1</code> is
+          enabled, the <code>unit</code> record MUST include a
+          <code>unit.gc</code> object with a closed schema:
+          <code
+            >{model:"moving"|"nonmoving", refRepr:"opaque",
+            readBarrier:"none"|"always", writeBarrier:"none"|"always"}</code
+          >. Consumers MUST reject streams with missing or unknown
+          <code>unit.gc</code> fields.
+        </li>
+        <li>
+          When enabled, <code>type.def.kind</code> gains:
+          <ul>
+            <li>
+              <code>{kind:"ref", heap:ID}</code>: an opaque managed reference
+              into heap <code>heap</code>. <code>heap</code> is a stable
+              identifier (e.g., <code>"default"</code> or <code>"gen0"</code>)
+              used only for validation/tooling; semantics depend only on
+              <code>unit.gc</code>.
+            </li>
+            <li>
+              <code>{kind:"root", of:ref}</code>: a GC root handle that keeps a
+              managed reference alive across safepoints.
+            </li>
+          </ul>
+        </li>
+        <li>
+          Managed <code>ref</code> values are <strong>not pointers</strong>:
+          they MUST NOT be used with <code>ptr.*</code> ops or raw
+          <code>load.*</code>/<code>store.*</code>. They may only be manipulated
+          by <code>gc:v1</code> mnemonics.
+        </li>
+        <li>
+          <strong>Safepoints are semantic:</strong> a <code>ref</code> that is
+          not kept alive by a live <code>root</code> (or by being returned from
+          <code>gc.safepoint</code>) MUST NOT be used after a safepoint.
+          Consumers MUST reject streams that use a potentially collected
+          reference.
+        </li>
+        <li>
+          <strong>Determinism:</strong> any movement/forwarding performed by the
+          GC model is made explicit by <code>gc.safepoint</code> returning
+          updated references in a deterministic order.
+        </li>
+        <li>
+          Consumers MUST reject <code>gc:v1</code> mnemonics if the pack is not
+          enabled.
+        </li>
+      </ul>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Mnemonic</th>
+              <th>Kind</th>
+              <th>Shape</th>
+              <th>Type rule</th>
+              <th>Semantics</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong
+                  >Managed references, roots, and safepoints (gc:v1)</strong
+                ><br /><span style="color: var(--muted)"
+                  >Roots make liveness explicit; safepoints return updated refs
+                  for moving collectors.</span
+                >
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">gc.null</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[]</code></td>
+              <td data-label="Type rule">ty : ref(heap) → dst : ty</td>
+              <td data-label="Semantics">
+                The null managed reference for <code>ty</code>.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">gc.is_null</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[x]</code></td>
+              <td data-label="Type rule">x : ref(heap) → dst : bool</td>
+              <td data-label="Semantics">
+                True iff <code>x</code> is the null reference.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">gc.cmp.eq / gc.cmp.ne</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>args:[a,b]</code></td>
+              <td data-label="Type rule">
+                a,b : ref(heap) (same heap) → dst : bool
+              </td>
+              <td data-label="Semantics">
+                Deterministic reference equality/inequality under the declared
+                GC model.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">gc.root</td>
+              <td data-label="Kind"><code>op</code></td>
+              <td data-label="Shape"><code>ty:ref, args:[x]</code></td>
+              <td data-label="Type rule">
+                ty : ref(heap); x : ty → dst : root(of:ty)
+              </td>
+              <td data-label="Semantics">
+                Create a GC root handle for <code>x</code>. The root keeps the
+                referenced object alive across safepoints until explicitly
+                released with <code>gc.unroot</code>.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">gc.unroot</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape"><code>args:[r]</code></td>
+              <td data-label="Type rule">
+                r : root(of:refTy) → (no SSA result)
+              </td>
+              <td data-label="Semantics">
+                Release a root handle. After <code>gc.unroot</code>,
+                <code>r</code> MUST NOT be used again.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">gc.safepoint</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code>args:[roots...]</code>, results:[{id,ty}...],
+                flags:{reason?:STR}
+              </td>
+              <td data-label="Type rule">
+                each root : root(of:refTy) → corresponding result : refTy (same
+                order)
+              </td>
+              <td data-label="Semantics">
+                A GC safepoint. The collector may run and (if
+                <code>unit.gc.model</code> is <code>"moving"</code>) may move
+                objects. The effect returns the <em>current</em> references
+                corresponding to each root in the same order. A producer MUST
+                use the returned SSA refs for any uses after the safepoint (do
+                not reuse pre-safepoint refs unless re-rooted and re-returned).
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">gc.keepalive</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape"><code>args:[x]</code></td>
+              <td data-label="Type rule">x : ref(heap) → (no SSA result)</td>
+              <td data-label="Semantics">
+                Extends the semantic liveness of <code>x</code> to this point (a
+                producer MAY use this to prevent premature collection when a ref
+                is only used for finalization/ordering purposes). This has no
+                other effect.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic" colspan="5">
+                <strong>Read/write barriers (gc:v1)</strong><br /><span
+                  style="color: var(--muted)"
+                  >Barriers are explicit and semantic. If the declared model
+                  requires them, missing barriers make the stream invalid.</span
+                >
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">gc.read_barrier</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape">
+                <code>args:[x]</code>, results:[{id,ty}]
+              </td>
+              <td data-label="Type rule">x : ref(heap) → result : ref(heap)</td>
+              <td data-label="Semantics">
+                Apply the GC read barrier to <code>x</code>. If
+                <code>unit.gc.readBarrier</code> is <code>"none"</code>, this is
+                a semantic no-op and producers SHOULD omit it. If
+                <code>"always"</code>, consumers MUST reject any use of a
+                reference loaded from the heap that is not passed through a read
+                barrier as required by the runtime model.
+              </td>
+            </tr>
+
+            <tr>
+              <td data-label="Mnemonic">gc.write_barrier</td>
+              <td data-label="Kind"><code>eff</code></td>
+              <td data-label="Shape"><code>args:[owner, value]</code></td>
+              <td data-label="Type rule">
+                owner : ref(heapA), value : ref(heapB) or null-ref → (no SSA
+                result)
+              </td>
+              <td data-label="Semantics">
+                Apply the GC write barrier for storing <code>value</code> into
+                an object owned by <code>owner</code>. If
+                <code>unit.gc.writeBarrier</code> is <code>"none"</code>, this
+                is a semantic no-op and producers SHOULD omit it. If
+                <code>"always"</code>, producers MUST emit this barrier at every
+                heap edge store as defined by their object model; consumers MAY
+                validate conservatively and reject clearly missing barriers.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Semantic algebra (sem:v1)</h3>
+        <p>
+          This pack adds a
+          <strong>closed, declarative semantic algebra</strong> for expressing
+          higher-level language constructs (e.g., conditional evaluation,
+          short-circuiting, structured sequencing) <em>inside</em> SIR without
+          relying on ambient conventions. The meaning of each
+          <code>sem:v1</code> mnemonic is defined <strong>only</strong> by a
+          deterministic desugaring into base SIR v1.0 records
+          (<code>block</code>/<code>op</code>/<code>eff</code>/<code>term</code>).
+        </p>
+
+        <ul>
+          <li>
+            Enabled when <code>unit.features</code> includes
+            <code>sem:v1</code>.
+          </li>
+          <li>
+            <strong>Requires:</strong> <code>fun:v1</code> (and optionally
+            <code>closure:v1</code> for captures).
+          </li>
+          <li>
+            <strong>Validation rule:</strong> If <code>sem:v1</code> mnemonics
+            are present, consumers MUST validate correctness by first desugaring
+            them into base SIR, then validating the resulting stream under the
+            normal v1.0 rules (including backward-reference and SSA
+            dominance-in-stream-order constraints).
+          </li>
+          <li>
+            <strong>Closed set:</strong> The <code>sem.*</code> mnemonic set is
+            closed for <code>sem:v1</code>. Consumers MUST reject unknown
+            <code>sem.*</code> mnemonics.
+          </li>
+          <li>
+            <strong>Determinism:</strong> Desugaring is fully deterministic.
+            Consumers MUST NOT consult ambient host/runtime behavior. All
+            control-flow structure is explicit after desugaring.
+          </li>
+        </ul>
+
+        <h4>Branch operand encoding (sem:v1)</h4>
+        <p>
+          Several mnemonics accept a “branch operand” that may be either an
+          already-evaluated value or a thunk (callable) that produces the value
+          when selected. This is how <code>sem:v1</code> expresses non-strict
+          evaluation (e.g., if/short-circuit) declaratively.
+        </p>
+        <ul>
+          <li>
+            <strong>Immediate value branch:</strong>
+            <code>{"kind":"val","v":VALUE}</code>
+          </li>
+          <li>
+            <strong>Thunk branch:</strong>
+            <code>{"kind":"thunk","f":VALUE}</code> where <code>f</code> is
+            either:
+            <ul>
+              <li>
+                <code>fun(sig)</code> with <code>sig = () -&gt; (T)</code>,
+                called using <code>call.fun</code>, or
+              </li>
+              <li>
+                <code>closure(callSig, env)</code> with
+                <code>callSig = () -&gt; (T)</code>, called using
+                <code>call.closure</code>.
+              </li>
+            </ul>
+          </li>
+        </ul>
+
+        <p>
+          In all cases, the produced value has the destination type
+          <code>T</code>. A producer MUST ensure the branch operand is
+          type-correct; otherwise the stream is invalid.
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Mnemonic</th>
+                <th>Kind</th>
+                <th>Shape</th>
+                <th>Type rule</th>
+                <th>Semantics (normative desugaring)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td data-label="Mnemonic" colspan="5">
+                  <strong>Conditional evaluation (sem:v1)</strong><br />
+                  <span style="color: var(--muted)">
+                    Declarative non-strict conditional. Branches may be values
+                    or thunks. The result is produced by calling/evaluating only
+                    the selected branch.
+                  </span>
+                </td>
+              </tr>
+
+              <tr>
+                <td data-label="Mnemonic">sem.if</td>
+                <td data-label="Kind"><code>eff</code></td>
+                <td data-label="Shape">
+                  <code
+                    >ty:ref, args:[cond, thenBranch, elseBranch],
+                    results:[{id,ty}]</code
+                  ><br />
+                  where <code>thenBranch</code>/<code>elseBranch</code> are
+                  branch operands as defined above.
+                </td>
+                <td data-label="Type rule">
+                  <code>cond: bool</code>, <code>ty:T</code>, branches produce
+                  <code>T</code> → result: <code>T</code>
+                </td>
+                <td data-label="Semantics">
+                  Desugar into explicit control flow:
+                  <ol
+                    style="
+                      margin: 0.4rem 0 0 1.2rem;
+                      color: var(--muted);
+                      line-height: 1.5;
+                    "
+                  >
+                    <li>
+                      Create blocks <code>B_then</code>, <code>B_else</code>,
+                      <code>B_join</code>.
+                    </li>
+                    <li>
+                      End current block with <code>term.cbr</code> on
+                      <code>cond</code> to
+                      <code>B_then</code>/<code>B_else</code>.
+                    </li>
+                    <li>
+                      In <code>B_then</code>, evaluate <code>thenBranch</code>:
+                      if <code>{"kind":"val"}</code> use that value; if
+                      <code>{"kind":"thunk"}</code> call it (<code
+                        >call.fun</code
+                      >
+                      or <code>call.closure</code> as appropriate). Let the
+                      produced value be <code>v_then</code>. Then
+                      <code>term.br</code> to <code>B_join</code> passing
+                      <code>v_then</code>.
+                    </li>
+                    <li>
+                      In <code>B_else</code>, evaluate
+                      <code>elseBranch</code> similarly to get
+                      <code>v_else</code>. Then <code>term.br</code> to
+                      <code>B_join</code> passing <code>v_else</code>.
+                    </li>
+                    <li>
+                      <code>B_join</code> MUST have exactly one block parameter
+                      whose id is the <code>results[0].id</code> and whose type
+                      is <code>ty</code>. That parameter is the value of the
+                      <code>sem.if</code> expression.
+                    </li>
+                  </ol>
+                  Determinism: only the selected branch is evaluated; all
+                  block/param ordering is explicit and stable.
+                </td>
+              </tr>
+
+              <tr>
+                <td data-label="Mnemonic" colspan="5">
+                  <strong>Short-circuit boolean (sem:v1)</strong><br />
+                  <span style="color: var(--muted)">
+                    These define evaluation order without “compiler convention”.
+                    The RHS is a branch operand so it can be delayed.
+                  </span>
+                </td>
+              </tr>
+
+              <tr>
+                <td data-label="Mnemonic">sem.and_sc</td>
+                <td data-label="Kind"><code>eff</code></td>
+                <td data-label="Shape">
+                  <code>args:[lhs, rhsBranch], results:[{id,ty}]</code><br />
+                  where <code>rhsBranch</code> is a branch operand producing
+                  <code>bool</code>.
+                </td>
+                <td data-label="Type rule">
+                  lhs: bool; rhs produces bool → result: bool
+                </td>
+                <td data-label="Semantics">
+                  Equivalent to:
+                  <code
+                    >sem.if(ty=bool, cond=lhs, then=rhsBranch,
+                    else={"kind":"val","v":{"t":"bool","v":false}})</code
+                  >. Only evaluates RHS when <code>lhs</code> is true.
+                </td>
+              </tr>
+
+              <tr>
+                <td data-label="Mnemonic">sem.or_sc</td>
+                <td data-label="Kind"><code>eff</code></td>
+                <td data-label="Shape">
+                  <code>args:[lhs, rhsBranch], results:[{id,ty}]</code><br />
+                  where <code>rhsBranch</code> is a branch operand producing
+                  <code>bool</code>.
+                </td>
+                <td data-label="Type rule">
+                  lhs: bool; rhs produces bool → result: bool
+                </td>
+                <td data-label="Semantics">
+                  Equivalent to:
+                  <code
+                    >sem.if(ty=bool, cond=lhs,
+                    then={"kind":"val","v":{"t":"bool","v":true}},
+                    else=rhsBranch)</code
+                  >. Only evaluates RHS when <code>lhs</code> is false.
+                </td>
+              </tr>
+              <tr>
+                <td data-label="Mnemonic" colspan="5">
+                  <strong>Sum matching (sem:v1; requires adt:v1)</strong><br />
+                  <span style="color: var(--muted)">
+                    Declarative pattern matching over
+                    <code>type.kind:"sum"</code>. Each arm is a branch operand,
+                    optionally consuming the payload.
+                  </span>
+                </td>
+              </tr>
+
+              <tr>
+                <td data-label="Mnemonic">sem.match_sum</td>
+                <td data-label="Kind"><code>eff</code></td>
+                <td data-label="Shape">
+                  <code
+                    >sum:ref, ty:ref, args:[scrut], cases:[{variant:NUM,
+                    body:BR}], default:BR, results:[{id,ty}]</code
+                  ><br />
+                  where <code>BR</code> is a branch operand (val or thunk).
+                </td>
+                <td data-label="Type rule">
+                  <code>sum:S</code> where <code>S</code> is
+                  <code>kind:"sum"</code>; <code>scrut:S</code>;
+                  <code>ty:T</code>; each case body must produce <code>T</code>.
+                  If a case’s <code>body</code> is a thunk whose callable
+                  accepts one argument <code>P</code>, then that
+                  <code>P</code> MUST equal the payload type of that variant.
+                </td>
+                <td data-label="Semantics">
+                  Desugar into explicit control flow using
+                  <code>adt.tag</code> and <code>term.switch</code>:
+                  <ol
+                    style="
+                      margin: 0.4rem 0 0 1.2rem;
+                      color: var(--muted);
+                      line-height: 1.5;
+                    "
+                  >
+                    <li>
+                      Compute <code>tag = adt.tag(scrut)</code> (type
+                      <code>i32</code>).
+                    </li>
+                    <li>
+                      Create blocks <code>B_case[k]</code> for each provided
+                      <code>cases[*].variant</code>, plus
+                      <code>B_default</code>, and a join block
+                      <code>B_join</code>.
+                    </li>
+                    <li>
+                      End current block with <code>term.switch</code> over
+                      <code>tag</code>, mapping literals to the corresponding
+                      <code>B_case</code> blocks; missing variants go to
+                      <code>B_default</code>.
+                    </li>
+                    <li>
+                      In each <code>B_case</code>:
+                      <ul style="margin: 0.25rem 0 0 1.2rem">
+                        <li>
+                          Let the case be for <code>variant = k</code>. If
+                          <code>body</code> is a thunk that expects one
+                          argument, then: compute
+                          <code>p = adt.get(ty=sum, v=scrut, variant=k)</code>
+                          and call the thunk with args <code>[p]</code>.
+                        </li>
+                        <li>
+                          Otherwise (val or 0-arg thunk), evaluate
+                          <code>body</code> with args <code>[]</code>.
+                        </li>
+                        <li>
+                          Let the produced value be <code>v_k : T</code>. Then
+                          <code>term.br</code> to <code>B_join</code> passing
+                          <code>v_k</code>.
+                        </li>
+                      </ul>
+                    </li>
+                    <li>
+                      In <code>B_default</code>, evaluate
+                      <code>default</code> (val or thunk, args <code>[]</code>),
+                      producing <code>v_def : T</code>, then
+                      <code>term.br</code> to <code>B_join</code> passing
+                      <code>v_def</code>.
+                    </li>
+                    <li>
+                      <code>B_join</code> MUST have exactly one block parameter
+                      whose id is <code>results[0].id</code> and whose type is
+                      <code>ty</code>. That parameter is the value of the match
+                      expression.
+                    </li>
+                  </ol>
+
+                  Determinism:
+                  <ul
+                    style="
+                      margin: 0.25rem 0 0 1.2rem;
+                      color: var(--muted);
+                      line-height: 1.5;
+                    "
+                  >
+                    <li>Only the selected arm is evaluated.</li>
+                    <li>
+                      <code>cases[*].variant</code> MUST be unique. Producers
+                      SHOULD sort cases by ascending <code>variant</code> for
+                      canonical form.
+                    </li>
+                    <li>
+                      If a thunk declares it consumes payload (arity 1), the
+                      payload extraction is semantic and explicit via
+                      <code>adt.get</code>.
+                    </li>
+                  </ul>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h4>Notes for grammar-to-semantics mapping</h4>
+        <ul>
+          <li>
+            A grammar production may assign semantics by emitting
+            <code>sem:v1</code> forms as the meaning of the node. The “meaning”
+            is the semantic algebra node itself, not an imperative lowering
+            script.
+          </li>
+          <li>
+            Consumers that do not implement <code>sem:v1</code> MUST reject
+            streams containing <code>sem.*</code> mnemonics (unless the producer
+            already desugared them away).
+          </li>
+          <li>
+            Producers MAY desugar <code>sem:v1</code> eagerly (emitting only
+            base SIR). If so, the stream does not need to include
+            <code>sem:v1</code> in <code>unit.features</code>.
+          </li>
+        </ul>
+      </div>
+    </section>
+  </body>
+</html>

@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frogfish.io/zasm/schema/ir/v1.1/record.schema.json",
+  "title": "zasm IR v1.1 JSONL record",
+  "description": "One JSON object per line (JSONL). Each line must validate against one of the record variants. Additive extensions for richer tooling (src/diag/meta) and ABI clarity (reg operands, mem displacement).",
+  "oneOf": [
+    { "$ref": "#/$defs/MetaRecord" },
+    { "$ref": "#/$defs/SrcRecord" },
+    { "$ref": "#/$defs/DiagRecord" },
+    { "$ref": "#/$defs/LabelRecord" },
+    { "$ref": "#/$defs/InstrRecord" },
+    { "$ref": "#/$defs/DirRecord" }
+  ],
+  "$defs": {
+    "IrTag": {
+      "type": "string",
+      "const": "zasm-v1.1"
+    },
+    "Ident": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z_.$][A-Za-z0-9_.$]*$"
+    },
+    "SrcId": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Source record identifier; MUST be unique within a stream; src_ref MUST reference a prior SrcRecord.id."
+    },
+    "RecordId": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional record identifier; if present, SHOULD be unique across the stream."
+    },
+    "Section": {
+      "type": "string",
+      "enum": ["text","rodata","data","bss"]
+    },
+    "Sym": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t","v"],
+      "properties": {
+        "t": { "const": "sym" },
+        "v": { "$ref": "#/$defs/Ident" }
+      },
+      "description": "Linkable symbol (extern/public/global); relocation candidate."
+    },
+    "Lbl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t","v"],
+      "properties": {
+        "t": { "const": "lbl" },
+        "v": { "$ref": "#/$defs/Ident" }
+      },
+      "description": "Local control-flow target within the current unit/stream."
+    },
+    "Reg": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t","v"],
+      "properties": {
+        "t": { "const": "reg" },
+        "v": { "$ref": "#/$defs/Ident" }
+      }
+    },
+    "Num": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t","v"],
+      "properties": {
+        "t": { "const": "num" },
+        "v": { "type": "integer" }
+      }
+    },
+    "Str": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t","v"],
+      "properties": {
+        "t": { "const": "str" },
+        "v": { "type": "string" }
+      }
+    },
+    "Mem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t","base"],
+      "properties": {
+        "t": { "const": "mem" },
+        "base": {
+          "oneOf": [
+            { "$ref": "#/$defs/Reg" },
+            { "$ref": "#/$defs/Sym" }
+          ]
+        },
+        "disp": { "type": "integer", "description": "Optional displacement in bytes relative to base." },
+        "size": { "type": "integer", "enum": [1,2,4,8,16], "description": "Optional width hint in bytes; if present and conflicts with mnemonic-implied width, emit a diagnostic." }
+      }
+    },
+    "Operand": {
+      "description": "Instruction operand (typed).",
+      "oneOf": [
+        { "$ref": "#/$defs/Sym" },
+        { "$ref": "#/$defs/Lbl" },
+        { "$ref": "#/$defs/Reg" },
+        { "$ref": "#/$defs/Num" },
+        { "$ref": "#/$defs/Str" },
+        { "$ref": "#/$defs/Mem" }
+      ]
+    },
+    "Arg": {
+      "description": "Directive argument (typed). Same shapes as operands.",
+      "$ref": "#/$defs/Operand"
+    },
+    "Loc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["line"],
+      "properties": {
+        "line": { "type": "integer", "minimum": 1 },
+        "col": { "type": "integer", "minimum": 1, "description": "1-based column; omit if unknown." },
+        "unit": { "type": "string", "description": "Optional compilation unit / filename hint." }
+      }
+    },
+    "MetaRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ir","k"],
+      "properties": {
+        "ir": { "$ref": "#/$defs/IrTag" },
+        "k": { "const": "meta" },
+        "producer": { "type": "string" },
+        "ts": { "type": "string", "description": "Optional timestamp or build id." },
+        "unit": { "type": "string" },
+        "id": { "$ref": "#/$defs/RecordId" }
+      }
+    },
+    "SrcRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ir","k","id","line"],
+      "properties": {
+        "ir": { "$ref": "#/$defs/IrTag" },
+        "k": { "const": "src" },
+        "id": { "$ref": "#/$defs/SrcId" },
+        "file": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "col": { "type": "integer", "minimum": 1, "description": "1-based column; omit if unknown." },
+        "end_line": { "type": "integer", "minimum": 1 },
+        "end_col": { "type": "integer", "minimum": 1 },
+        "text": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["end_line"] },
+          "then": { "required": ["end_col"] }
+        },
+        {
+          "if": { "required": ["end_col"] },
+          "then": { "required": ["end_line"] }
+        }
+      ]
+    },
+    "DiagRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ir","k","level","msg"],
+      "properties": {
+        "ir": { "$ref": "#/$defs/IrTag" },
+        "k": { "const": "diag" },
+        "level": { "type": "string", "enum": ["info","warn","error"] },
+        "msg": { "type": "string" },
+        "code": { "type": "string", "description": "Optional stable diagnostic code." },
+        "notes": { "type": "array", "items": { "type": "string" }, "description": "Optional supplementary context lines." },
+        "help": { "type": "string", "description": "Optional actionable hint." },
+        "src_ref": { "$ref": "#/$defs/SrcId" },
+        "loc": { "$ref": "#/$defs/Loc" },
+        "id": { "$ref": "#/$defs/RecordId" }
+      }
+    },
+    "LabelRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ir","k","name"],
+      "properties": {
+        "ir": { "$ref": "#/$defs/IrTag" },
+        "k": { "const": "label" },
+        "name": { "$ref": "#/$defs/Ident" },
+        "loc": { "$ref": "#/$defs/Loc" },
+        "id": { "$ref": "#/$defs/RecordId" }
+      }
+    },
+    "InstrRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ir","k","m","ops"],
+      "properties": {
+        "ir": { "$ref": "#/$defs/IrTag" },
+        "k": { "const": "instr" },
+        "m": { "type": "string", "minLength": 1, "description": "Mnemonic (case-sensitive)." },
+        "ops": { "type": "array", "items": { "$ref": "#/$defs/Operand" } },
+        "src_ref": { "$ref": "#/$defs/SrcId" },
+        "loc": { "$ref": "#/$defs/Loc" },
+        "id": { "$ref": "#/$defs/RecordId" }
+      }
+    },
+    "DirRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ir","k","d","args"],
+      "properties": {
+        "ir": { "$ref": "#/$defs/IrTag" },
+        "k": { "const": "dir" },
+        "d": {
+          "type": "string",
+          "enum": ["DB","DW","RESB","PUBLIC","EXTERN","STR","EQU"],
+          "description": "Directive name. v1.1 supports DB/DW/RESB/STR/EQU/PUBLIC/EXTERN."
+        },
+        "name": { "$ref": "#/$defs/Ident", "description": "Optional label associated with this directive (e.g. msg: DB ...)." },
+        "args": { "type": "array", "items": { "$ref": "#/$defs/Arg" } },
+        "section": { "$ref": "#/$defs/Section", "description": "Optional section hint for data layout." },
+        "sig": { "type": "string", "description": "Optional human-readable signature metadata for PUBLIC/EXTERN (ignored by lowerers)." },
+        "src_ref": { "$ref": "#/$defs/SrcId" },
+        "loc": { "$ref": "#/$defs/Loc" },
+        "id": { "$ref": "#/$defs/RecordId" }
+      }
+    }
+  }
+}
