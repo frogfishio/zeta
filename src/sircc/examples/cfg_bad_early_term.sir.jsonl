@@ -1,0 +1,13 @@
+{"ir":"sir-v1.0","k":"meta","producer":"sircc-example","unit":"cfg_bad_early_term"}
+
+{"ir":"sir-v1.0","k":"type","id":1,"kind":"prim","prim":"i32"}
+{"ir":"sir-v1.0","k":"type","id":2,"kind":"fn","params":[],"ret":1}
+
+{"ir":"sir-v1.0","k":"node","id":10,"tag":"const.i32","type_ref":1,"fields":{"value":1}}
+{"ir":"sir-v1.0","k":"node","id":11,"tag":"term.ret","fields":{"value":{"t":"ref","id":10}}}
+{"ir":"sir-v1.0","k":"node","id":12,"tag":"const.i32","type_ref":1,"fields":{"value":2}}
+
+{"ir":"sir-v1.0","k":"node","id":100,"tag":"block","fields":{"stmts":[{"t":"ref","id":11},{"t":"ref","id":12}]}}
+
+{"ir":"sir-v1.0","k":"node","id":200,"tag":"fn","type_ref":2,"fields":{"name":"main","entry":{"t":"ref","id":100},"blocks":[{"t":"ref","id":100}]}}
+

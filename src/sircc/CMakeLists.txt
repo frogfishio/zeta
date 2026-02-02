@@ -83,6 +83,12 @@ add_test(
 )
 
 add_test(
+  NAME sircc_verify_reject_cfg_early_term
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/cfg_bad_early_term.sir.jsonl
+)
+set_tests_properties(sircc_verify_reject_cfg_early_term PROPERTIES WILL_FAIL TRUE)
+
+add_test(
   NAME sircc_verify_reject_unknown_field
   COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/bad_unknown_field.sir.jsonl
 )
