@@ -26,6 +26,11 @@ If you installed LLVM with Homebrew:
 - Emit LLVM IR: `./build/src/sircc/sircc src/sircc/examples/add.sir.jsonl --emit-llvm -o add.ll`
 - Emit object only: `./build/src/sircc/sircc src/sircc/examples/add.sir.jsonl --emit-obj -o add.o`
 
+Optional flags:
+
+- Pick a linker: `--clang clang` (default: `clang`)
+- Override the LLVM target triple: `--target-triple <triple>`
+
 Current lowering support is intentionally small (enough to smoke-test the pipeline):
 
 - `type` records: `prim`, `fn`, `ptr`
