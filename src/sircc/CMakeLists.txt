@@ -63,6 +63,11 @@ add_test(
 )
 
 add_test(
+  NAME sircc_verify_call_mnemonic_tags
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/call_mnemonic_tags.sir.jsonl
+)
+
+add_test(
   NAME sircc_verify_reject_unknown_field
   COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/bad_unknown_field.sir.jsonl
 )

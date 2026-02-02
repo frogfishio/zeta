@@ -1324,6 +1324,55 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
     goto done;
   }
 
+  if (strcmp(n->tag, "call") == 0) {
+    if (!n->fields) {
+      errf(f->p, "sircc: call node %lld missing fields", (long long)node_id);
+      goto done;
+    }
+    JsonValue* callee_v = json_obj_get(n->fields, "callee");
+    int64_t callee_id = 0;
+    if (!parse_node_ref_id(callee_v, &callee_id)) {
+      errf(f->p, "sircc: call node %lld missing callee ref", (long long)node_id);
+      goto done;
+    }
+    NodeRec* callee_n = get_node(f->p, callee_id);
+    if (!callee_n || strcmp(callee_n->tag, "fn") != 0 || !callee_n->llvm_value) {
+      errf(f->p, "sircc: call node %lld callee %lld is not a lowered fn", (long long)node_id, (long long)callee_id);
+      goto done;
+    }
+    LLVMValueRef callee = callee_n->llvm_value;
+
+    JsonValue* args = json_obj_get(n->fields, "args");
+    if (!args || args->type != JSON_ARRAY) {
+      errf(f->p, "sircc: call node %lld missing args array", (long long)node_id);
+      goto done;
+    }
+    size_t argc = args->v.arr.len;
+    LLVMValueRef* argv = NULL;
+    if (argc) {
+      argv = (LLVMValueRef*)malloc(argc * sizeof(LLVMValueRef));
+      if (!argv) goto done;
+      for (size_t i = 0; i < argc; i++) {
+        int64_t aid = 0;
+        if (!parse_node_ref_id(args->v.arr.items[i], &aid)) {
+          errf(f->p, "sircc: call node %lld arg[%zu] must be node ref", (long long)node_id, i);
+          free(argv);
+          goto done;
+        }
+        argv[i] = lower_expr(f, aid);
+        if (!argv[i]) {
+          free(argv);
+          goto done;
+        }
+      }
+    }
+
+    LLVMTypeRef callee_fty = LLVMGetElementType(LLVMTypeOf(callee));
+    out = LLVMBuildCall2(f->builder, callee_fty, callee, argv, (unsigned)argc, "call");
+    free(argv);
+    goto done;
+  }
+
   if (strncmp(n->tag, "f32.", 4) == 0 || strncmp(n->tag, "f64.", 4) == 0) {
     int width = (n->tag[1] == '3') ? 32 : 64;
     const char* op = n->tag + 4;

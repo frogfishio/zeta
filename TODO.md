@@ -101,7 +101,7 @@ Implement in the same order as below (earlier items unblock later ones). Each bu
 - [ ] `memcpy/memmove/memset` (or whatever the table defines) via LLVM intrinsics
 
 ### 3.12 Calls (effects) — 2
-- [ ] `call` with signature/type checking
+- [ ] `call` with signature/type checking (implemented: direct `call` to referenced `fn` node; TODO: signature checks + indirect/varargs)
 - [ ] `term.ret` / `term.unreachable` (or the table’s exact terminators) with CFG validation (implemented: `term.ret`, `term.unreachable`, `term.trap`)
 
 ### 3.13 Control flow (terminators) — 7
