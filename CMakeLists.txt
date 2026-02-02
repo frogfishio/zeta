@@ -9,3 +9,8 @@ set(CMAKE_C_EXTENSIONS OFF)
 enable_testing()
 
 add_subdirectory(src/sircc)
+
+option(SIR_ENABLE_SIRC "Build the experimental .sir text parser (flex/bison)" OFF)
+if(SIR_ENABLE_SIRC)
+  add_subdirectory(sirc)
+endif()

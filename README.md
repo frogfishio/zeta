@@ -32,6 +32,14 @@ Optional flags:
 - Pick a linker: `--clang clang` (default: `clang`)
 - Override the LLVM target triple: `--target-triple <triple>`
 
+## Build `sirc` (experimental .sir parser)
+
+`sirc` is an experimental flex/bison-based parser for a textual `.sir` syntax. It is currently a syntax checker only (it does not emit JSONL yet).
+
+- Configure with: `cmake -S . -B build -G Ninja -DSIR_ENABLE_SIRC=ON -DLLVM_DIR=$(brew --prefix llvm)/lib/cmake/llvm`
+- Build: `cmake --build build`
+- Run: `./build/sirc/sirc sirc/hello.sir`
+
 Current lowering support is intentionally small (enough to smoke-test the pipeline):
 
 - `type` records: `prim`, `fn`, `ptr`

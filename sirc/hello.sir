@@ -1,0 +1,120 @@
+unit u0 target wasm32 +agg:v1
+
+;; ----- pure arithmetic helpers -----
+
+fn add(a:i32, b:i32) -> i32 public
+  return i32.add(a, b)
+end
+
+fn sub(a:i32, b:i32) -> i32 public
+  return i32.sub(a, b)
+end
+
+fn mul(a:i32, b:i32) -> i32 public
+  return i32.mul(a, b)
+end
+
+fn max_u32(a:i32, b:i32) -> i32 public
+  ;; unsigned max: pick a if a >=u b else b
+  ;; (uses a compare + value-level select)
+  let ge: bool = i32.cmp.uge(a, b)
+  return select(i32, ge, a, b)
+end
+
+fn clamp_u32(x:i32, lo:i32, hi:i32) -> i32 public
+  ;; clamp in unsigned space
+  let x1: i32 = max_u32(x, lo)
+  let le: bool = i32.cmp.ule(x1, hi)
+  return select(i32, le, x1, hi)
+end
+
+;; ----- small memory example -----
+
+fn sum2(ptr_base:ptr) -> i32 public
+  ;; load two i32s from memory and add
+  let x: i32 = load.i32(ptr_base)
+  let p1: ptr = ptr.add(ptr_base, 4:i64)
+  let y: i32 = load.i32(p1)
+  return i32.add(x, y)
+end
+
+fn store_add(dst:ptr, a:i32, b:i32) -> i32 public
+  ;; compute a+b, store it, also return it
+  let r: i32 = i32.add(a, b)
+  store.i32(dst, r)
+  return r
+end
+
+;; ----- structured constants + globals (agg:v1) -----
+
+;; [4 x i32]
+type t_arr4_i32 = array(i32, 4)
+
+;; const c_vec = [10, 20, 30, 40]
+const c_vec : ^t_arr4_i32 = { kind:"array",
+  elems:[ 10:i32, 20:i32, 30:i32, 40:i32 ]
+}
+
+global g_vec : ^t_arr4_i32 public = ^c_vec
+
+fn sum_global_vec() -> i32 public
+  ;; sum g_vec[0..4)
+  let base: ptr = ptr.sym(g_vec)
+
+  let p0: ptr = base
+  let p1: ptr = ptr.add(base, 4:i64)
+  let p2: ptr = ptr.add(base, 8:i64)
+  let p3: ptr = ptr.add(base, 12:i64)
+
+  let a: i32 = load.i32(p0)
+  let b: i32 = load.i32(p1)
+  let c: i32 = load.i32(p2)
+  let d: i32 = load.i32(p3)
+
+  let ab: i32 = i32.add(a, b)
+  let cd: i32 = i32.add(c, d)
+  return i32.add(ab, cd)
+end
+
+;; ----- control flow example -----
+
+fn abs_i32(x:i32) -> i32 public
+  ;; if x < 0 return -x else x
+  let isneg: bool = i32.cmp.slt(x, 0:i32)
+  let nx: i32 = i32.neg(x)
+  return select(i32, isneg, nx, x)
+end
+
+fn gcd_u32(a:i32, b:i32) -> i32 public
+  ;; Euclid loop using blocks + term.cbr / term.br
+  block entry
+    term.br to loop, args:[a, b]
+  end
+
+  block loop(x:i32, y:i32)
+    let y0: bool = i32.eqz(y)
+    term.cbr cond:y0,
+      then:{ to done, args:[x] },
+      else:{ to step, args:[x, y] }
+  end
+
+  block step(x:i32, y:i32)
+    ;; r = x % y (total form to avoid trap)
+    let r: i32 = i32.rem.u.sat(x, y)
+    term.br to loop, args:[y, r]
+  end
+
+  block done(r:i32)
+    term.ret value:r
+  end
+end
+
+;; ----- “main” style entry -----
+
+fn main(x:i32, y:i32) -> i32 public
+  ;; use a few helpers
+  let s: i32 = add(x, y)
+  let p: i32 = mul(s, 3:i32)
+  let g: i32 = gcd_u32(p, 100:i32)
+  return clamp_u32(g, 0:i32, 1000:i32)
+end

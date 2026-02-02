@@ -12,6 +12,7 @@ This TODO is organized as milestones. Each milestone should end with:
 - [ ] Deterministic builds: pin target triple + data layout reporting (`--print-target`)
 - [x] Add `--dump-records` (quick parse trace)
 - [x] Add `--verify-only` (parse + validate + report, no codegen)
+- [ ] Experimental text frontend (`sirc`): `.sir` → `sir-v1.0` JSONL (see `sirc/`; build gated by `-DSIR_ENABLE_SIRC=ON`)
 
 ## Milestone 1 — Parser + Validator (spec-first correctness)
 
@@ -57,6 +58,18 @@ This TODO is organized as milestones. Each milestone should end with:
 - [ ] Cross-platform link driver strategy (clang/lld/cc) with `--linker` and `--ldflags`
 - [ ] Emit static libs / shared libs (later): `--emit-lib`
 
+### 2.4 Text frontend (`sirc`) (dev UX; optional)
+- [x] Add a buildable `sirc` target (flex/bison) behind `-DSIR_ENABLE_SIRC=ON`
+- [ ] Emit `sir-v1.0` JSONL to stdout (`sirc hello.sir > hello.sir.jsonl`)
+- [ ] Minimal coverage to bootstrap demos:
+  - [ ] `unit ... target ... +features` → `meta` record (`meta.ext.target.triple`, `meta.ext.features`)
+  - [ ] `fn`/`block`/`term.*` syntax → node-frontend JSONL (CFG-form functions)
+  - [ ] `let`/`return`/call expressions → node tags + `type` records
+  - [ ] Diagnostics: include line/column in errors; reject unsupported constructs cleanly
+- [ ] Decide handling for `const`/`global`:
+  - [ ] Either: lower to `sym`+data segments + extend `sircc` to emit LLVM globals, or
+  - [ ] Explicitly defer and ship a clear error until sircc supports globals
+
 ## Milestone 3 — Mnemonics: Base (ungated, required)
 
 Implement in the same order as below (earlier items unblock later ones). Each bullet means:
@@ -87,7 +100,7 @@ Implement in the same order as below (earlier items unblock later ones). Each bu
   - [x] Float comparisons and conversions (implemented for `node.tag`: `f32/f64.cmp.*`, `f32/f64.from_i{32,64}.{s,u}`, `i{32,64}.trunc_sat_f{32,64}.{s,u}`)
 
 ### 3.7 Value-level conditional (pure) — 1
-- [x] `select` lowering with type checking (lowering implemented for `node.tag` `select`; TODO: strict type checks)
+- [x] `select` lowering with type checking (implemented for `node.tag`; validates bool cond + matching operand types; accepts optional `fields.ty` and checks against `type_ref` when present)
 
 ### 3.8 Conversions and casts (pure; closed patterns) — 3
 - [x] `zext`, `sext`, `trunc` (lowering implemented for `node.tag` `i<dst>.(zext|sext|trunc).i<src>`)
@@ -99,11 +112,11 @@ Implement in the same order as below (earlier items unblock later ones). Each bu
 - [x] `ptr.offset`, `ptr.alignof`, `ptr.sizeof` (implemented for `node.tag`; current layout uses a deterministic host-layout subset: prim sizes + host `sizeof(void*)`, plus `type.kind:"array"`/`"ptr"` recursion; TODO: wire real `unit.target.ptrBits`/data-layout reporting)
 
 ### 3.11 Memory effects — 10
-- [ ] `load.*` / `store.*` for ints and floats (alignment + optional width rules) (implemented: `alloca/load/store` for `i8/i16/i32/i64/f32/f64`)
-- [ ] `mem.copy` / `mem.fill` (and overlap semantics) via LLVM intrinsics (implemented: `mem.copy`, `mem.fill`; TODO: overlap=\"disallow\" trap behavior)
+- [ ] `load.*` / `store.*` for ints and floats (alignment + optional width rules) (implemented: `alloca/load/store` for `i8/i16/i32/i64/f32/f64/ptr`; float loads canonicalize NaNs; float stores canonicalize NaNs)
+- [ ] `mem.copy` / `mem.fill` (and overlap semantics) via LLVM intrinsics (implemented: `mem.copy` overlap=\"allow\" -> memmove; overlap=\"disallow\" -> runtime overlap check + deterministic trap; `mem.fill` implemented)
 
 ### 3.12 Calls (effects) — 2
-- [ ] `call` with signature/type checking (implemented: direct `call` to referenced `fn` node; TODO: signature checks + indirect/varargs)
+- [ ] `call` with signature/type checking (implemented: direct `call` to referenced `fn` node; validates arg count/types for non-varargs and pointer-arg bitcasts; TODO: indirect calls + richer coercions)
 - [ ] `term.ret` / `term.unreachable` (or the table’s exact terminators) with CFG validation (implemented: `term.ret`, `term.unreachable`, `term.trap`)
 
 ### 3.13 Control flow (terminators) — 7

@@ -2068,6 +2068,12 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
       errf(f->p, "sircc: select node %lld requires args:[cond, then, else]", (long long)node_id);
       goto done;
     }
+    int64_t ty_id = 0;
+    bool has_ty = false;
+    if (n->fields) {
+      JsonValue* tyv = json_obj_get(n->fields, "ty");
+      if (tyv && parse_type_ref_id(tyv, &ty_id)) has_ty = true;
+    }
     int64_t c_id = 0, t_id = 0, e_id = 0;
     if (!parse_node_ref_id(args->v.arr.items[0], &c_id) || !parse_node_ref_id(args->v.arr.items[1], &t_id) ||
         !parse_node_ref_id(args->v.arr.items[2], &e_id)) {
@@ -2078,6 +2084,28 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
     LLVMValueRef tv = lower_expr(f, t_id);
     LLVMValueRef ev = lower_expr(f, e_id);
     if (!c || !tv || !ev) goto done;
+    if (LLVMGetTypeKind(LLVMTypeOf(c)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(c)) != 1) {
+      errf(f->p, "sircc: select node %lld cond must be bool", (long long)node_id);
+      goto done;
+    }
+    if (LLVMTypeOf(tv) != LLVMTypeOf(ev)) {
+      errf(f->p, "sircc: select node %lld then/else types must match", (long long)node_id);
+      goto done;
+    }
+    if (n->type_ref) {
+      LLVMTypeRef want = lower_type(f->p, f->ctx, n->type_ref);
+      if (!want || want != LLVMTypeOf(tv)) {
+        errf(f->p, "sircc: select node %lld type_ref does not match operand type", (long long)node_id);
+        goto done;
+      }
+    }
+    if (has_ty) {
+      LLVMTypeRef want = lower_type(f->p, f->ctx, ty_id);
+      if (!want || want != LLVMTypeOf(tv)) {
+        errf(f->p, "sircc: select node %lld ty does not match operand type", (long long)node_id);
+        goto done;
+      }
+    }
     out = LLVMBuildSelect(f->builder, c, tv, ev, "select");
     goto done;
   }
@@ -2126,8 +2154,58 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
     }
 
     LLVMTypeRef callee_fty = LLVMGetElementType(LLVMTypeOf(callee));
+    if (LLVMGetTypeKind(callee_fty) != LLVMFunctionTypeKind) {
+      errf(f->p, "sircc: call node %lld callee is not a function pointer", (long long)node_id);
+      free(argv);
+      goto done;
+    }
+
+    unsigned param_count = LLVMCountParamTypes(callee_fty);
+    bool is_varargs = LLVMIsFunctionVarArg(callee_fty) != 0;
+    if (!is_varargs && (unsigned)argc != param_count) {
+      errf(f->p, "sircc: call node %lld arg count mismatch (got %zu, want %u)", (long long)node_id, argc, param_count);
+      free(argv);
+      goto done;
+    }
+    if ((unsigned)argc < param_count) {
+      errf(f->p, "sircc: call node %lld missing required args (got %zu, want >= %u)", (long long)node_id, argc, param_count);
+      free(argv);
+      goto done;
+    }
+
+    if (param_count) {
+      LLVMTypeRef* params = (LLVMTypeRef*)malloc(param_count * sizeof(LLVMTypeRef));
+      if (!params) {
+        free(argv);
+        goto done;
+      }
+      LLVMGetParamTypes(callee_fty, params);
+      for (unsigned i = 0; i < param_count; i++) {
+        LLVMTypeRef want = params[i];
+        LLVMTypeRef got = LLVMTypeOf(argv[i]);
+        if (want == got) continue;
+        if (LLVMGetTypeKind(want) == LLVMPointerTypeKind && LLVMGetTypeKind(got) == LLVMPointerTypeKind) {
+          argv[i] = LLVMBuildBitCast(f->builder, argv[i], want, "arg.cast");
+          continue;
+        }
+        free(params);
+        errf(f->p, "sircc: call node %lld arg[%u] type mismatch", (long long)node_id, i);
+        free(argv);
+        goto done;
+      }
+      free(params);
+    }
+
     out = LLVMBuildCall2(f->builder, callee_fty, callee, argv, (unsigned)argc, "call");
     free(argv);
+    if (out && n->type_ref) {
+      LLVMTypeRef want = lower_type(f->p, f->ctx, n->type_ref);
+      if (want && want != LLVMTypeOf(out)) {
+        errf(f->p, "sircc: call node %lld return type does not match type_ref", (long long)node_id);
+        out = NULL;
+        goto done;
+      }
+    }
     goto done;
   }
 
@@ -2384,6 +2462,11 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
     if (alignv) {
       int64_t a = 0;
       if (json_get_i64(alignv, &a) && a > 0) LLVMSetAlignment(out, (unsigned)a);
+    }
+    JsonValue* volv = json_obj_get(n->fields, "vol");
+    if (volv && volv->type == JSON_BOOL) LLVMSetVolatile(out, volv->v.b ? 1 : 0);
+    if (LLVMGetTypeKind(el) == LLVMFloatTypeKind || LLVMGetTypeKind(el) == LLVMDoubleTypeKind) {
+      out = canonicalize_float(f, out);
     }
     goto done;
   }
@@ -2648,6 +2731,8 @@ static bool lower_stmt(FunctionCtx* f, int64_t node_id) {
       int64_t a = 0;
       if (json_get_i64(alignv, &a) && a > 0) LLVMSetAlignment(st, (unsigned)a);
     }
+    JsonValue* volv = json_obj_get(n->fields, "vol");
+    if (volv && volv->type == JSON_BOOL) LLVMSetVolatile(st, volv->v.b ? 1 : 0);
     return true;
   }
 
@@ -2693,10 +2778,24 @@ static bool lower_stmt(FunctionCtx* f, int64_t node_id) {
       if (ov && strcmp(ov, "allow") == 0) use_memmove = true;
     }
 
-    // Note: overlap="disallow" is specified as a deterministic trap; currently lowered as memcpy (no trap).
     if (use_memmove) {
       LLVMBuildMemMove(f->builder, dst, align_dst, src, align_src, len);
     } else {
+      // Deterministic trap on overlapping ranges: overlap = len!=0 && (dst < src+len) && (src < dst+len).
+      unsigned ptr_bits = (unsigned)(sizeof(void*) * 8u);
+      LLVMTypeRef ip = LLVMIntTypeInContext(f->ctx, ptr_bits);
+      LLVMValueRef dst_i = LLVMBuildPtrToInt(f->builder, dst, ip, "dst.i");
+      LLVMValueRef src_i = LLVMBuildPtrToInt(f->builder, src, ip, "src.i");
+      LLVMValueRef len_i = LLVMBuildTruncOrBitCast(f->builder, len, ip, "len.i");
+      LLVMValueRef z = LLVMConstInt(ip, 0, 0);
+      LLVMValueRef nz = LLVMBuildICmp(f->builder, LLVMIntNE, len_i, z, "len.nz");
+      LLVMValueRef src_end = LLVMBuildAdd(f->builder, src_i, len_i, "src.end");
+      LLVMValueRef dst_end = LLVMBuildAdd(f->builder, dst_i, len_i, "dst.end");
+      LLVMValueRef c1 = LLVMBuildICmp(f->builder, LLVMIntULT, dst_i, src_end, "ov.c1");
+      LLVMValueRef c2 = LLVMBuildICmp(f->builder, LLVMIntULT, src_i, dst_end, "ov.c2");
+      LLVMValueRef ov = LLVMBuildAnd(f->builder, c1, c2, "ov");
+      LLVMValueRef trap = LLVMBuildAnd(f->builder, nz, ov, "ov.trap");
+      if (!emit_trap_if(f, trap)) return false;
       LLVMBuildMemCpy(f->builder, dst, align_dst, src, align_src, len);
     }
     return true;
