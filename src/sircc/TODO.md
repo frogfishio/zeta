@@ -11,7 +11,10 @@ This TODO is organized as milestones. Each milestone should end with:
 
 - [ ] CI build matrix (macOS, Linux) with cached LLVM install/docs
 - [x] `sircc --version` and `sircc --help` (basic)
-- [ ] Deterministic builds: pin target triple + data layout reporting (`--print-target`)
+- [ ] Deterministic builds: pin target triple + data layout reporting
+  - [x] `sircc --print-target` prints `triple`, `data_layout`, `endianness`, `ptrBits`
+  - [x] Codegen always sets module `target triple` + `datalayout` (opt override > `meta.ext.target.triple` > host)
+  - [ ] Make “pinned triple” a producer requirement for reproducible artifacts (docs + validator)
 - [x] Add `--dump-records` (quick parse trace)
 - [x] Add `--verify-only` (parse + validate + report, no codegen)
 
@@ -55,7 +58,7 @@ This TODO is organized as milestones. Each milestone should end with:
 - [ ] Pass pipeline: verify, minimal canonicalization, optional `-O{0,1,2,3}`
 
 ### 2.3 Linking and output
-- [ ] `--emit-llvm`, `--emit-obj`, default executable
+- [x] `--emit-llvm`, `--emit-obj`, default executable
 - [ ] Cross-platform link driver strategy (clang/lld/cc) with `--linker` and `--ldflags`
 - [ ] Emit static libs / shared libs (later): `--emit-lib`
 
@@ -99,20 +102,21 @@ Implement in the same order as below (earlier items unblock later ones). Each bu
 
 ### 3.10 Address calculation and layout (pure; target-explicit) — 3
 - [x] `ptr.offset`, `ptr.alignof`, `ptr.sizeof` (implemented for `node.tag`; current layout uses a deterministic host-layout subset: prim sizes + host `sizeof(void*)`, plus `type.kind:"array"`/`"ptr"` recursion; TODO: wire real `unit.target.ptrBits`/data-layout reporting)
+  - [x] Pointer size/width now derived from selected target triple (not host `sizeof(void*)*8`)
 
 ### 3.11 Memory effects — 10
 - [x] `load.*` / `store.*` baseline for ints/floats/ptr (supports `align` + `vol`; **if `align` omitted we default to 1 to avoid implicit UB**; float loads/stores canonicalize NaNs)
-- [x] `mem.copy` / `mem.fill` (overlap=\"allow\" -> memmove; overlap=\"disallow\" -> runtime overlap check + deterministic trap)
+- [x] `mem.copy` / `mem.fill` (overlap=\"allow\" -> memmove; overlap=\"disallow\" -> runtime overlap check + deterministic trap; `align*` must be >0 when present; `overlap` is a closed set)
 - [x] `alloca` (mnemonic-style: `fields.ty` + `flags:{count (i64/ref), align, zero}`) → `ptr`
 - [x] `eff.fence` with mode validation (`relaxed` is a no-op; others lower to LLVM fence)
-- [ ] Remaining target-specified alignment/trapping semantics for loads/stores/mem ops (no implicit UB)
+- [x] Remaining target-specified alignment/trapping semantics for loads/stores/mem ops (no implicit UB): validate align is power-of-two and trap on misaligned access when `align>1`
 
 ### 3.12 Calls (effects) — 2
-- [ ] `call` with signature/type checking (implemented: direct `call` to referenced `fn` node; validates arg count/types for non-varargs and pointer-arg bitcasts; TODO: indirect calls + richer coercions)
-- [ ] `term.ret` / `term.unreachable` (or the table’s exact terminators) with CFG validation (implemented: `term.ret`, `term.unreachable`, `term.trap`)
+- [x] `call` with signature/type checking (direct calls + `call.indirect` with explicit `fields.sig` fn type; validates arg count/types for non-varargs and pointer-arg bitcasts)
+- [x] `term.ret` / `term.unreachable` (or the table’s exact terminators) with CFG validation (implemented: `term.ret`, `term.unreachable`, `term.trap`)
 
 ### 3.13 Control flow (terminators) — 7
-- [ ] `term.br`, `term.condbr`, `term.switch`, etc. (exact names per table) (implemented: `term.br`, `term.cbr`, `term.switch` in CFG-form `fn`, plus block args/params via `bparam` PHIs; TODO: `term.invoke`/`term.resume` and ptr scrut)
+- [x] `term.br`, `term.condbr`, `term.switch`, etc. (exact names per table) (implemented: `term.br`, `term.condbr` (alias `term.cbr`), `term.switch` in CFG-form `fn`, plus block args/params via `bparam` PHIs; gated `term.invoke`/`term.resume` remain Milestone 4)
 - [ ] Enforce “no implicit fallthrough” rule (every block must end in a terminator) (implemented in lowering + `--verify-only` CFG validator)
 
 ## Milestone 4 — Mnemonics: Feature-gated packages

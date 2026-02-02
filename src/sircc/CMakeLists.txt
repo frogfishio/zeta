@@ -73,8 +73,18 @@ add_test(
 )
 
 add_test(
+  NAME sircc_verify_call_indirect_ptrsym
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/call_indirect_ptrsym.sir.jsonl
+)
+
+add_test(
   NAME sircc_verify_cfg_if
   COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/cfg_if.sir.jsonl
+)
+
+add_test(
+  NAME sircc_verify_cfg_if_condbr
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/cfg_if_condbr.sir.jsonl
 )
 
 add_test(
@@ -160,6 +170,16 @@ add_test(
 add_test(
   NAME sircc_emit_llvm_load_store_no_align
   COMMAND sircc ${CMAKE_CURRENT_LIST_DIR}/examples/load_store_no_align.sir.jsonl -o ${CMAKE_CURRENT_BINARY_DIR}/load_store_no_align.ll --emit-llvm
+)
+
+add_test(
+  NAME sircc_emit_llvm_call_indirect_ptrsym
+  COMMAND sircc ${CMAKE_CURRENT_LIST_DIR}/examples/call_indirect_ptrsym.sir.jsonl -o ${CMAKE_CURRENT_BINARY_DIR}/call_indirect_ptrsym.ll --emit-llvm
+)
+
+add_test(
+  NAME sircc_emit_llvm_misaligned_load_traps
+  COMMAND sircc ${CMAKE_CURRENT_LIST_DIR}/examples/misaligned_load_traps.sir.jsonl -o ${CMAKE_CURRENT_BINARY_DIR}/misaligned_load_traps.ll --emit-llvm
 )
 
 add_test(

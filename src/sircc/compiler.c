@@ -1047,29 +1047,29 @@ static bool validate_terminator(SirProgram* p, int64_t term_id) {
     return validate_branch_args(p, to_id, json_obj_get(t->fields, "args"));
   }
 
-  if (strcmp(t->tag, "term.cbr") == 0) {
+  if (strcmp(t->tag, "term.cbr") == 0 || strcmp(t->tag, "term.condbr") == 0) {
     if (!t->fields) {
-      errf(p, "sircc: term.cbr missing fields");
+      errf(p, "sircc: %s missing fields", t->tag);
       return false;
     }
     int64_t cond_id = 0;
     if (!parse_node_ref_id(json_obj_get(t->fields, "cond"), &cond_id)) {
-      errf(p, "sircc: term.cbr missing cond ref");
+      errf(p, "sircc: %s missing cond ref", t->tag);
       return false;
     }
     if (!get_node(p, cond_id)) {
-      errf(p, "sircc: term.cbr cond references unknown node %lld", (long long)cond_id);
+      errf(p, "sircc: %s cond references unknown node %lld", t->tag, (long long)cond_id);
       return false;
     }
     JsonValue* thenb = json_obj_get(t->fields, "then");
     JsonValue* elseb = json_obj_get(t->fields, "else");
     if (!thenb || thenb->type != JSON_OBJECT || !elseb || elseb->type != JSON_OBJECT) {
-      errf(p, "sircc: term.cbr requires then/else objects");
+      errf(p, "sircc: %s requires then/else objects", t->tag);
       return false;
     }
     int64_t then_id = 0, else_id = 0;
     if (!parse_node_ref_id(json_obj_get(thenb, "to"), &then_id) || !parse_node_ref_id(json_obj_get(elseb, "to"), &else_id)) {
-      errf(p, "sircc: term.cbr then/else missing to ref");
+      errf(p, "sircc: %s then/else missing to ref", t->tag);
       return false;
     }
     if (!validate_block_params(p, then_id) || !validate_block_params(p, else_id)) return false;
@@ -1496,6 +1496,29 @@ static bool emit_trap_if(FunctionCtx* f, LLVMValueRef cond) {
 
   LLVMPositionBuilderAtEnd(f->builder, cont_bb);
   return true;
+}
+
+static bool emit_trap_if_misaligned(FunctionCtx* f, LLVMValueRef ptr, unsigned align) {
+  if (!f || !ptr) return false;
+  if (align <= 1) return true;
+  if ((align & (align - 1u)) != 0u) {
+    errf(f->p, "sircc: align must be a power of two (got %u)", align);
+    return false;
+  }
+
+  if (LLVMGetTypeKind(LLVMTypeOf(ptr)) != LLVMPointerTypeKind) {
+    errf(f->p, "sircc: internal: alignment check requires ptr");
+    return false;
+  }
+
+  unsigned ptr_bits = f->p->ptr_bits ? f->p->ptr_bits : (unsigned)(sizeof(void*) * 8u);
+  LLVMTypeRef ip = LLVMIntTypeInContext(f->ctx, ptr_bits);
+  LLVMValueRef addr = LLVMBuildPtrToInt(f->builder, ptr, ip, "addr.bits");
+  LLVMValueRef mask = LLVMConstInt(ip, (unsigned long long)(align - 1u), 0);
+  LLVMValueRef low = LLVMBuildAnd(f->builder, addr, mask, "addr.low");
+  LLVMValueRef z = LLVMConstInt(ip, 0, 0);
+  LLVMValueRef bad = LLVMBuildICmp(f->builder, LLVMIntNE, low, z, "misaligned");
+  return emit_trap_if(f, bad);
 }
 
 static bool bind_add(FunctionCtx* f, const char* name, LLVMValueRef v) {
@@ -2253,6 +2276,112 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
     goto done;
   }
 
+  if (strcmp(n->tag, "call.indirect") == 0) {
+    if (!n->fields) {
+      errf(f->p, "sircc: call.indirect node %lld missing fields", (long long)node_id);
+      goto done;
+    }
+
+    int64_t sig_id = 0;
+    if (!parse_type_ref_id(json_obj_get(n->fields, "sig"), &sig_id)) {
+      errf(f->p, "sircc: call.indirect node %lld missing fields.sig (fn type ref)", (long long)node_id);
+      goto done;
+    }
+    LLVMTypeRef callee_fty = lower_type(f->p, f->ctx, sig_id);
+    if (!callee_fty || LLVMGetTypeKind(callee_fty) != LLVMFunctionTypeKind) {
+      errf(f->p, "sircc: call.indirect node %lld fields.sig must reference a fn type", (long long)node_id);
+      goto done;
+    }
+
+    JsonValue* args = json_obj_get(n->fields, "args");
+    if (!args || args->type != JSON_ARRAY || args->v.arr.len < 1) {
+      errf(f->p, "sircc: call.indirect node %lld requires args:[callee_ptr, ...]", (long long)node_id);
+      goto done;
+    }
+
+    int64_t callee_id = 0;
+    if (!parse_node_ref_id(args->v.arr.items[0], &callee_id)) {
+      errf(f->p, "sircc: call.indirect node %lld args[0] must be callee ptr ref", (long long)node_id);
+      goto done;
+    }
+    LLVMValueRef callee = lower_expr(f, callee_id);
+    if (!callee) goto done;
+    if (LLVMGetTypeKind(LLVMTypeOf(callee)) != LLVMPointerTypeKind) {
+      errf(f->p, "sircc: call.indirect node %lld callee must be a ptr", (long long)node_id);
+      goto done;
+    }
+
+    size_t argc = args->v.arr.len - 1;
+    LLVMValueRef* argv = NULL;
+    if (argc) {
+      argv = (LLVMValueRef*)malloc(argc * sizeof(LLVMValueRef));
+      if (!argv) goto done;
+      for (size_t i = 0; i < argc; i++) {
+        int64_t aid = 0;
+        if (!parse_node_ref_id(args->v.arr.items[i + 1], &aid)) {
+          errf(f->p, "sircc: call.indirect node %lld arg[%zu] must be node ref", (long long)node_id, i);
+          free(argv);
+          goto done;
+        }
+        argv[i] = lower_expr(f, aid);
+        if (!argv[i]) {
+          free(argv);
+          goto done;
+        }
+      }
+    }
+
+    unsigned param_count = LLVMCountParamTypes(callee_fty);
+    bool is_varargs = LLVMIsFunctionVarArg(callee_fty) != 0;
+    if (!is_varargs && (unsigned)argc != param_count) {
+      errf(f->p, "sircc: call.indirect node %lld arg count mismatch (got %zu, want %u)", (long long)node_id, argc, param_count);
+      free(argv);
+      goto done;
+    }
+    if ((unsigned)argc < param_count) {
+      errf(f->p, "sircc: call.indirect node %lld missing required args (got %zu, want >= %u)", (long long)node_id, argc, param_count);
+      free(argv);
+      goto done;
+    }
+
+    if (param_count) {
+      LLVMTypeRef* params = (LLVMTypeRef*)malloc(param_count * sizeof(LLVMTypeRef));
+      if (!params) {
+        free(argv);
+        goto done;
+      }
+      LLVMGetParamTypes(callee_fty, params);
+      for (unsigned i = 0; i < param_count; i++) {
+        LLVMTypeRef want = params[i];
+        LLVMTypeRef got = LLVMTypeOf(argv[i]);
+        if (want == got) continue;
+        if (LLVMGetTypeKind(want) == LLVMPointerTypeKind && LLVMGetTypeKind(got) == LLVMPointerTypeKind) {
+          argv[i] = LLVMBuildBitCast(f->builder, argv[i], want, "arg.cast");
+          continue;
+        }
+        free(params);
+        errf(f->p, "sircc: call.indirect node %lld arg[%u] type mismatch", (long long)node_id, i);
+        free(argv);
+        goto done;
+      }
+      free(params);
+    }
+
+    out = LLVMBuildCall2(f->builder, callee_fty, callee, argv, (unsigned)argc, "call");
+    free(argv);
+
+    if (out && n->type_ref) {
+      LLVMTypeRef want = lower_type(f->p, f->ctx, n->type_ref);
+      if (want && want != LLVMTypeOf(out)) {
+        errf(f->p, "sircc: call.indirect node %lld return type does not match type_ref", (long long)node_id);
+        out = NULL;
+        goto done;
+      }
+    }
+
+    goto done;
+  }
+
   if (strncmp(n->tag, "ptr.", 4) == 0) {
     const char* op = n->tag + 4;
     JsonValue* args = n->fields ? json_obj_get(n->fields, "args") : NULL;
@@ -2636,7 +2765,6 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
     if (want_ptr != pty) {
       pval = LLVMBuildBitCast(f->builder, pval, want_ptr, "ld.cast");
     }
-    out = LLVMBuildLoad2(f->builder, el, pval, "load");
     JsonValue* alignv = json_obj_get(n->fields, "align");
     unsigned align = 1;
     if (alignv) {
@@ -2651,6 +2779,12 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
       }
       align = (unsigned)a;
     }
+    if ((align & (align - 1u)) != 0u) {
+      errf(f->p, "sircc: %s node %lld align must be a power of two", n->tag, (long long)node_id);
+      goto done;
+    }
+    if (!emit_trap_if_misaligned(f, pval, align)) goto done;
+    out = LLVMBuildLoad2(f->builder, el, pval, "load");
     LLVMSetAlignment(out, align);
     JsonValue* volv = json_obj_get(n->fields, "vol");
     if (volv && volv->type == JSON_BOOL) LLVMSetVolatile(out, volv->v.b ? 1 : 0);
@@ -2935,7 +3069,6 @@ static bool lower_stmt(FunctionCtx* f, int64_t node_id) {
     if (want_ptr != pty) {
       pval = LLVMBuildBitCast(f->builder, pval, want_ptr, "st.cast");
     }
-    LLVMValueRef st = LLVMBuildStore(f->builder, vval, pval);
     JsonValue* alignv = json_obj_get(n->fields, "align");
     unsigned align = 1;
     if (alignv) {
@@ -2950,6 +3083,12 @@ static bool lower_stmt(FunctionCtx* f, int64_t node_id) {
       }
       align = (unsigned)a;
     }
+    if ((align & (align - 1u)) != 0u) {
+      errf(f->p, "sircc: %s node %lld align must be a power of two", n->tag, (long long)node_id);
+      return false;
+    }
+    if (!emit_trap_if_misaligned(f, pval, align)) return false;
+    LLVMValueRef st = LLVMBuildStore(f->builder, vval, pval);
     LLVMSetAlignment(st, align);
     JsonValue* volv = json_obj_get(n->fields, "vol");
     if (volv && volv->type == JSON_BOOL) LLVMSetVolatile(st, volv->v.b ? 1 : 0);
@@ -3029,9 +3168,29 @@ static bool lower_stmt(FunctionCtx* f, int64_t node_id) {
     }
 
     if (use_memmove) {
+      if ((align_dst & (align_dst - 1u)) != 0u) {
+        errf(f->p, "sircc: mem.copy node %lld flags.alignDst must be a power of two", (long long)node_id);
+        return false;
+      }
+      if ((align_src & (align_src - 1u)) != 0u) {
+        errf(f->p, "sircc: mem.copy node %lld flags.alignSrc must be a power of two", (long long)node_id);
+        return false;
+      }
+      if (!emit_trap_if_misaligned(f, dst, align_dst)) return false;
+      if (!emit_trap_if_misaligned(f, src, align_src)) return false;
       LLVMBuildMemMove(f->builder, dst, align_dst, src, align_src, len);
     } else {
       // Deterministic trap on overlapping ranges: overlap = len!=0 && (dst < src+len) && (src < dst+len).
+      if ((align_dst & (align_dst - 1u)) != 0u) {
+        errf(f->p, "sircc: mem.copy node %lld flags.alignDst must be a power of two", (long long)node_id);
+        return false;
+      }
+      if ((align_src & (align_src - 1u)) != 0u) {
+        errf(f->p, "sircc: mem.copy node %lld flags.alignSrc must be a power of two", (long long)node_id);
+        return false;
+      }
+      if (!emit_trap_if_misaligned(f, dst, align_dst)) return false;
+      if (!emit_trap_if_misaligned(f, src, align_src)) return false;
       unsigned ptr_bits = f->p->ptr_bits ? f->p->ptr_bits : (unsigned)(sizeof(void*) * 8u);
       LLVMTypeRef ip = LLVMIntTypeInContext(f->ctx, ptr_bits);
       LLVMValueRef dst_i = LLVMBuildPtrToInt(f->builder, dst, ip, "dst.i");
@@ -3103,6 +3262,11 @@ static bool lower_stmt(FunctionCtx* f, int64_t node_id) {
       }
     }
 
+    if ((align_dst & (align_dst - 1u)) != 0u) {
+      errf(f->p, "sircc: mem.fill node %lld flags.alignDst must be a power of two", (long long)node_id);
+      return false;
+    }
+    if (!emit_trap_if_misaligned(f, dst, align_dst)) return false;
     LLVMBuildMemSet(f->builder, dst, bytev, len, align_dst);
     return true;
   }
@@ -3302,41 +3466,41 @@ static bool lower_term_cfg(FunctionCtx* f, int64_t node_id) {
     return true;
   }
 
-  if (strcmp(n->tag, "term.cbr") == 0) {
+  if (strcmp(n->tag, "term.cbr") == 0 || strcmp(n->tag, "term.condbr") == 0) {
     if (!n->fields) {
-      errf(f->p, "sircc: term.cbr node %lld missing fields", (long long)node_id);
+      errf(f->p, "sircc: %s node %lld missing fields", n->tag, (long long)node_id);
       return false;
     }
 
     int64_t cond_id = 0;
     if (!parse_node_ref_id(json_obj_get(n->fields, "cond"), &cond_id)) {
-      errf(f->p, "sircc: term.cbr node %lld missing cond ref", (long long)node_id);
+      errf(f->p, "sircc: %s node %lld missing cond ref", n->tag, (long long)node_id);
       return false;
     }
     LLVMValueRef cond = lower_expr(f, cond_id);
     if (!cond) return false;
     if (LLVMGetTypeKind(LLVMTypeOf(cond)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(cond)) != 1) {
-      errf(f->p, "sircc: term.cbr cond must be bool/i1");
+      errf(f->p, "sircc: %s cond must be bool/i1", n->tag);
       return false;
     }
 
     JsonValue* thenb = json_obj_get(n->fields, "then");
     JsonValue* elseb = json_obj_get(n->fields, "else");
     if (!thenb || thenb->type != JSON_OBJECT || !elseb || elseb->type != JSON_OBJECT) {
-      errf(f->p, "sircc: term.cbr node %lld requires then/else objects", (long long)node_id);
+      errf(f->p, "sircc: %s node %lld requires then/else objects", n->tag, (long long)node_id);
       return false;
     }
 
     int64_t then_id = 0;
     int64_t else_id = 0;
     if (!parse_node_ref_id(json_obj_get(thenb, "to"), &then_id) || !parse_node_ref_id(json_obj_get(elseb, "to"), &else_id)) {
-      errf(f->p, "sircc: term.cbr node %lld then/else missing to ref", (long long)node_id);
+      errf(f->p, "sircc: %s node %lld then/else missing to ref", n->tag, (long long)node_id);
       return false;
     }
     LLVMBasicBlockRef then_bb = bb_lookup(f, then_id);
     LLVMBasicBlockRef else_bb = bb_lookup(f, else_id);
     if (!then_bb || !else_bb) {
-      errf(f->p, "sircc: term.cbr node %lld targets unknown blocks", (long long)node_id);
+      errf(f->p, "sircc: %s node %lld targets unknown blocks", n->tag, (long long)node_id);
       return false;
     }
 
@@ -3889,7 +4053,7 @@ static bool lower_functions(SirProgram* p, LLVMContextRef ctx, LLVMModuleRef mod
 
     if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(builder))) {
       // Conservative default: fallthrough returns 0 for integer returns, otherwise void.
-      LLVMTypeRef rty = LLVMGetReturnType(LLVMGetElementType(LLVMTypeOf(fn)));
+      LLVMTypeRef rty = LLVMGetReturnType(LLVMGlobalGetValueType(fn));
       if (LLVMGetTypeKind(rty) == LLVMVoidTypeKind) {
         LLVMBuildRetVoid(builder);
       } else if (LLVMGetTypeKind(rty) == LLVMIntegerTypeKind) {
