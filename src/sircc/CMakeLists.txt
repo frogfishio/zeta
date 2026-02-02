@@ -158,6 +158,11 @@ add_test(
 )
 
 add_test(
+  NAME sircc_emit_llvm_load_store_no_align
+  COMMAND sircc ${CMAKE_CURRENT_LIST_DIR}/examples/load_store_no_align.sir.jsonl -o ${CMAKE_CURRENT_BINARY_DIR}/load_store_no_align.ll --emit-llvm
+)
+
+add_test(
   NAME sircc_verify_reject_cfg_early_term
   COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/cfg_bad_early_term.sir.jsonl
 )

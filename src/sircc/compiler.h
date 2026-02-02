@@ -19,6 +19,8 @@ typedef struct SirccOptions {
   const char* target_triple;
   bool verify_only;
   bool dump_records;
+  bool print_target;
 } SirccOptions;
 
 bool sircc_compile(const SirccOptions* opt);
+bool sircc_print_target(const char* triple);

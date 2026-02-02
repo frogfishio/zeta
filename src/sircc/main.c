@@ -13,6 +13,7 @@ static void usage(FILE* out) {
           "  sircc <input.sir.jsonl> -o <output> [--emit-llvm|--emit-obj] [--clang <path>] [--target-triple <triple>]\n"
           "  sircc --verify-only <input.sir.jsonl>\n"
           "  sircc --dump-records --verify-only <input.sir.jsonl>\n"
+          "  sircc --print-target [--target-triple <triple>]\n"
           "  sircc --version\n");
 }
 
@@ -25,6 +26,7 @@ int main(int argc, char** argv) {
       .target_triple = NULL,
       .verify_only = false,
       .dump_records = false,
+      .print_target = false,
   };
 
   for (int i = 1; i < argc; i++) {
@@ -44,6 +46,10 @@ int main(int argc, char** argv) {
     }
     if (strcmp(a, "--dump-records") == 0) {
       opt.dump_records = true;
+      continue;
+    }
+    if (strcmp(a, "--print-target") == 0) {
+      opt.print_target = true;
       continue;
     }
     if (strcmp(a, "--emit-llvm") == 0) {
@@ -92,6 +98,10 @@ int main(int argc, char** argv) {
     fprintf(stderr, "sircc: unexpected argument: %s\n", a);
     usage(stderr);
     return 2;
+  }
+
+  if (opt.print_target) {
+    return sircc_print_target(opt.target_triple) ? 0 : 1;
   }
 
   if (!opt.input_path) {

@@ -2577,10 +2577,12 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
     }
     out = LLVMBuildLoad2(f->builder, el, pval, "load");
     JsonValue* alignv = json_obj_get(n->fields, "align");
+    unsigned align = 1;
     if (alignv) {
       int64_t a = 0;
-      if (json_get_i64(alignv, &a) && a > 0) LLVMSetAlignment(out, (unsigned)a);
+      if (json_get_i64(alignv, &a) && a > 0) align = (unsigned)a;
     }
+    LLVMSetAlignment(out, align);
     JsonValue* volv = json_obj_get(n->fields, "vol");
     if (volv && volv->type == JSON_BOOL) LLVMSetVolatile(out, volv->v.b ? 1 : 0);
     if (LLVMGetTypeKind(el) == LLVMFloatTypeKind || LLVMGetTypeKind(el) == LLVMDoubleTypeKind) {
@@ -2866,10 +2868,12 @@ static bool lower_stmt(FunctionCtx* f, int64_t node_id) {
     }
     LLVMValueRef st = LLVMBuildStore(f->builder, vval, pval);
     JsonValue* alignv = json_obj_get(n->fields, "align");
+    unsigned align = 1;
     if (alignv) {
       int64_t a = 0;
-      if (json_get_i64(alignv, &a) && a > 0) LLVMSetAlignment(st, (unsigned)a);
+      if (json_get_i64(alignv, &a) && a > 0) align = (unsigned)a;
     }
+    LLVMSetAlignment(st, align);
     JsonValue* volv = json_obj_get(n->fields, "vol");
     if (volv && volv->type == JSON_BOOL) LLVMSetVolatile(st, volv->v.b ? 1 : 0);
     return true;
@@ -3372,6 +3376,50 @@ static bool emit_module_obj(LLVMModuleRef mod, const char* triple, const char* o
     return false;
   }
 
+  LLVMDisposeTargetMachine(tm);
+  if (!triple) LLVMDisposeMessage((char*)use_triple);
+  return true;
+}
+
+bool sircc_print_target(const char* triple) {
+  if (LLVMInitializeNativeTarget() != 0) {
+    errf(NULL, "sircc: LLVMInitializeNativeTarget failed");
+    return false;
+  }
+  LLVMInitializeNativeAsmPrinter();
+
+  char* err = NULL;
+  const char* use_triple = triple ? triple : LLVMGetDefaultTargetTriple();
+  LLVMTargetRef target = NULL;
+  if (LLVMGetTargetFromTriple(use_triple, &target, &err) != 0) {
+    errf(NULL, "sircc: target triple '%s' unsupported: %s", use_triple, err ? err : "(unknown)");
+    LLVMDisposeMessage(err);
+    if (!triple) LLVMDisposeMessage((char*)use_triple);
+    return false;
+  }
+
+  LLVMTargetMachineRef tm =
+      LLVMCreateTargetMachine(target, use_triple, "generic", "", LLVMCodeGenLevelDefault, LLVMRelocDefault, LLVMCodeModelDefault);
+  if (!tm) {
+    errf(NULL, "sircc: failed to create target machine");
+    if (!triple) LLVMDisposeMessage((char*)use_triple);
+    return false;
+  }
+
+  LLVMTargetDataRef td = LLVMCreateTargetDataLayout(tm);
+  char* dl_str = LLVMCopyStringRepOfTargetData(td);
+
+  unsigned ptr_bytes = LLVMPointerSize(td);
+  unsigned ptr_bits = ptr_bytes * 8u;
+  const char* endian = (dl_str && dl_str[0] == 'E') ? "big" : "little";
+
+  printf("triple: %s\n", use_triple);
+  printf("data_layout: %s\n", dl_str ? dl_str : "(null)");
+  printf("endianness: %s\n", endian);
+  printf("ptrBits: %u\n", ptr_bits);
+
+  LLVMDisposeMessage(dl_str);
+  LLVMDisposeTargetData(td);
   LLVMDisposeTargetMachine(tm);
   if (!triple) LLVMDisposeMessage((char*)use_triple);
   return true;
