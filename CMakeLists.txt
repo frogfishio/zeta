@@ -44,7 +44,8 @@ add_custom_target(dist_sircc
   COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:sircc> ${SIR_DIST_BIN_OS}/sircc
 
   # docs
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/docs/src.md ${SIR_DIST_DOC}/src.md
+  COMMAND ${CMAKE_COMMAND} -E rm -f ${SIR_DIST_DOC}/src.md
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/docs/src.md ${SIR_DIST_DOC}/sircc.md
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/docs/test.md ${SIR_DIST_TEST}/README.md
 
   # normative JSONL examples (subset)

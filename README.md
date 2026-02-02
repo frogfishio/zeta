@@ -49,7 +49,7 @@ After building `dist`, you can hand the whole `./dist/` folder to alpha users. I
 
 - `dist/bin/<os>/sircc` (JSONL → native)
 - `dist/bin/<os>/sirc` (optional, if built with `-DSIR_ENABLE_SIRC=ON`) (`.sir` → JSONL)
-- `dist/doc/src.md` and `dist/doc/sirc.md`
+- `dist/doc/sircc.md` and `dist/doc/sirc.md`
 - `dist/test/examples/` (paired `.sir` and `.sir.jsonl` examples)
 
 Quick run (macOS example path):
