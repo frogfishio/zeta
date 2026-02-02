@@ -148,14 +148,18 @@ static void errf(SirProgram* p, const char* fmt, ...) {
         line = sr->line;
         col = sr->col;
       }
-    } else if (p->cur_path && p->cur_line) {
+    } else if (p->cur_path) {
       file = p->cur_path;
       line = (int64_t)p->cur_line;
     }
 
-    if (file && line > 0) {
-      if (col > 0) fprintf(stderr, "%s:%lld:%lld: ", file, (long long)line, (long long)col);
-      else fprintf(stderr, "%s:%lld: ", file, (long long)line);
+    if (file) {
+      if (line > 0) {
+        if (col > 0) fprintf(stderr, "%s:%lld:%lld: ", file, (long long)line, (long long)col);
+        else fprintf(stderr, "%s:%lld: ", file, (long long)line);
+      } else {
+        fprintf(stderr, "%s: ", file);
+      }
     }
   }
   vfprintf(stderr, fmt, ap);
@@ -746,9 +750,11 @@ static bool parse_node_record(SirProgram* p, JsonValue* obj) {
 }
 
 static bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_path) {
+  p->cur_path = input_path;
+  p->cur_line = 0;
   FILE* f = fopen(input_path, "rb");
   if (!f) {
-    errf(NULL, "sircc: failed to open %s: %s", input_path, strerror(errno));
+    errf(p, "sircc: failed to open: %s", strerror(errno));
     return false;
   }
 
@@ -3607,10 +3613,10 @@ static bool lower_term_cfg(FunctionCtx* f, int64_t node_id) {
   return false;
 }
 
-static bool emit_module_ir(LLVMModuleRef mod, const char* out_path) {
+static bool emit_module_ir(SirProgram* p, LLVMModuleRef mod, const char* out_path) {
   char* err = NULL;
   if (LLVMPrintModuleToFile(mod, out_path, &err) != 0) {
-    errf(NULL, "sircc: failed to write LLVM IR: %s", err ? err : "(unknown)");
+    errf(p, "sircc: failed to write LLVM IR: %s", err ? err : "(unknown)");
     LLVMDisposeMessage(err);
     return false;
   }
@@ -3651,14 +3657,14 @@ static bool init_target_for_module(SirProgram* p, LLVMModuleRef mod, const char*
   return true;
 }
 
-static bool emit_module_obj(LLVMModuleRef mod, const char* triple, const char* out_path) {
+static bool emit_module_obj(SirProgram* p, LLVMModuleRef mod, const char* triple, const char* out_path) {
   llvm_init_targets_once();
 
   char* err = NULL;
   const char* use_triple = triple ? triple : LLVMGetDefaultTargetTriple();
   LLVMTargetRef target = NULL;
   if (LLVMGetTargetFromTriple(use_triple, &target, &err) != 0) {
-    errf(NULL, "sircc: target triple '%s' unsupported: %s", use_triple, err ? err : "(unknown)");
+    errf(p, "sircc: target triple '%s' unsupported: %s", use_triple, err ? err : "(unknown)");
     LLVMDisposeMessage(err);
     if (!triple) LLVMDisposeMessage((char*)use_triple);
     return false;
@@ -3668,7 +3674,7 @@ static bool emit_module_obj(LLVMModuleRef mod, const char* triple, const char* o
       LLVMCreateTargetMachine(target, use_triple, "generic", "", LLVMCodeGenLevelDefault, LLVMRelocDefault,
                               LLVMCodeModelDefault);
   if (!tm) {
-    errf(NULL, "sircc: failed to create target machine");
+    errf(p, "sircc: failed to create target machine");
     if (!triple) LLVMDisposeMessage((char*)use_triple);
     return false;
   }
@@ -3681,7 +3687,7 @@ static bool emit_module_obj(LLVMModuleRef mod, const char* triple, const char* o
   LLVMDisposeTargetData(td);
 
   if (LLVMTargetMachineEmitToFile(tm, mod, (char*)out_path, LLVMObjectFile, &err) != 0) {
-    errf(NULL, "sircc: failed to emit object: %s", err ? err : "(unknown)");
+    errf(p, "sircc: failed to emit object: %s", err ? err : "(unknown)");
     LLVMDisposeMessage(err);
     LLVMDisposeTargetMachine(tm);
     if (!triple) LLVMDisposeMessage((char*)use_triple);
@@ -3733,12 +3739,12 @@ bool sircc_print_target(const char* triple) {
   return true;
 }
 
-static bool run_clang_link(const char* clang_path, const char* obj_path, const char* out_path) {
+static bool run_clang_link(SirProgram* p, const char* clang_path, const char* obj_path, const char* out_path) {
   const char* clang = clang_path ? clang_path : "clang";
 
   pid_t pid = fork();
   if (pid < 0) {
-    errf(NULL, "sircc: fork failed: %s", strerror(errno));
+    errf(p, "sircc: fork failed: %s", strerror(errno));
     return false;
   }
   if (pid == 0) {
@@ -3747,11 +3753,11 @@ static bool run_clang_link(const char* clang_path, const char* obj_path, const c
   }
   int st = 0;
   if (waitpid(pid, &st, 0) < 0) {
-    errf(NULL, "sircc: waitpid failed: %s", strerror(errno));
+    errf(p, "sircc: waitpid failed: %s", strerror(errno));
     return false;
   }
   if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) {
-    errf(NULL, "sircc: clang failed (exit=%d)", WIFEXITED(st) ? WEXITSTATUS(st) : 1);
+    errf(p, "sircc: clang failed (exit=%d)", WIFEXITED(st) ? WEXITSTATUS(st) : 1);
     return false;
   }
   return true;
@@ -4092,6 +4098,14 @@ bool sircc_compile(const SirccOptions* opt) {
     goto done;
   }
 
+  // After parsing, clear record-local location so later errors don't point at the last JSONL line.
+  p.cur_path = opt->input_path;
+  p.cur_line = 0;
+  p.cur_src_ref = -1;
+  p.cur_loc.unit = NULL;
+  p.cur_loc.line = 0;
+  p.cur_loc.col = 0;
+
   const char* use_triple = opt->target_triple ? opt->target_triple : p.target_triple;
   if (!use_triple) {
     owned_triple = LLVMGetDefaultTargetTriple();
@@ -4117,7 +4131,7 @@ bool sircc_compile(const SirccOptions* opt) {
 
   char* verr = NULL;
   if (LLVMVerifyModule(mod, LLVMReturnStatusAction, &verr) != 0) {
-    errf(NULL, "sircc: LLVM verification failed: %s", verr ? verr : "(unknown)");
+    errf(&p, "sircc: LLVM verification failed: %s", verr ? verr : "(unknown)");
     LLVMDisposeMessage(verr);
     LLVMDisposeModule(mod);
     LLVMContextDispose(ctx);
@@ -4126,14 +4140,14 @@ bool sircc_compile(const SirccOptions* opt) {
   }
 
   if (opt->emit == SIRCC_EMIT_LLVM_IR) {
-    ok = emit_module_ir(mod, opt->output_path);
+    ok = emit_module_ir(&p, mod, opt->output_path);
     LLVMDisposeModule(mod);
     LLVMContextDispose(ctx);
     goto done;
   }
 
   if (opt->emit == SIRCC_EMIT_OBJ) {
-    ok = emit_module_obj(mod, use_triple, opt->output_path);
+    ok = emit_module_obj(&p, mod, use_triple, opt->output_path);
     LLVMDisposeModule(mod);
     LLVMContextDispose(ctx);
     goto done;
@@ -4141,14 +4155,14 @@ bool sircc_compile(const SirccOptions* opt) {
 
   char tmp_obj[4096];
   if (!make_tmp_obj(tmp_obj, sizeof(tmp_obj))) {
-    errf(NULL, "sircc: failed to create temporary object path");
+    errf(&p, "sircc: failed to create temporary object path");
     LLVMDisposeModule(mod);
     LLVMContextDispose(ctx);
     ok = false;
     goto done;
   }
 
-  ok = emit_module_obj(mod, use_triple, tmp_obj);
+  ok = emit_module_obj(&p, mod, use_triple, tmp_obj);
   LLVMDisposeModule(mod);
   LLVMContextDispose(ctx);
   if (!ok) {
@@ -4156,7 +4170,7 @@ bool sircc_compile(const SirccOptions* opt) {
     goto done;
   }
 
-  ok = run_clang_link(opt->clang_path, tmp_obj, opt->output_path);
+  ok = run_clang_link(&p, opt->clang_path, tmp_obj, opt->output_path);
   unlink(tmp_obj);
 
 done:

@@ -11,6 +11,7 @@ This TODO is organized as milestones. Each milestone should end with:
 
 - [ ] CI build matrix (macOS, Linux) with cached LLVM install/docs
 - [x] `sircc --version` and `sircc --help` (basic)
+- [x] `dist` bundle target: `dist/bin/<os>`, `dist/doc/src.md`, `dist/test/examples`
 - [ ] Deterministic builds: pin target triple + data layout reporting
   - [x] `sircc --print-target` prints `triple`, `data_layout`, `endianness`, `ptrBits`
   - [x] Codegen always sets module `target triple` + `datalayout` (opt override > `meta.ext.target.triple` > host)
@@ -88,7 +89,7 @@ Implement in the same order as below (earlier items unblock later ones). Each bu
 
 ### 3.6 Floating point (pure, deterministic) — 10
 - [x] `f32/f64`: `add sub mul div neg abs sqrt min max` (implemented for `node.tag`)
-- [ ] Canonical NaN rules (no payload propagation): implemented by canonicalizing NaN results to qNaN bits; TODO: add IR-based tests
+- [x] Canonical NaN rules (no payload propagation): canonicalize NaN results to qNaN bits; IR-based test added (`float_nan_canon_ops.sir.jsonl`)
   - [x] Float comparisons and conversions (implemented for `node.tag`: `f32/f64.cmp.*`, `f32/f64.from_i{32,64}.{s,u}`, `i{32,64}.trunc_sat_f{32,64}.{s,u}`)
 
 ### 3.7 Value-level conditional (pure) — 1
@@ -177,7 +178,8 @@ Each package must be fully skippable unless its `unit.features` gate is enabled.
 - [ ] Generate a machine-readable “mnemonic support table” from `mnemonics.html` and compare against implemented handlers
 - [ ] Provide one example `.sir.jsonl` per mnemonic family (small, focused)
 - [ ] Conformance runner: compile + execute (where possible) and compare outputs
+  - [x] Minimal CTest conformance set: compile+run core examples and assert exit codes (mem/cfg smoke)
 - [ ] Final hardening:
   - [ ] No UB surprises: all traps/saturation explicit
   - [ ] Determinism: NaN canonicalization, stable switch ordering, stable layout reporting
-  - [ ] Diagnostics: include `src_ref/loc` in every error when available
+  - [x] Diagnostics: include `src_ref/loc` in every error when available (and always prefix at least the input file for non-record errors)

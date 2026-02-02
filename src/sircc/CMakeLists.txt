@@ -42,6 +42,51 @@ target_compile_options(sircc PRIVATE
   -Werror
 )
 
+#
+# dist bundle (copy-pasteable for alpha users)
+#
+set(SIRCC_DIST_ROOT ${CMAKE_SOURCE_DIR}/dist)
+set(SIRCC_DIST_BIN ${SIRCC_DIST_ROOT}/bin)
+set(SIRCC_DIST_DOC ${SIRCC_DIST_ROOT}/doc)
+set(SIRCC_DIST_TEST ${SIRCC_DIST_ROOT}/test)
+set(SIRCC_DIST_TEST_EXAMPLES ${SIRCC_DIST_TEST}/examples)
+
+set(SIRCC_DIST_OS "${CMAKE_SYSTEM_NAME}")
+if(SIRCC_DIST_OS STREQUAL "Darwin")
+  set(SIRCC_DIST_OS "macos")
+elseif(SIRCC_DIST_OS STREQUAL "Linux")
+  set(SIRCC_DIST_OS "linux")
+elseif(SIRCC_DIST_OS STREQUAL "Windows")
+  set(SIRCC_DIST_OS "windows")
+endif()
+
+set(SIRCC_DIST_BIN_OS ${SIRCC_DIST_BIN}/${SIRCC_DIST_OS})
+
+add_custom_target(dist
+  DEPENDS sircc
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${SIRCC_DIST_BIN_OS}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${SIRCC_DIST_DOC}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${SIRCC_DIST_TEST_EXAMPLES}
+
+  # binaries (copy + alias)
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:sircc> ${SIRCC_DIST_BIN_OS}/sircc
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:sircc> ${SIRCC_DIST_BIN_OS}/sirc
+
+  # docs
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/docs/src.md ${SIRCC_DIST_DOC}/src.md
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/docs/test.md ${SIRCC_DIST_TEST}/README.md
+
+  # normative examples (subset)
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/examples/add.sir.jsonl ${SIRCC_DIST_TEST_EXAMPLES}/add.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/examples/mem_copy_fill.sir.jsonl ${SIRCC_DIST_TEST_EXAMPLES}/mem_copy_fill.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/examples/cfg_if.sir.jsonl ${SIRCC_DIST_TEST_EXAMPLES}/cfg_if.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/examples/cfg_switch.sir.jsonl ${SIRCC_DIST_TEST_EXAMPLES}/cfg_switch.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/examples/float_nan_canon_ops.sir.jsonl ${SIRCC_DIST_TEST_EXAMPLES}/float_nan_canon_ops.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/examples/call_indirect_ptrsym.sir.jsonl ${SIRCC_DIST_TEST_EXAMPLES}/call_indirect_ptrsym.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/examples/misaligned_load_traps.sir.jsonl ${SIRCC_DIST_TEST_EXAMPLES}/misaligned_load_traps.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/examples/ptr_layout.sir.jsonl ${SIRCC_DIST_TEST_EXAMPLES}/ptr_layout.sir.jsonl
+)
+
 add_test(
   NAME sircc_verify_add
   COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/add.sir.jsonl
@@ -118,6 +163,46 @@ add_test(
 )
 
 add_test(
+  NAME sircc_run_mem_copy_fill
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/mem_copy_fill.sir.jsonl
+    -DEXE=${CMAKE_CURRENT_BINARY_DIR}/mem_copy_fill.exe
+    -DEXPECT=42
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/run_and_expect_exit.cmake
+)
+
+add_test(
+  NAME sircc_run_mem_stack
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/mem_stack.sir.jsonl
+    -DEXE=${CMAKE_CURRENT_BINARY_DIR}/mem_stack.exe
+    -DEXPECT=2
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/run_and_expect_exit.cmake
+)
+
+add_test(
+  NAME sircc_run_cfg_if
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/cfg_if.sir.jsonl
+    -DEXE=${CMAKE_CURRENT_BINARY_DIR}/cfg_if.exe
+    -DEXPECT=222
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/run_and_expect_exit.cmake
+)
+
+add_test(
+  NAME sircc_run_cfg_switch
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/cfg_switch.sir.jsonl
+    -DEXE=${CMAKE_CURRENT_BINARY_DIR}/cfg_switch.exe
+    -DEXPECT=20
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/run_and_expect_exit.cmake
+)
+
+add_test(
   NAME sircc_emit_llvm_ptr_layout
   COMMAND sircc ${CMAKE_CURRENT_LIST_DIR}/examples/ptr_layout.sir.jsonl -o ${CMAKE_CURRENT_BINARY_DIR}/ptr_layout.ll --emit-llvm
 )
@@ -150,6 +235,16 @@ add_test(
 add_test(
   NAME sircc_emit_llvm_float_load_canon
   COMMAND sircc ${CMAKE_CURRENT_LIST_DIR}/examples/float_load_canon.sir.jsonl -o ${CMAKE_CURRENT_BINARY_DIR}/float_load_canon.ll --emit-llvm
+)
+
+add_test(
+  NAME sircc_emit_check_llvm_float_nan_canon_ops
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/float_nan_canon_ops.sir.jsonl
+    -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/float_nan_canon_ops.ll
+    -DPATTERNS=fcmp\ uno\ float;fcmp\ uno\ double;select\ i1;0x7FF8000000000000
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_and_check.cmake
 )
 
 add_test(
