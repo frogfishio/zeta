@@ -1,6 +1,7 @@
 %option noyywrap nodefault yylineno
 
 %{
+#include "sirc_emit.h"
 #include "sir.tab.h"
 #include <string.h>
 #include <stdlib.h>
@@ -134,13 +135,12 @@ void yyerror(const char* s);
 
 WS          [ \t\r]+
 NL          \n
-ID          [A-Za-z_.$][A-Za-z0-9_.$]*
+ID          [A-Za-z_$][A-Za-z0-9_$]*
 INT10       -?[0-9][0-9_]*
 INTHEX      -?0[xX][0-9A-Fa-f][0-9A-Fa-f_]*
 INTBIN      -?0[bB][01][01_]*
 STR         \"([^\"\\\n]|\\.)*\"
 STR_UNTERM1  \"([^\"\\\n]|\\.)*\n
-STR_UNTERM2  \"([^\"\\\n]|\\.)*<<EOF>>
 
 %%
 
@@ -155,12 +155,6 @@ STR_UNTERM2  \"([^\"\\\n]|\\.)*<<EOF>>
                               return T_NL;
                             }
 
-{STR_UNTERM2}               {
-                              yyerror("unterminated string literal");
-                              /* treat EOF after opening quote as end of line */
-                              return 0;
-                            }
-
 {STR}                       {
                               yylval.s = unescape_c_string(yytext);
                               col_advance();
@@ -171,7 +165,6 @@ STR_UNTERM2  \"([^\"\\\n]|\\.)*<<EOF>>
 {INTHEX}                     { yylval.i = parse_int_literal(yytext); col_advance(); return T_INT; }
 {INT10}                      { yylval.i = parse_int_literal(yytext); col_advance(); return T_INT; }
 
-/* keywords */
 "unit"                      { col_advance(); return T_UNIT; }
 "target"                    { col_advance(); return T_TARGET; }
 "features"                  { col_advance(); return T_FEATURES; }
@@ -194,14 +187,13 @@ STR_UNTERM2  \"([^\"\\\n]|\\.)*<<EOF>>
 "then"                      { col_advance(); return T_THEN; }
 "else"                      { col_advance(); return T_ELSE; }
 "value"                     { col_advance(); return T_VALUE; }
+"true"                      { yylval.b = 1; col_advance(); return T_BOOL; }
+"false"                     { yylval.b = 0; col_advance(); return T_BOOL; }
 
-/* multi-char operators */
 "->"                        { col_advance(); return T_ARROW; }
 
-/* identifiers */
 {ID}                        { yylval.s = dup_yytext(); col_advance(); return T_ID; }
 
-/* single-char tokens */
 "("                         { col_advance(); return '('; }
 ")"                         { col_advance(); return ')'; }
 "["                         { col_advance(); return '['; }
@@ -229,5 +221,7 @@ STR_UNTERM2  \"([^\"\\\n]|\\.)*<<EOF>>
                               col_advance();
                               return yytext[0];
                             }
+
+<<EOF>>                     { return 0; }
 
 %%

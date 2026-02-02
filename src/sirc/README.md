@@ -44,6 +44,26 @@ The text form is intentionally small:
 
 You should be able to read the program top-to-bottom without needing to understand the JSONL encoding.
 
+## Build + run
+
+SIRC uses flex/bison. On macOS, prefer the Homebrew versions (Apple’s `/usr/bin/bison` is typically very old):
+
+- `brew install bison flex`
+
+Standalone build (from repo root):
+
+- `cmake -S src/sirc -B build/sirc`
+- `cmake --build build/sirc`
+
+Try it:
+
+- `./build/sirc/sirc src/sirc/examples/hello.sir -o /tmp/hello.sir.jsonl`
+- `./build/sircc/sircc /tmp/hello.sir.jsonl -o /tmp/hello && /tmp/hello`
+
+Note: the current parser/translator is intentionally minimal (enough for extern calls + “hello world”); the big “Specimen program” below is aspirational and not fully supported yet.
+
+Tip: use `target host` in the `unit` header to let the backend pick the default LLVM host triple.
+
 ## How lowering works (roughly)
 
 For a given input file, SIRC typically emits:
@@ -208,4 +228,3 @@ fn main(x:i32, y:i32) -> i32 public
   return clamp_u32(g, 0:i32, 1000:i32)
 end
 ```
-

@@ -1,0 +1,75 @@
+cmake_minimum_required(VERSION 3.20)
+
+# Allow building this directory standalone (useful for quick iteration):
+#   cmake -S src/sirc -B build/sirc && cmake --build build/sirc
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  project(sirc LANGUAGES C)
+  set(CMAKE_C_STANDARD 11)
+  set(CMAKE_C_STANDARD_REQUIRED ON)
+  set(CMAKE_C_EXTENSIONS OFF)
+endif()
+
+# Prefer Homebrew bison/flex on macOS (Apple's system bison is often very old).
+find_program(SIRC_BISON
+  NAMES bison
+  HINTS
+    /opt/homebrew/opt/bison/bin
+    /usr/local/opt/bison/bin
+)
+find_program(SIRC_FLEX
+  NAMES flex
+  HINTS
+    /opt/homebrew/opt/flex/bin
+    /usr/local/opt/flex/bin
+)
+
+if(NOT SIRC_BISON)
+  message(FATAL_ERROR "sirc: bison not found (install via Homebrew: brew install bison)")
+endif()
+if(NOT SIRC_FLEX)
+  message(FATAL_ERROR "sirc: flex not found (install via Homebrew: brew install flex)")
+endif()
+
+set(SIRC_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR})
+set(SIRC_BISON_C ${SIRC_GEN_DIR}/sir.tab.c)
+set(SIRC_BISON_H ${SIRC_GEN_DIR}/sir.tab.h)
+set(SIRC_FLEX_C  ${SIRC_GEN_DIR}/sir.yy.c)
+
+add_custom_command(
+  OUTPUT ${SIRC_BISON_C} ${SIRC_BISON_H}
+  COMMAND ${SIRC_BISON} -d -o ${SIRC_BISON_C} ${CMAKE_CURRENT_LIST_DIR}/sir.y
+  DEPENDS ${CMAKE_CURRENT_LIST_DIR}/sir.y
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT ${SIRC_FLEX_C}
+  COMMAND ${SIRC_FLEX} -o ${SIRC_FLEX_C} ${CMAKE_CURRENT_LIST_DIR}/sir.l
+  DEPENDS ${CMAKE_CURRENT_LIST_DIR}/sir.l ${SIRC_BISON_H}
+  VERBATIM
+)
+
+add_executable(sirc
+  sirc.c
+  ${SIRC_BISON_C}
+  ${SIRC_FLEX_C}
+)
+
+set_source_files_properties(
+  ${SIRC_BISON_C}
+  ${SIRC_FLEX_C}
+  PROPERTIES
+    COMPILE_OPTIONS "-Wno-error;-Wno-unused-function;-Wno-unneeded-internal-declaration"
+)
+
+target_include_directories(sirc PRIVATE
+  ${CMAKE_CURRENT_LIST_DIR}
+  ${SIRC_GEN_DIR}
+)
+
+target_compile_options(sirc PRIVATE
+  -Wall
+  -Wextra
+  -Wpedantic
+  -Werror
+)
