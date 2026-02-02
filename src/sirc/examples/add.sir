@@ -1,0 +1,6 @@
+unit add target host
+
+fn main() -> i32 public
+  return i32.add(40:i32, 2:i32)
+end
+

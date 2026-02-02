@@ -1,0 +1,12 @@
+unit abs_i32 target host
+
+fn abs_i32(x:i32) -> i32 public
+  let isneg: bool = i32.cmp.slt(x, 0:i32)
+  let nx: i32 = i32.neg(x)
+  return select(i32, isneg, nx, x)
+end
+
+fn main(x:i32) -> i32 public
+  return abs_i32(x)
+end
+

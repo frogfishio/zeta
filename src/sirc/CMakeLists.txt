@@ -7,6 +7,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   set(CMAKE_C_STANDARD 11)
   set(CMAKE_C_STANDARD_REQUIRED ON)
   set(CMAKE_C_EXTENSIONS OFF)
+  include(CTest)
 endif()
 
 # Prefer Homebrew bison/flex on macOS (Apple's system bison is often very old).
@@ -73,3 +74,27 @@ target_compile_options(sirc PRIVATE
   -Wpedantic
   -Werror
 )
+
+#
+# Tests (require sircc)
+#
+if(TARGET sircc AND BUILD_TESTING)
+  function(sirc_add_verify_test name input_rel)
+    add_test(
+      NAME ${name}
+      COMMAND ${CMAKE_COMMAND}
+        -DSIRC=$<TARGET_FILE:sirc>
+        -DSIRCC=$<TARGET_FILE:sircc>
+        -DINPUT=${CMAKE_CURRENT_LIST_DIR}/${input_rel}
+        -DOUT=${CMAKE_CURRENT_BINARY_DIR}/${name}.sir.jsonl
+        -P ${CMAKE_CURRENT_LIST_DIR}/tests/run_sirc_then_sircc_verify.cmake
+    )
+  endfunction()
+
+  sirc_add_verify_test(sirc_verify_hello examples/hello.sir)
+  sirc_add_verify_test(sirc_verify_add examples/add.sir)
+  sirc_add_verify_test(sirc_verify_mem_stack examples/mem_stack.sir)
+  sirc_add_verify_test(sirc_verify_mem_copy_fill examples/mem_copy_fill.sir)
+  sirc_add_verify_test(sirc_verify_abs_i32 examples/abs_i32.sir)
+  sirc_add_verify_test(sirc_verify_float_trunc examples/float_trunc.sir)
+endif()

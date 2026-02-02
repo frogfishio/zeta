@@ -7,12 +7,17 @@
 int yylex(void);
 extern int yylineno;
 extern int yycolumn;
-void yyerror(const char* s) { fprintf(stderr, "parse error:%d:%d: %s\n", yylineno, yycolumn, s); }
+void yyerror(const char* s) {
+  fprintf(stderr, "%s:%d:%d: error: %s", sirc_input_path(), sirc_last_line, sirc_last_col, s);
+  if (sirc_last_tok[0]) fprintf(stderr, " (near '%s')", sirc_last_tok);
+  fputc('\n', stderr);
+}
 %}
 
 %union {
   char*         s;
   long long     i;
+  double        d;
   int           b;
   int64_t       ty;
   SircParamList* params;
@@ -24,12 +29,14 @@ void yyerror(const char* s) { fprintf(stderr, "parse error:%d:%d: %s\n", yylinen
 /* tokens with values */
 %token <s>   T_ID T_STRING
 %token <i>   T_INT
+%token <d>   T_FLOAT
 %token <b>   T_BOOL
 
 /* keywords / structural */
 %token T_NL T_ARROW
 %token T_UNIT T_TARGET
 %token T_FN T_PUBLIC T_EXTERN T_END T_RETURN T_LET
+%token T_SELECT
 
 /* declared in lexer (unused for now, but must exist) */
 %token T_FEATURES T_SIG T_DO
@@ -41,9 +48,9 @@ void yyerror(const char* s) { fprintf(stderr, "parse error:%d:%d: %s\n", yylinen
 %type <ty> type
 %type <params> params_opt params
 %type <stmts> stmt_list
-%type <node> stmt let_stmt return_stmt expr_stmt
+%type <node> stmt let_stmt return_stmt expr_stmt select_expr
 %type <args> args_opt args
-%type <node> expr value int_lit dotted_or_call
+%type <node> expr value int_lit float_lit dotted_or_call
 %type <s> dotted_name
 
 %start program
@@ -146,6 +153,12 @@ expr_stmt
 
 expr
   : value                    { $$ = $1; }
+  | select_expr              { $$ = $1; }
+  ;
+
+select_expr
+  : T_SELECT '(' nl_star type comma_sep expr comma_sep expr comma_sep expr nl_star ')'
+    { $$ = sirc_select($4, $6, $8, $10); }
   ;
 
 dotted_name
@@ -169,6 +182,7 @@ args
 
 value
   : int_lit                  { $$ = $1; }
+  | float_lit                { $$ = $1; }
   | T_BOOL                   { $$ = sirc_value_bool($1); }
   | T_STRING                 { $$ = sirc_value_string($1); }
   | dotted_or_call           { $$ = $1; }
@@ -177,6 +191,11 @@ value
 int_lit
   : T_INT                    { $$ = sirc_value_int($1); }
   | T_INT ':' type           { $$ = sirc_typed_int($1, $3); }
+  ;
+
+float_lit
+  : T_FLOAT                  { $$ = sirc_value_float($1); }
+  | T_FLOAT ':' type         { $$ = sirc_typed_float($1, $3); }
   ;
 
 dotted_or_call

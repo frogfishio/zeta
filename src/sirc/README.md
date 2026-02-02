@@ -1,11 +1,47 @@
 # SIRC - Sir Compiler
 
-SIRC is the reference **front-end compiler** for **SIR**: it takes a small, readable, line-oriented surface language (shown below) and lowers it into **SIR v1.0 JSONL** — *one JSON object per line*.
+SIRC is the reference compiler for **SIR**.
 
-The intent is simple:
+It compiles a **small, readable, line-oriented language** ("SIRC", shown below) into **SIR v1.0 JSONL** — **one record per line**.
 
-- **Humans write** the compact text form (good DX for authoring and review).
-- **Tools consume** the JSONL stream (stable, strict schema; easy to diff, index, validate, and pipe).
+## Why this exists
+
+Most pipelines eventually want two things at the same time:
+
+- **Human-authored, reviewable code** (so you can write test cases, repros, and small programs without drowning in JSON or raw assembly)
+- **Machine-friendly IR** (so tools can validate, diff, index, cache, and stream it through build steps)
+
+SIR is the contract for tools. SIRC is the ergonomic way to write it.
+
+### The killer feature
+
+**Assembly-like control with mid-level structure + tooling.**
+
+You get:
+
+- **Full control over lowering**: you can see exactly what an abstraction compiles into, tweak it, patternise it, and teach the compiler new/cheaper lowerings.
+- **Typed operations and literals** (e.g. `3:i32`) so width/sign/ABI mistakes become diagnostics.
+- **Structured control flow** when you want it (`return`, blocks, `term.*`) without hand-managing labels.
+- **Streaming IR** you can `cat | grep | jq | diff` — stable and line-addressable.
+- **First-class source mapping + diagnostics** (`src` / `diag`) without side channels.
+
+### Who writes SIRC
+
+- Compiler/back-end authors (reference programs, golden tests, lowering experiments)
+- Tooling and build systems (indexing, caching, linting, validation, reduction)
+- Low-level/perf work where “close to metal” matters but raw ASM/WAT is too brittle
+
+### At a glance
+
+```sir
+unit u0 target wasm32 +agg:v1
+
+fn add(a:i32, b:i32) -> i32 public
+  return i32.add(a, b)
+end
+```
+
+→ lowers into a **typed semantic stream** (SIR JSONL) that other tools can consume.
 
 ## What SIRC produces
 
@@ -63,6 +99,21 @@ Try it:
 Note: the current parser/translator is intentionally minimal (enough for extern calls + “hello world”); the big “Specimen program” below is aspirational and not fully supported yet.
 
 Tip: use `target host` in the `unit` header to let the backend pick the default LLVM host triple.
+
+## Supported subset (current)
+
+This is what we treat as “basic product” right now:
+
+- unit header: `unit <name> target host|<triple> [+feature[:v]]*`
+- functions: `extern fn ...`, `fn ... end`, `public`, `let`, `return`
+- values: identifiers, `true/false`, string literals
+- values: integer literals (`3` and `3:i32`)
+- values: float literals (`1.5`, `1.5:f32`, `1e3:f64`) (emitted as deterministic `const.f32/f64` bit-pattern records)
+- values: decimal float literals (`1.5` and `1.5:f64` / `1.5:f32`) (emitted as deterministic `const.f32/f64` bit-pattern records)
+- calls:
+  - mnemonic calls via dotted names (e.g. `i32.add(a,b)`, `alloca.i32()`, `mem.copy(dst,src,len)`)
+  - `load.<ty>(addr)` / `store.<ty>(addr, value)` (emits proper `fields.addr/value` + inferred `align`)
+  - `select(<ty>, cond, then, else)` (lowers to SIR `select`)
 
 ## How lowering works (roughly)
 

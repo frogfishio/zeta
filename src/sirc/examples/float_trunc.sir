@@ -1,0 +1,7 @@
+unit float_trunc target host
+
+fn main() -> i32 public
+  let x: f64 = f64.add(1.5:f64, 2.25:f64)
+  return i32.trunc_sat_f64.s(x)
+end
+
