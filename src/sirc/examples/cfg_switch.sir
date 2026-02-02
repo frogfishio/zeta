@@ -1,0 +1,25 @@
+unit cfg_switch target host
+
+fn main(x:i32) -> i32 public
+  block entry
+    term.switch scrut:x,
+      cases:[
+        { lit:0:i32, to zero },
+        { lit:1:i32, to one }
+      ],
+      default:def
+  end
+
+  block zero
+    term.ret value:10:i32
+  end
+
+  block one
+    term.ret value:20:i32
+  end
+
+  block def
+    term.ret value:30:i32
+  end
+end
+

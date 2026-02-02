@@ -1,0 +1,21 @@
+unit cfg_join_phi target host
+
+fn main(x:i32) -> i32 public
+  block entry
+    let c: bool = i32.cmp.eq(x, 0:i32)
+    term.cbr cond:c, then:then_blk, else:else_blk
+  end
+
+  block then_blk
+    term.br to join, args:[111:i32]
+  end
+
+  block else_blk
+    term.br to join, args:[222:i32]
+  end
+
+  block join(r:i32)
+    term.ret value:r
+  end
+end
+

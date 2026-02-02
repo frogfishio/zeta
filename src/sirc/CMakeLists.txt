@@ -78,7 +78,7 @@ target_compile_options(sirc PRIVATE
 #
 # Tests (require sircc)
 #
-if(TARGET sircc AND BUILD_TESTING)
+if(TARGET sircc)
   function(sirc_add_verify_test name input_rel)
     add_test(
       NAME ${name}
@@ -96,5 +96,11 @@ if(TARGET sircc AND BUILD_TESTING)
   sirc_add_verify_test(sirc_verify_mem_stack examples/mem_stack.sir)
   sirc_add_verify_test(sirc_verify_mem_copy_fill examples/mem_copy_fill.sir)
   sirc_add_verify_test(sirc_verify_abs_i32 examples/abs_i32.sir)
-  sirc_add_verify_test(sirc_verify_float_trunc examples/float_trunc.sir)
+	  sirc_add_verify_test(sirc_verify_float_trunc examples/float_trunc.sir)
+	  sirc_add_verify_test(sirc_verify_features examples/features.sir)
+	  sirc_add_verify_test(sirc_verify_ptr_layout examples/ptr_layout.sir)
+	  sirc_add_verify_test(sirc_verify_alloca_array examples/alloca_array.sir)
+	  sirc_add_verify_test(sirc_verify_cfg_if examples/cfg_if.sir)
+	  sirc_add_verify_test(sirc_verify_cfg_switch examples/cfg_switch.sir)
+	  sirc_add_verify_test(sirc_verify_cfg_join_phi examples/cfg_join_phi.sir)
 endif()

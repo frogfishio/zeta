@@ -1,0 +1,19 @@
+unit ptr_layout target host
+
+type t_arr4_i32 = array(i32, 4)
+
+fn main(x:i32) -> i32 public
+  ;; q = p + 2 * sizeof(i32)
+  let p: ptr = alloca(t_arr4_i32)
+  let q: ptr = ptr.offset(i32, p, 2:i64)
+
+  store.i32(q, x)
+  let y: i32 = load.i32(q)
+
+  let a: i32 = ptr.alignof(t_arr4_i32)
+  let s: i64 = ptr.sizeof(t_arr4_i32)
+  let s32: i32 = i32.trunc.i64(s)
+
+  let r1: i32 = i32.add(y, a)
+  return i32.add(r1, s32)
+end

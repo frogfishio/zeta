@@ -1,0 +1,10 @@
+unit feats target host +simd:v1
+
+extern fn puts(s:ptr) -> i32
+
+fn main() -> i32 public
+  let msg: ptr = "features ok"
+  let _: i32 = puts(msg)
+  return 0:i32
+end
+

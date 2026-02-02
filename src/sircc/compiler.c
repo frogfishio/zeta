@@ -27,10 +27,21 @@
 static void llvm_init_targets_once(void) {
   static int inited = 0;
   if (inited) return;
-  LLVMInitializeAllTargetInfos();
-  LLVMInitializeAllTargets();
-  LLVMInitializeAllTargetMCs();
-  LLVMInitializeAllAsmPrinters();
+  // Avoid forcing linkage against every LLVM target backend. For the
+  // "product" path (Milestone 3), initializing the native target is enough.
+  // If/when we want a true cross-compiler build, we can add an opt-in mode
+  // that links + initializes all targets.
+  if (LLVMInitializeNativeTarget() != 0) {
+    fprintf(stderr, "sircc: failed to initialize native LLVM target\n");
+    exit(2);
+  }
+  if (LLVMInitializeNativeAsmPrinter() != 0) {
+    fprintf(stderr, "sircc: failed to initialize native LLVM asm printer\n");
+    exit(2);
+  }
+  // The parser isn't strictly required for object/exe emission, but is a cheap
+  // init and keeps future tooling options open.
+  (void)LLVMInitializeNativeAsmParser();
   inited = 1;
 }
 
@@ -2910,6 +2921,28 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
       goto done;
     }
 
+    // Conversions like f32.from_i32.s take integer operands, so handle those
+    // before enforcing float operand types.
+    if (strncmp(op, "from_i", 6) == 0) {
+      if (!a || b) {
+        errf(f->p, "sircc: %s requires args:[x]", n->tag);
+        goto done;
+      }
+      int srcw = 0;
+      char su = 0;
+      if (sscanf(op, "from_i%d.%c", &srcw, &su) != 2 || (srcw != 32 && srcw != 64) || (su != 's' && su != 'u')) {
+        errf(f->p, "sircc: unsupported int->float conversion '%s' in %s", op, n->tag);
+        goto done;
+      }
+      if (LLVMGetTypeKind(LLVMTypeOf(a)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(a)) != (unsigned)srcw) {
+        errf(f->p, "sircc: %s requires i%d operand", n->tag, srcw);
+        goto done;
+      }
+      LLVMTypeRef fty = (width == 32) ? LLVMFloatTypeInContext(f->ctx) : LLVMDoubleTypeInContext(f->ctx);
+      out = (su == 's') ? LLVMBuildSIToFP(f->builder, a, fty, "sitofp") : LLVMBuildUIToFP(f->builder, a, fty, "uitofp");
+      goto done;
+    }
+
     LLVMTypeRef fty = LLVMTypeOf(a);
     if (width == 32 && LLVMGetTypeKind(fty) != LLVMFloatTypeKind) {
       errf(f->p, "sircc: %s expects f32 operands", n->tag);
@@ -3019,25 +3052,6 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
       goto done;
     }
 
-    if (strncmp(op, "from_i", 6) == 0) {
-      if (!a || b) {
-        errf(f->p, "sircc: %s requires args:[x]", n->tag);
-        goto done;
-      }
-      int srcw = 0;
-      char su = 0;
-      if (sscanf(op, "from_i%d.%c", &srcw, &su) != 2 || (srcw != 32 && srcw != 64) || (su != 's' && su != 'u')) {
-        errf(f->p, "sircc: unsupported int->float conversion '%s' in %s", op, n->tag);
-        goto done;
-      }
-      if (LLVMGetTypeKind(LLVMTypeOf(a)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(a)) != (unsigned)srcw) {
-        errf(f->p, "sircc: %s requires i%d operand", n->tag, srcw);
-        goto done;
-      }
-      LLVMTypeRef fty = (width == 32) ? LLVMFloatTypeInContext(f->ctx) : LLVMDoubleTypeInContext(f->ctx);
-      out = (su == 's') ? LLVMBuildSIToFP(f->builder, a, fty, "sitofp") : LLVMBuildUIToFP(f->builder, a, fty, "uitofp");
-      goto done;
-    }
   }
 
   if (strncmp(n->tag, "const.", 6) == 0) {

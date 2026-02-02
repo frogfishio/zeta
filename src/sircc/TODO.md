@@ -62,6 +62,7 @@ This TODO is organized as milestones. Each milestone should end with:
 - [x] `--emit-llvm`, `--emit-obj`, default executable
 - [ ] Cross-platform link driver strategy (clang/lld/cc) with `--linker` and `--ldflags`
 - [ ] Emit static libs / shared libs (later): `--emit-lib`
+- [ ] Cross-target LLVM backends: keep native-only init as default, add an opt-in “all targets” build/init mode for true cross compilation
 
 ## Milestone 3 — Mnemonics: Base (ungated, required)
 
@@ -118,7 +119,7 @@ Implement in the same order as below (earlier items unblock later ones). Each bu
 
 ### 3.13 Control flow (terminators) — 7
 - [x] `term.br`, `term.condbr`, `term.switch`, etc. (exact names per table) (implemented: `term.br`, `term.condbr` (alias `term.cbr`), `term.switch` in CFG-form `fn`, plus block args/params via `bparam` PHIs; gated `term.invoke`/`term.resume` remain Milestone 4)
-- [ ] Enforce “no implicit fallthrough” rule (every block must end in a terminator) (implemented in lowering + `--verify-only` CFG validator)
+- [x] Enforce “no implicit fallthrough” rule (every block must end in a terminator) (implemented in lowering + `--verify-only` CFG validator)
 
 ## Milestone 4 — Mnemonics: Feature-gated packages
 

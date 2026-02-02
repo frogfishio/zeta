@@ -1,0 +1,13 @@
+unit alloca_array target host
+
+type t_arr4_i32 = array(i32, 4)
+
+fn main() -> i32 public
+  ;; allocate [4 x i32] on stack, then write/read element #3
+  let p: ptr = alloca(t_arr4_i32)
+  let q: ptr = ptr.offset(i32, p, 3:i64)
+  store.i32(q, 7:i32)
+  let x: i32 = load.i32(q)
+  return x
+end
+

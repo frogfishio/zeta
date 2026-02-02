@@ -198,6 +198,7 @@ STR_UNTERM1  \"([^\"\\\n]|\\.)*\n
 "target"                    { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_TARGET; }
 "features"                  { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_FEATURES; }
 "type"                      { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_TYPE; }
+"array"                     { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_ARRAY; }
 "sig"                       { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_SIG; }
 "fn"                        { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_FN; }
 "const"                     { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_CONST; }
@@ -210,6 +211,17 @@ STR_UNTERM1  \"([^\"\\\n]|\\.)*\n
 "block"                     { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_BLOCK; }
 "let"                       { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_LET; }
 "return"                    { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_RETURN; }
+"term.br"                   { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_TERM_BR; }
+"term.cbr"                  { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_TERM_CBR; }
+"term.condbr"               { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_TERM_CBR; }
+"term.switch"               { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_TERM_SWITCH; }
+"term.ret"                  { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_TERM_RET; }
+
+"scrut"                     { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_SCRUT; }
+"cases"                     { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_CASES; }
+"default"                   { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_DEFAULT; }
+"lit"                       { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_LIT; }
+
 "term"                      { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_TERM; }
 "to"                        { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_TO; }
 "args"                      { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_ARGS; }
@@ -219,6 +231,10 @@ STR_UNTERM1  \"([^\"\\\n]|\\.)*\n
 "value"                     { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_VALUE; }
 "true"                      { sirc_mark(yytext, yylineno, yycolumn); yylval.b = 1; col_advance(); return T_BOOL; }
 "false"                     { sirc_mark(yytext, yylineno, yycolumn); yylval.b = 0; col_advance(); return T_BOOL; }
+
+"ptr.sizeof"                { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_PTR_SIZEOF; }
+"ptr.alignof"               { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_PTR_ALIGNOF; }
+"ptr.offset"                { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_PTR_OFFSET; }
 
 "->"                        { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_ARROW; }
 
