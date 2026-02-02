@@ -24,6 +24,16 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+static void llvm_init_targets_once(void) {
+  static int inited = 0;
+  if (inited) return;
+  LLVMInitializeAllTargetInfos();
+  LLVMInitializeAllTargets();
+  LLVMInitializeAllTargetMCs();
+  LLVMInitializeAllAsmPrinters();
+  inited = 1;
+}
+
 typedef enum TypeKind {
   TYPE_INVALID = 0,
   TYPE_PRIM,
@@ -93,6 +103,8 @@ typedef struct SirProgram {
 
   const char* unit_name;
   const char* target_triple;
+  unsigned ptr_bytes;
+  unsigned ptr_bits;
 
   bool feat_atomics_v1;
   bool feat_simd_v1;
@@ -467,7 +479,7 @@ static bool parse_meta_record(SirProgram* p, const SirccOptions* opt, JsonValue*
     JsonValue* target = json_obj_get(ext, "target");
     if (target && target->type == JSON_OBJECT) {
       const char* triple = json_get_string(json_obj_get(target, "triple"));
-      if (triple) p->target_triple = triple;
+      if (triple && !(opt && opt->target_triple)) p->target_triple = triple;
     }
 
     // Convention (sircc-defined): ext.features (array of strings)
@@ -710,7 +722,7 @@ static bool parse_node_record(SirProgram* p, JsonValue* obj) {
 
   JsonValue* fields = json_obj_get(obj, "fields");
   if (fields && fields->type != JSON_OBJECT) {
-    fatalf("sircc: expected object for node.fields");
+    errf(p, "sircc: expected object for node.fields");
     return false;
   }
 
@@ -1270,8 +1282,8 @@ static bool type_size_align_rec(SirProgram* p, int64_t type_id, unsigned char* v
       }
       break;
     case TYPE_PTR:
-      size = (int64_t)sizeof(void*);
-      align = (int64_t)sizeof(void*);
+      size = (int64_t)(p->ptr_bytes ? p->ptr_bytes : (unsigned)sizeof(void*));
+      align = (int64_t)(p->ptr_bytes ? p->ptr_bytes : (unsigned)sizeof(void*));
       break;
     case TYPE_ARRAY: {
       int64_t el_size = 0;
@@ -1338,47 +1350,32 @@ static LLVMValueRef get_or_declare_intrinsic(LLVMModuleRef mod, const char* name
   return fn;
 }
 
-static LLVMValueRef canonical_qnan(FunctionCtx* f, LLVMTypeRef fty) {
-  if (LLVMGetTypeKind(fty) == LLVMFloatTypeKind) {
-    LLVMValueRef ib = LLVMConstInt(LLVMInt32TypeInContext(f->ctx), 0x7fc00000u, 0);
-    return LLVMConstBitCast(ib, fty);
+static LLVMValueRef build_zext_or_trunc(LLVMBuilderRef b, LLVMValueRef v, LLVMTypeRef ty, const char* name) {
+  if (!b || !v || !ty) return NULL;
+  if (LLVMTypeOf(v) == ty) return v;
+  LLVMTypeRef from_ty = LLVMTypeOf(v);
+  if (LLVMGetTypeKind(from_ty) != LLVMIntegerTypeKind || LLVMGetTypeKind(ty) != LLVMIntegerTypeKind) {
+    return LLVMBuildTruncOrBitCast(b, v, ty, name ? name : "");
   }
-  if (LLVMGetTypeKind(fty) == LLVMDoubleTypeKind) {
-    LLVMValueRef ib = LLVMConstInt(LLVMInt64TypeInContext(f->ctx), 0x7ff8000000000000ULL, 0);
-    return LLVMConstBitCast(ib, fty);
+  unsigned from_w = LLVMGetIntTypeWidth(from_ty);
+  unsigned to_w = LLVMGetIntTypeWidth(ty);
+  if (from_w == to_w) return v;
+  if (from_w < to_w) return LLVMBuildZExt(b, v, ty, name ? name : "");
+  return LLVMBuildTrunc(b, v, ty, name ? name : "");
+}
+
+static LLVMValueRef build_sext_or_trunc(LLVMBuilderRef b, LLVMValueRef v, LLVMTypeRef ty, const char* name) {
+  if (!b || !v || !ty) return NULL;
+  if (LLVMTypeOf(v) == ty) return v;
+  LLVMTypeRef from_ty = LLVMTypeOf(v);
+  if (LLVMGetTypeKind(from_ty) != LLVMIntegerTypeKind || LLVMGetTypeKind(ty) != LLVMIntegerTypeKind) {
+    return LLVMBuildTruncOrBitCast(b, v, ty, name ? name : "");
   }
-  return LLVMGetUndef(fty);
-}
-
-static LLVMValueRef canonicalize_float(FunctionCtx* f, LLVMValueRef v) {
-  LLVMTypeRef ty = LLVMTypeOf(v);
-  if (LLVMGetTypeKind(ty) != LLVMFloatTypeKind && LLVMGetTypeKind(ty) != LLVMDoubleTypeKind) return v;
-  LLVMValueRef isnan = LLVMBuildFCmp(f->builder, LLVMRealUNO, v, v, "isnan");
-  LLVMValueRef qnan = canonical_qnan(f, ty);
-  return LLVMBuildSelect(f->builder, isnan, qnan, v, "canon");
-}
-
-static void emit_trap_unreachable(FunctionCtx* f) {
-  LLVMTypeRef v = LLVMVoidTypeInContext(f->ctx);
-  LLVMValueRef fn = get_or_declare_intrinsic(f->mod, "llvm.trap", v, NULL, 0);
-  LLVMBuildCall2(f->builder, LLVMGetElementType(LLVMTypeOf(fn)), fn, NULL, 0, "");
-  LLVMBuildUnreachable(f->builder);
-}
-
-static bool emit_trap_if(FunctionCtx* f, LLVMValueRef cond) {
-  if (!f || !f->builder || !f->fn) return false;
-  if (!cond || LLVMGetTypeKind(LLVMTypeOf(cond)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(cond)) != 1) return false;
-
-  if (LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(f->builder))) return false;
-  LLVMBasicBlockRef trap_bb = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "trap");
-  LLVMBasicBlockRef cont_bb = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "cont");
-  LLVMBuildCondBr(f->builder, cond, trap_bb, cont_bb);
-
-  LLVMPositionBuilderAtEnd(f->builder, trap_bb);
-  emit_trap_unreachable(f);
-
-  LLVMPositionBuilderAtEnd(f->builder, cont_bb);
-  return true;
+  unsigned from_w = LLVMGetIntTypeWidth(from_ty);
+  unsigned to_w = LLVMGetIntTypeWidth(ty);
+  if (from_w == to_w) return v;
+  if (from_w < to_w) return LLVMBuildSExt(b, v, ty, name ? name : "");
+  return LLVMBuildTrunc(b, v, ty, name ? name : "");
 }
 
 static LLVMTypeRef lower_type(SirProgram* p, LLVMContextRef ctx, int64_t id) {
@@ -1457,6 +1454,49 @@ typedef struct FunctionCtx {
 
   LLVMBasicBlockRef* blocks_by_node; // indexed by NodeId (node records)
 } FunctionCtx;
+
+static LLVMValueRef canonical_qnan(FunctionCtx* f, LLVMTypeRef fty) {
+  if (LLVMGetTypeKind(fty) == LLVMFloatTypeKind) {
+    LLVMValueRef ib = LLVMConstInt(LLVMInt32TypeInContext(f->ctx), 0x7fc00000u, 0);
+    return LLVMConstBitCast(ib, fty);
+  }
+  if (LLVMGetTypeKind(fty) == LLVMDoubleTypeKind) {
+    LLVMValueRef ib = LLVMConstInt(LLVMInt64TypeInContext(f->ctx), 0x7ff8000000000000ULL, 0);
+    return LLVMConstBitCast(ib, fty);
+  }
+  return LLVMGetUndef(fty);
+}
+
+static LLVMValueRef canonicalize_float(FunctionCtx* f, LLVMValueRef v) {
+  LLVMTypeRef ty = LLVMTypeOf(v);
+  if (LLVMGetTypeKind(ty) != LLVMFloatTypeKind && LLVMGetTypeKind(ty) != LLVMDoubleTypeKind) return v;
+  LLVMValueRef isnan = LLVMBuildFCmp(f->builder, LLVMRealUNO, v, v, "isnan");
+  LLVMValueRef qnan = canonical_qnan(f, ty);
+  return LLVMBuildSelect(f->builder, isnan, qnan, v, "canon");
+}
+
+static void emit_trap_unreachable(FunctionCtx* f) {
+  LLVMTypeRef v = LLVMVoidTypeInContext(f->ctx);
+  LLVMValueRef fn = get_or_declare_intrinsic(f->mod, "llvm.trap", v, NULL, 0);
+  LLVMBuildCall2(f->builder, LLVMGlobalGetValueType(fn), fn, NULL, 0, "");
+  LLVMBuildUnreachable(f->builder);
+}
+
+static bool emit_trap_if(FunctionCtx* f, LLVMValueRef cond) {
+  if (!f || !f->builder || !f->fn) return false;
+  if (!cond || LLVMGetTypeKind(LLVMTypeOf(cond)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(cond)) != 1) return false;
+
+  if (LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(f->builder))) return false;
+  LLVMBasicBlockRef trap_bb = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "trap");
+  LLVMBasicBlockRef cont_bb = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "cont");
+  LLVMBuildCondBr(f->builder, cond, trap_bb, cont_bb);
+
+  LLVMPositionBuilderAtEnd(f->builder, trap_bb);
+  emit_trap_unreachable(f);
+
+  LLVMPositionBuilderAtEnd(f->builder, cont_bb);
+  return true;
+}
 
 static bool bind_add(FunctionCtx* f, const char* name, LLVMValueRef v) {
   if (!name) return false;
@@ -1678,7 +1718,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
 
             LLVMValueRef shift = b;
             if (LLVMGetIntTypeWidth(sty) != LLVMGetIntTypeWidth(xty)) {
-              shift = LLVMBuildZExtOrTrunc(f->builder, b, xty, "shift.cast");
+              shift = build_zext_or_trunc(f->builder, b, xty, "shift.cast");
             }
             unsigned mask = (unsigned)(width - 1);
             LLVMValueRef maskv = LLVMConstInt(xty, mask, 0);
@@ -1784,7 +1824,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
               unsigned long long min_bits = 1ULL << (unsigned)(width - 1);
               min_i = LLVMConstInt(ity, min_bits, 0);
               max_i = LLVMConstInt(ity, min_bits - 1ULL, 0);
-              LLVMValueRef min_f = LLVMConstSIToFP(min_i, fty);
+              LLVMValueRef min_f = LLVMBuildSIToFP(f->builder, min_i, fty, "min.f");
               LLVMValueRef too_low = LLVMBuildFCmp(f->builder, LLVMRealOLT, x, min_f, "too_low");
               LLVMBuildCondBr(f->builder, too_low, bb_min, bb_chk2);
             } else {
@@ -1799,7 +1839,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
             LLVMBuildBr(f->builder, bb_merge);
 
             LLVMPositionBuilderAtEnd(f->builder, bb_chk2);
-            LLVMValueRef max_f = (su == 's') ? LLVMConstSIToFP(max_i, fty) : LLVMConstUIToFP(max_i, fty);
+            LLVMValueRef max_f = (su == 's') ? LLVMBuildSIToFP(f->builder, max_i, fty, "max.f") : LLVMBuildUIToFP(f->builder, max_i, fty, "max.f");
             LLVMValueRef too_high = LLVMBuildFCmp(f->builder, LLVMRealOGE, x, max_f, "too_high");
             LLVMBuildCondBr(f->builder, too_high, bb_max, bb_conv);
 
@@ -1922,7 +1962,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
             }
             LLVMValueRef amt = b;
             if (LLVMGetIntTypeWidth(sty) != LLVMGetIntTypeWidth(xty)) {
-              amt = LLVMBuildZExtOrTrunc(f->builder, b, xty, "rot.cast");
+              amt = build_zext_or_trunc(f->builder, b, xty, "rot.cast");
             }
             unsigned mask = (unsigned)(width - 1);
             LLVMValueRef maskv = LLVMConstInt(xty, mask, 0);
@@ -1933,7 +1973,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
             LLVMTypeRef params[3] = {xty, xty, xty};
             LLVMValueRef fn = get_or_declare_intrinsic(f->mod, full, xty, params, 3);
             LLVMValueRef argv[3] = {a, a, amt};
-            out = LLVMBuildCall2(f->builder, LLVMGetElementType(LLVMTypeOf(fn)), fn, argv, 3, "rot");
+            out = LLVMBuildCall2(f->builder, LLVMGlobalGetValueType(fn), fn, argv, 3, "rot");
             goto done;
           }
 
@@ -1971,7 +2011,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
             LLVMTypeRef params[2] = {ity, i1};
             LLVMValueRef fn = get_or_declare_intrinsic(f->mod, full, ity, params, 2);
             LLVMValueRef argsv[2] = {a, LLVMConstInt(i1, 0, 0)};
-            out = LLVMBuildCall2(f->builder, LLVMGetElementType(LLVMTypeOf(fn)), fn, argsv, 2, op);
+            out = LLVMBuildCall2(f->builder, LLVMGlobalGetValueType(fn), fn, argsv, 2, op);
             goto done;
           }
 
@@ -1982,7 +2022,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
             LLVMTypeRef params[1] = {ity};
             LLVMValueRef fn = get_or_declare_intrinsic(f->mod, full, ity, params, 1);
             LLVMValueRef argsv[1] = {a};
-            out = LLVMBuildCall2(f->builder, LLVMGetElementType(LLVMTypeOf(fn)), fn, argsv, 1, "popc");
+            out = LLVMBuildCall2(f->builder, LLVMGlobalGetValueType(fn), fn, argsv, 1, "popc");
             goto done;
           }
 
@@ -2157,7 +2197,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
       }
     }
 
-    LLVMTypeRef callee_fty = LLVMGetElementType(LLVMTypeOf(callee));
+    LLVMTypeRef callee_fty = LLVMGlobalGetValueType(callee);
     if (LLVMGetTypeKind(callee_fty) != LLVMFunctionTypeKind) {
       errf(f->p, "sircc: call node %lld callee is not a function pointer", (long long)node_id);
       free(argv);
@@ -2304,7 +2344,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
           goto done;
         }
 
-        unsigned ptr_bits = (unsigned)(sizeof(void*) * 8u);
+        unsigned ptr_bits = f->p->ptr_bits ? f->p->ptr_bits : (unsigned)(sizeof(void*) * 8u);
         LLVMTypeRef ip = LLVMIntTypeInContext(f->ctx, ptr_bits);
         LLVMValueRef base_bits = LLVMBuildPtrToInt(f->builder, base, ip, "base.bits");
         LLVMValueRef idx_bits = LLVMBuildTruncOrBitCast(f->builder, idx, ip, "idx.bits");
@@ -2372,7 +2412,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
       LLVMValueRef off = oval;
       LLVMTypeRef i64 = LLVMInt64TypeInContext(f->ctx);
       if (LLVMGetIntTypeWidth(LLVMTypeOf(off)) != 64) {
-        off = LLVMBuildSExtOrTrunc(f->builder, off, i64, "off64");
+        off = build_sext_or_trunc(f->builder, off, i64, "off64");
       }
       if (strcmp(op, "sub") == 0) {
         off = LLVMBuildNeg(f->builder, off, "off.neg");
@@ -2397,7 +2437,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
       if (!x) goto done;
 
       LLVMTypeRef i64 = LLVMInt64TypeInContext(f->ctx);
-      unsigned ptr_bits = (unsigned)(sizeof(void*) * 8u);
+      unsigned ptr_bits = f->p->ptr_bits ? f->p->ptr_bits : (unsigned)(sizeof(void*) * 8u);
       LLVMTypeRef ip = LLVMIntTypeInContext(f->ctx, ptr_bits);
       LLVMTypeRef pty = LLVMPointerType(LLVMInt8TypeInContext(f->ctx), 0);
 
@@ -2407,7 +2447,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
           goto done;
         }
         LLVMValueRef bits = LLVMBuildPtrToInt(f->builder, x, ip, "ptr.bits");
-        out = LLVMBuildZExtOrTrunc(f->builder, bits, i64, "ptr.i64");
+        out = build_zext_or_trunc(f->builder, bits, i64, "ptr.i64");
         goto done;
       }
 
@@ -2447,18 +2487,32 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
 
     // Parse flags: count?:i64, align?:i32, zero?:bool
     int64_t align_i64 = 0;
+    bool align_present = false;
     bool zero_init = false;
     LLVMValueRef count_val = NULL;
     JsonValue* flags = json_obj_get(n->fields, "flags");
     if (flags && flags->type == JSON_OBJECT) {
-      (void)json_get_i64(json_obj_get(flags, "align"), &align_i64);
+      JsonValue* av = json_obj_get(flags, "align");
+      if (av) {
+        align_present = true;
+        if (!json_get_i64(av, &align_i64)) {
+          errf(f->p, "sircc: alloca node %lld flags.align must be an integer", (long long)node_id);
+          goto done;
+        }
+      }
       JsonValue* zv = json_obj_get(flags, "zero");
       if (zv && zv->type == JSON_BOOL) zero_init = zv->v.b;
     }
     JsonValue* countv = (flags && flags->type == JSON_OBJECT) ? json_obj_get(flags, "count") : NULL;
     if (!countv) countv = json_obj_get(n->fields, "count");
     JsonValue* alignv = json_obj_get(n->fields, "align");
-    if (alignv) (void)json_get_i64(alignv, &align_i64);
+    if (alignv) {
+      align_present = true;
+      if (!json_get_i64(alignv, &align_i64)) {
+        errf(f->p, "sircc: alloca node %lld align must be an integer", (long long)node_id);
+        goto done;
+      }
+    }
     JsonValue* zerov = json_obj_get(n->fields, "zero");
     if (zerov && zerov->type == JSON_BOOL) zero_init = zerov->v.b;
 
@@ -2486,7 +2540,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
           goto done;
         }
         if (LLVMGetIntTypeWidth(LLVMTypeOf(count_val)) != 64) {
-          count_val = LLVMBuildZExtOrTrunc(f->builder, count_val, i64, "count.i64");
+          count_val = build_zext_or_trunc(f->builder, count_val, i64, "count.i64");
         }
       }
     }
@@ -2505,8 +2559,15 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
     if (!alloca_i) goto done;
 
     unsigned align = 0;
-    if (align_i64 > 0) align = (unsigned)align_i64;
-    else if (el_align > 0) align = (unsigned)el_align;
+    if (align_present) {
+      if (align_i64 <= 0 || align_i64 > (int64_t)UINT_MAX) {
+        errf(f->p, "sircc: alloca node %lld align must be > 0", (long long)node_id);
+        goto done;
+      }
+      align = (unsigned)align_i64;
+    } else if (el_align > 0) {
+      align = (unsigned)el_align;
+    }
     if (align) LLVMSetAlignment(alloca_i, align);
 
     if (zero_init) {
@@ -2580,7 +2641,15 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
     unsigned align = 1;
     if (alignv) {
       int64_t a = 0;
-      if (json_get_i64(alignv, &a) && a > 0) align = (unsigned)a;
+      if (!json_get_i64(alignv, &a)) {
+        errf(f->p, "sircc: %s node %lld align must be an integer", n->tag, (long long)node_id);
+        goto done;
+      }
+      if (a <= 0 || a > (int64_t)UINT_MAX) {
+        errf(f->p, "sircc: %s node %lld align must be > 0", n->tag, (long long)node_id);
+        goto done;
+      }
+      align = (unsigned)a;
     }
     LLVMSetAlignment(out, align);
     JsonValue* volv = json_obj_get(n->fields, "vol");
@@ -2678,7 +2747,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
       LLVMTypeRef params[1] = {fty};
       LLVMValueRef fn = get_or_declare_intrinsic(f->mod, full, fty, params, 1);
       LLVMValueRef argsv[1] = {a};
-      out = canonicalize_float(f, LLVMBuildCall2(f->builder, LLVMGetElementType(LLVMTypeOf(fn)), fn, argsv, 1, "fabs"));
+      out = canonicalize_float(f, LLVMBuildCall2(f->builder, LLVMGlobalGetValueType(fn), fn, argsv, 1, "fabs"));
       goto done;
     }
     if (strcmp(op, "sqrt") == 0) {
@@ -2687,7 +2756,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
       LLVMTypeRef params[1] = {fty};
       LLVMValueRef fn = get_or_declare_intrinsic(f->mod, full, fty, params, 1);
       LLVMValueRef argsv[1] = {a};
-      out = canonicalize_float(f, LLVMBuildCall2(f->builder, LLVMGetElementType(LLVMTypeOf(fn)), fn, argsv, 1, "fsqrt"));
+      out = canonicalize_float(f, LLVMBuildCall2(f->builder, LLVMGlobalGetValueType(fn), fn, argsv, 1, "fsqrt"));
       goto done;
     }
 
@@ -2871,7 +2940,15 @@ static bool lower_stmt(FunctionCtx* f, int64_t node_id) {
     unsigned align = 1;
     if (alignv) {
       int64_t a = 0;
-      if (json_get_i64(alignv, &a) && a > 0) align = (unsigned)a;
+      if (!json_get_i64(alignv, &a)) {
+        errf(f->p, "sircc: %s node %lld align must be an integer", n->tag, (long long)node_id);
+        return false;
+      }
+      if (a <= 0 || a > (int64_t)UINT_MAX) {
+        errf(f->p, "sircc: %s node %lld align must be > 0", n->tag, (long long)node_id);
+        return false;
+      }
+      align = (unsigned)a;
     }
     LLVMSetAlignment(st, align);
     JsonValue* volv = json_obj_get(n->fields, "vol");
@@ -2906,7 +2983,7 @@ static bool lower_stmt(FunctionCtx* f, int64_t node_id) {
 
     LLVMTypeRef i64 = LLVMInt64TypeInContext(f->ctx);
     if (LLVMGetTypeKind(LLVMTypeOf(len)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(len)) != 64) {
-      len = LLVMBuildZExtOrTrunc(f->builder, len, i64, "len.i64");
+      len = build_zext_or_trunc(f->builder, len, i64, "len.i64");
     }
 
     unsigned align_dst = 1;
@@ -2914,18 +2991,48 @@ static bool lower_stmt(FunctionCtx* f, int64_t node_id) {
     bool use_memmove = false;
     JsonValue* flags = json_obj_get(n->fields, "flags");
     if (flags && flags->type == JSON_OBJECT) {
-      int64_t a = 0;
-      if (json_get_i64(json_obj_get(flags, "alignDst"), &a) && a > 0) align_dst = (unsigned)a;
-      if (json_get_i64(json_obj_get(flags, "alignSrc"), &a) && a > 0) align_src = (unsigned)a;
+      JsonValue* adv = json_obj_get(flags, "alignDst");
+      if (adv) {
+        int64_t a = 0;
+        if (!json_get_i64(adv, &a)) {
+          errf(f->p, "sircc: mem.copy node %lld flags.alignDst must be an integer", (long long)node_id);
+          return false;
+        }
+        if (a <= 0 || a > (int64_t)UINT_MAX) {
+          errf(f->p, "sircc: mem.copy node %lld flags.alignDst must be > 0", (long long)node_id);
+          return false;
+        }
+        align_dst = (unsigned)a;
+      }
+      JsonValue* asv = json_obj_get(flags, "alignSrc");
+      if (asv) {
+        int64_t a = 0;
+        if (!json_get_i64(asv, &a)) {
+          errf(f->p, "sircc: mem.copy node %lld flags.alignSrc must be an integer", (long long)node_id);
+          return false;
+        }
+        if (a <= 0 || a > (int64_t)UINT_MAX) {
+          errf(f->p, "sircc: mem.copy node %lld flags.alignSrc must be > 0", (long long)node_id);
+          return false;
+        }
+        align_src = (unsigned)a;
+      }
       const char* ov = json_get_string(json_obj_get(flags, "overlap"));
-      if (ov && strcmp(ov, "allow") == 0) use_memmove = true;
+      if (ov) {
+        if (strcmp(ov, "allow") == 0) use_memmove = true;
+        else if (strcmp(ov, "disallow") == 0) use_memmove = false;
+        else {
+          errf(f->p, "sircc: mem.copy node %lld flags.overlap must be 'allow' or 'disallow'", (long long)node_id);
+          return false;
+        }
+      }
     }
 
     if (use_memmove) {
       LLVMBuildMemMove(f->builder, dst, align_dst, src, align_src, len);
     } else {
       // Deterministic trap on overlapping ranges: overlap = len!=0 && (dst < src+len) && (src < dst+len).
-      unsigned ptr_bits = (unsigned)(sizeof(void*) * 8u);
+      unsigned ptr_bits = f->p->ptr_bits ? f->p->ptr_bits : (unsigned)(sizeof(void*) * 8u);
       LLVMTypeRef ip = LLVMIntTypeInContext(f->ctx, ptr_bits);
       LLVMValueRef dst_i = LLVMBuildPtrToInt(f->builder, dst, ip, "dst.i");
       LLVMValueRef src_i = LLVMBuildPtrToInt(f->builder, src, ip, "src.i");
@@ -2975,14 +3082,25 @@ static bool lower_stmt(FunctionCtx* f, int64_t node_id) {
 
     LLVMTypeRef i64 = LLVMInt64TypeInContext(f->ctx);
     if (LLVMGetTypeKind(LLVMTypeOf(len)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(len)) != 64) {
-      len = LLVMBuildZExtOrTrunc(f->builder, len, i64, "len.i64");
+      len = build_zext_or_trunc(f->builder, len, i64, "len.i64");
     }
 
     unsigned align_dst = 1;
     JsonValue* flags = json_obj_get(n->fields, "flags");
     if (flags && flags->type == JSON_OBJECT) {
-      int64_t a = 0;
-      if (json_get_i64(json_obj_get(flags, "alignDst"), &a) && a > 0) align_dst = (unsigned)a;
+      JsonValue* adv = json_obj_get(flags, "alignDst");
+      if (adv) {
+        int64_t a = 0;
+        if (!json_get_i64(adv, &a)) {
+          errf(f->p, "sircc: mem.fill node %lld flags.alignDst must be an integer", (long long)node_id);
+          return false;
+        }
+        if (a <= 0 || a > (int64_t)UINT_MAX) {
+          errf(f->p, "sircc: mem.fill node %lld flags.alignDst must be > 0", (long long)node_id);
+          return false;
+        }
+        align_dst = (unsigned)a;
+      }
     }
 
     LLVMBuildMemSet(f->builder, dst, bytev, len, align_dst);
@@ -3020,10 +3138,6 @@ static bool lower_stmt(FunctionCtx* f, int64_t node_id) {
 
     (void)LLVMBuildFence(f->builder, ord, 0, "");
     return true;
-  }
-
-  if (strncmp(n->tag, "term.", 5) == 0) {
-    return lower_term_cfg(f, node_id);
   }
 
   if (strcmp(n->tag, "return") == 0) {
@@ -3065,9 +3179,13 @@ static bool lower_stmt(FunctionCtx* f, int64_t node_id) {
     // Deterministic immediate trap: lower to llvm.trap + unreachable.
     LLVMTypeRef v = LLVMVoidTypeInContext(f->ctx);
     LLVMValueRef fn = get_or_declare_intrinsic(f->mod, "llvm.trap", v, NULL, 0);
-    LLVMBuildCall2(f->builder, LLVMGetElementType(LLVMTypeOf(fn)), fn, NULL, 0, "");
+    LLVMBuildCall2(f->builder, LLVMGlobalGetValueType(fn), fn, NULL, 0, "");
     LLVMBuildUnreachable(f->builder);
     return true;
+  }
+
+  if (strncmp(n->tag, "term.", 5) == 0) {
+    return lower_term_cfg(f, node_id);
   }
 
   if (strcmp(n->tag, "block") == 0) {
@@ -3246,8 +3364,8 @@ static bool lower_term_cfg(FunctionCtx* f, int64_t node_id) {
     if (!scrut) return false;
     LLVMTypeRef sty = LLVMTypeOf(scrut);
     if (LLVMGetTypeKind(sty) == LLVMPointerTypeKind) {
-      // Spec allows ptr scrut; lower by casting to host-sized integer.
-      unsigned ptr_bits = (unsigned)(sizeof(void*) * 8u);
+      // Spec allows ptr scrut; lower by casting to target pointer-sized integer.
+      unsigned ptr_bits = f->p->ptr_bits ? f->p->ptr_bits : (unsigned)(sizeof(void*) * 8u);
       LLVMTypeRef ity = LLVMIntTypeInContext(f->ctx, ptr_bits);
       scrut = LLVMBuildPtrToInt(f->builder, scrut, ity, "ptr.switch");
       sty = LLVMTypeOf(scrut);
@@ -3335,12 +3453,42 @@ static bool emit_module_ir(LLVMModuleRef mod, const char* out_path) {
   return true;
 }
 
-static bool emit_module_obj(LLVMModuleRef mod, const char* triple, const char* out_path) {
-  if (LLVMInitializeNativeTarget() != 0) {
-    errf(NULL, "sircc: LLVMInitializeNativeTarget failed");
+static bool init_target_for_module(SirProgram* p, LLVMModuleRef mod, const char* triple) {
+  if (!p || !mod || !triple) return false;
+
+  llvm_init_targets_once();
+
+  char* err = NULL;
+  LLVMTargetRef target = NULL;
+  if (LLVMGetTargetFromTriple(triple, &target, &err) != 0) {
+    errf(p, "sircc: target triple '%s' unsupported: %s", triple, err ? err : "(unknown)");
+    LLVMDisposeMessage(err);
     return false;
   }
-  LLVMInitializeNativeAsmPrinter();
+
+  LLVMTargetMachineRef tm =
+      LLVMCreateTargetMachine(target, triple, "generic", "", LLVMCodeGenLevelDefault, LLVMRelocDefault, LLVMCodeModelDefault);
+  if (!tm) {
+    errf(p, "sircc: failed to create target machine");
+    return false;
+  }
+
+  LLVMTargetDataRef td = LLVMCreateTargetDataLayout(tm);
+  char* dl_str = LLVMCopyStringRepOfTargetData(td);
+  LLVMSetTarget(mod, triple);
+  LLVMSetDataLayout(mod, dl_str);
+
+  p->ptr_bytes = LLVMPointerSize(td);
+  p->ptr_bits = p->ptr_bytes * 8u;
+
+  LLVMDisposeMessage(dl_str);
+  LLVMDisposeTargetData(td);
+  LLVMDisposeTargetMachine(tm);
+  return true;
+}
+
+static bool emit_module_obj(LLVMModuleRef mod, const char* triple, const char* out_path) {
+  llvm_init_targets_once();
 
   char* err = NULL;
   const char* use_triple = triple ? triple : LLVMGetDefaultTargetTriple();
@@ -3382,11 +3530,7 @@ static bool emit_module_obj(LLVMModuleRef mod, const char* triple, const char* o
 }
 
 bool sircc_print_target(const char* triple) {
-  if (LLVMInitializeNativeTarget() != 0) {
-    errf(NULL, "sircc: LLVMInitializeNativeTarget failed");
-    return false;
-  }
-  LLVMInitializeNativeAsmPrinter();
+  llvm_init_targets_once();
 
   char* err = NULL;
   const char* use_triple = triple ? triple : LLVMGetDefaultTargetTriple();
@@ -3771,6 +3915,7 @@ bool sircc_compile(const SirccOptions* opt) {
 
   SirProgram p = {0};
   arena_init(&p.arena);
+  char* owned_triple = NULL;
 
   bool ok = parse_program(&p, opt, opt->input_path);
   if (!ok) goto done;
@@ -3783,8 +3928,21 @@ bool sircc_compile(const SirccOptions* opt) {
     goto done;
   }
 
+  const char* use_triple = opt->target_triple ? opt->target_triple : p.target_triple;
+  if (!use_triple) {
+    owned_triple = LLVMGetDefaultTargetTriple();
+    use_triple = owned_triple;
+  }
+
   LLVMContextRef ctx = LLVMContextCreate();
   LLVMModuleRef mod = LLVMModuleCreateWithNameInContext("sir", ctx);
+
+  if (!init_target_for_module(&p, mod, use_triple)) {
+    LLVMDisposeModule(mod);
+    LLVMContextDispose(ctx);
+    ok = false;
+    goto done;
+  }
 
   if (!lower_functions(&p, ctx, mod)) {
     LLVMDisposeModule(mod);
@@ -3811,7 +3969,7 @@ bool sircc_compile(const SirccOptions* opt) {
   }
 
   if (opt->emit == SIRCC_EMIT_OBJ) {
-    ok = emit_module_obj(mod, opt->target_triple, opt->output_path);
+    ok = emit_module_obj(mod, use_triple, opt->output_path);
     LLVMDisposeModule(mod);
     LLVMContextDispose(ctx);
     goto done;
@@ -3826,7 +3984,7 @@ bool sircc_compile(const SirccOptions* opt) {
     goto done;
   }
 
-  ok = emit_module_obj(mod, opt->target_triple, tmp_obj);
+  ok = emit_module_obj(mod, use_triple, tmp_obj);
   LLVMDisposeModule(mod);
   LLVMContextDispose(ctx);
   if (!ok) {
@@ -3838,6 +3996,7 @@ bool sircc_compile(const SirccOptions* opt) {
   unlink(tmp_obj);
 
 done:
+  if (owned_triple) LLVMDisposeMessage(owned_triple);
   free(p.srcs);
   free(p.syms);
   free(p.types);

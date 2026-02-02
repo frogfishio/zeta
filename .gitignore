@@ -5,3 +5,4 @@ build/
 *.dSYM/
 .DS_Store
 compile_commands.json
+node_modules/

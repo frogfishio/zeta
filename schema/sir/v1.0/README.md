@@ -3,117 +3,372 @@
 
 # SIR 1.0 (Semantic IR, JSONL)
 
-This directory defines the **stable pipeline boundary** for *declarative compilers*:
+SIR is the **stable boundary format** between:
 
-- A **front-end** (parser + lowerer) reads a source language and emits **SIR** as **JSONL** (**one JSON object per line**).
-- A **back-end** (lowerer/codegen) reads **SIR JSONL** and produces the next stage (e.g. ZIR, LLVM IR, WAT, native code, etc.).
+- **Front-ends** (parsers / lowerers) that translate a source language into a *language-agnostic* semantic representation.
+- **Back-ends** (optimizers / code generators / lowerers) that translate that representation into a target (WASM, LLVM IR, native, another IR, …).
 
-Version: **sir-v1.0** (stable contract).
+SIR is a **streaming, line-delimited JSON format (JSONL)**:
 
-SIR is intentionally:
+- **One JSON object per line**.
+- Each line is a **record**.
+- Each record is validated by **`record.schema.json`**.
 
-- **Language-agnostic**: it models common semantics (decls/stmts/exprs/types) without baking in any one surface syntax.
-- **Streaming-friendly**: JSONL enables incremental tools (indexers, linters, IDEs) and easy piping.
-- **Deterministic**: record shapes are normative; if it is not in the schema, it is invalid.
+Version: **`sir-v1.0`**.
+
+---
+
+## Why SIR exists
+
+Lowering directly from a high-level language into assembly (or assembly-like IR) is painful:
+
+- you lose semantics early,
+- optimization turns into pattern-matching,
+- tooling gets brittle (source mapping, diagnostics, indexing, refactoring).
+
+SIR is a **mid-point**:
+
+- Still semantic enough to be analyzable and optimizable.
+- Flat/regular enough to stream, diff, grep, and pipe between tools.
+- Strict enough to be a *contract* (schema-validated).
+
+Think of SIR as **“semantic assembly”**:
+
+- structured enough for compilers,
+- simple enough for tooling,
+- and (as it turns out) not terrible for humans.
+
+---
 
 ## Files
 
 - `record.schema.json` — JSON Schema for **one JSONL record**.
   A `.sir.jsonl` file is valid if **every line** parses as JSON and validates against this schema.
 
-## Record model (normative)
+---
+
+## The shape of every record (normative)
 
 Every record MUST include:
 
 - `ir: "sir-v1.0"`
 - `k`: the record kind tag
 
-SIR is a *typed, reference-based* IR. Nodes are introduced by records that carry an integer `id`, and other records may refer to them using typed references.
+SIR v1.0 is a **closed schema**: unknown fields are rejected (unless the schema says otherwise).
 
-### Core kinds
+---
 
-The v1.0 contract defines these top-level record kinds:
+## Big idea: a stream of typed records
 
-- `meta` — stream metadata (producer, unit, options)
+SIR is not “one giant JSON document”. It is:
+
+- **a stream of independent records**,
+- that can be consumed incrementally,
+- and stitched into a graph using **stable numeric IDs**.
+
+That makes it suitable for:
+
+- compiler passes that don’t need the whole program in memory,
+- indexers that build symbol/type maps while reading,
+- linters and diagnostics that can report errors early,
+- log-friendly debugging.
+
+---
+
+## Record kinds (v1.0)
+
+SIR defines two layers that can co-exist in the same stream:
+
+### 1) Tooling / envelope records
+
+These do not change program semantics; they exist to make compilers usable.
+
+- `meta` — stream metadata (producer, unit, build options, feature flags)
 - `src` — source text anchoring (for diagnostics and round-tripping)
-- `diag` — diagnostics (info/warn/error) with optional source references
-- `sym` — symbol identity (optional for v1, recommended)
-- `type` — type nodes
-- `decl` — declarations (functions, variables, type decls)
-- `stmt` — statements
-- `expr` — expressions
-- `block` — statement lists / structured bodies
+- `diag` — diagnostics (info/warn/error) with optional source / node references
+- `ext` — explicit extensions (debug/tooling data, experiments) without loosening validation
 
-A toolchain MAY emit only a subset (e.g. no `sym` in an MVP), but any emitted record MUST validate.
+### 2) Semantic graph records
 
-### IDs and references
+These carry semantic identity and form the IR graph.
 
-- Records that define nodes (e.g. `type`, `decl`, `stmt`, `expr`, `block`, `sym`, `src`) use an integer `id` that MUST be unique within the stream.
-- References are typed objects:
-  - `{"t":"type","id":12}`
-  - `{"t":"expr","id":40}`
-  - `{"t":"decl","id":7}`
-  - `{"t":"sym","id":3}`
+- `sym` — symbol identity (functions, vars, consts, types, params, fields, labels)
+- `type` — type nodes (prim/ptr/array/fn/struct/union/enum/…)
+- `node` — semantic nodes (the “everything else” graph: blocks, statements, expressions, declarations, patterns, …)
 
-Implementations SHOULD emit a referenced node **before** the first record that references it.
+### 3) Low-level / mnemonic interop records (optional)
 
-## Conventions
+These exist for “assembly-like” views, debugging, or as a lowering target.
 
-These are recommendations for producers/consumers; the schema is the source of truth.
+- `label` — legacy label record
+- `instr` — instruction record (`m` mnemonic + `ops` operands)
+- `dir` — directive record (data/layout/backend interop)
 
-- **Streaming**: emit `meta` first when possible.
-- **Ordering**: emit `src` records early so later nodes can point at them.
-- **Locations**:
-  - `loc` is optional but strongly recommended for good errors.
-  - `src_ref` should reference a prior `src` record `id` when exact slices matter.
-- **Unknown fields**: v1.0 schemas are *closed*; unknown fields SHOULD be rejected.
-- **Stability**: changing meaning without a version bump is forbidden.
+A toolchain may emit only a subset, but any record that appears MUST validate.
 
-## Minimal semantics in v1.0
+---
 
-SIR 1.0 is intentionally conservative:
+## Identity: stable numeric IDs (not source spans)
 
-- Expressions cover a small, composable core (names, literals, calls, binops, assigns, etc.).
-- Statements cover structured control flow (block/if/while/return/expr-stmt).
-- Types cover a minimal set (prim/pointer/function) sufficient to describe many languages.
+SIR’s semantic identity is **numeric and explicit**.
 
-Higher-level or language-specific features should be lowered *into* this core or introduced in a new SIR version.
+- Semantic identity records (`sym`, `type`, `node`) carry an integer `id`.
+- Other records refer to them using a **typed reference object**:
 
-## Extension policy
-
-- Any SIR 1.0 stream must validate against `record.schema.json`.
-- Additive evolution (new record kinds, new enum values, new optional fields) requires a **schema update** and typically a **version bump**.
-- Consumers MUST reject unknown `ir` versions.
-
-## Example record stream
-
-Below is a tiny SIR program equivalent to:
-
-```text
-fn add(a: i32, b: i32) -> i32 { return a + b; }
+```json
+{"t":"ref","id":123,"k":"node"}
 ```
+
+This is deliberate:
+
+- **Source spans are not identity.** `src` / `loc` describe *where it came from*, not *what it is*.
+- **Names are not identity.** Names can collide, change, or be absent.
+
+### Practical consequence
+
+If you want tools to reliably say “this is the same symbol/type/node” as the program evolves, you should:
+
+- use `id` + `NodeRef` as the *truth*,
+- and treat `src_ref` / `loc` as *debug provenance*.
+
+---
+
+## Streaming and ordering
+
+SIR is designed to be read in a single forward pass.
+
+Recommended conventions:
+
+- Emit a `meta` record first.
+- Emit `src` records early so later nodes can point at them.
+- Emit `sym` / `type` / `node` records before their first use when possible.
+
+The schema allows forward references, but **producers SHOULD avoid them** when streaming.
+
+---
+
+## Source mapping (`src` + `loc`) and diagnostics (`diag`)
+
+### `src` records
+
+A `src` record creates a stable *anchor* you can reference later:
+
+- `id` — unique source anchor ID
+- `file`, `line`, `col`, `end_line`, `end_col`, `text` — optional slice metadata
+
+Later records can attach:
+
+- `src_ref: <id>`
+- `loc: { line, col, unit }`
+
+### `diag` records
+
+Diagnostics are first-class records:
+
+- `level`: `info | warn | error`
+- `msg`: human message
+- optional `src_ref` / `loc`
+- optional `about`: a typed reference to the symbol/type/node the diagnostic is about
+
+This is what makes SIR good for:
+
+- compilers,
+- IDE integration,
+- build tooling,
+- and rich error reporting.
+
+---
+
+## Types (`type`)
+
+`type` records represent a language-agnostic type graph.
+
+The important part is: **types have IDs**, and other things reference them.
+
+Examples:
+
+- primitive type: `kind: "prim"`, `prim: "i32"`
+- pointer type: `kind: "ptr"`, `of: <type id>`
+- function type: `kind: "fn"`, `params: [...]`, `ret: <type id>`
+- aggregate types: `struct` / `union` / `enum` / `array`
+
+SIR intentionally keeps the type schema permissive so different languages can map into it.
+
+---
+
+## Symbols (`sym`)
+
+`SymRecord` is the place where “names become identity”.
+
+- `id`: stable identity for a symbol within the stream
+- `name`: human name
+- `kind`: `fn | var | const | type | param | field | label`
+- optional `linkage`: `local | public | extern`
+- optional `type_ref`: links symbol to a `type`
+- optional `value`: for `const`
+
+Symbols are how you build:
+
+- symbol tables,
+- export/import maps,
+- debug info,
+- and stable references for tooling.
+
+---
+
+## Nodes (`node`): the semantic graph
+
+The `node` record is the general semantic building block.
+
+- `id`: stable identity
+- `tag`: semantic tag (examples: `fn`, `block`, `stmt.return`, `expr.call`, `expr.binop`, …)
+- optional `type_ref`: type of the node (especially expressions)
+- optional `inputs`: dependencies (as `NodeRef`)
+- optional `fields`: tag-specific payload (small, stable keys; put big/debuggy things in `ext`)
+
+This is the core trick:
+
+> **SIR does not hardcode every AST variant into the top-level schema.**
+> Instead, it defines a strict *container* (`node`) and lets `tag + fields + inputs` express the graph.
+
+That keeps v1.0 stable while still letting the IR grow.
+
+---
+
+## Values and operands (`Value`)
+
+Across SIR records you’ll see a small set of typed leaf values:
+
+- `sym` / `lbl` / `reg` — named references in low-level contexts
+- `num` / `str` — literals
+- `mem` — address-like operand (base + disp + size)
+- `ref` — semantic reference to a `sym`/`type`/`node` by numeric ID
+
+Important: **semantic references use `ref`**.
+
+The other operand forms are mostly for low-level interop and readability.
+
+---
+
+## Extensions (`ext`): grow without breaking validation
+
+If you need to attach extra tool/debug data, you do it explicitly:
+
+- `k: "ext"`
+- `name`: extension identifier (namespace-friendly)
+- `payload`: arbitrary JSON object
+- optional `about`: reference to what it describes (`sym`/`type`/`node`)
+
+This is how you add “bells and whistles” while keeping the core schema closed.
+
+---
+
+## Low-level mnemonics (`instr` / `dir` / `label`)
+
+SIR can carry a low-level “mnemonic stream” view:
+
+- `instr`: `m` mnemonic + `ops` operands
+- `dir`: directives (data/layout/backend interop)
+- `label`: local labels
+
+This is useful when:
+
+- you lower SIR into a target-specific instruction stream,
+- you want a debug print that looks like assembly,
+- you need a canonical interchange format for a late-stage backend.
+
+You can treat this as **one possible payload** that lives inside the same streaming envelope.
+
+---
+
+## Typical pipeline
+
+A realistic toolchain often looks like:
+
+1. **Parse** source → AST/CST
+2. **Lower** AST → SIR semantic graph (`sym`/`type`/`node`)
+3. **Analyze / optimize** in semantic space
+4. **Lower** semantic graph → mnemonic stream (`instr`/`dir`/`label`) or directly to a target IR
+5. **Codegen** to the final artifact
+
+Throughout the pipeline, emit:
+
+- `src` anchors
+- `diag` records
+- `ext` records for debug/tooling
+
+This is what makes the build pipeline observable and debuggable.
+
+---
+
+## Contract and versioning
+
+- If it validates against `record.schema.json`, it is SIR 1.0.
+- Meaning-changing changes require a new `sir-vX.Y`.
+- Additive evolution should prefer:
+  - new `node.tag` values,
+  - new optional fields,
+  - and `ext` records.
+
+Consumers MUST reject unknown `ir` versions.
+
+---
+
+## Example: tiny semantic stream
+
+Below is a tiny stream that introduces a type, a function symbol, and a node that represents a function body.
 
 ```jsonl
-{"ir":"sir-v1.0","k":"meta","producer":"sir-demo","unit":"example"}
+{"ir":"sir-v1.0","k":"meta","producer":"sir-demo","unit":"example","ext":{"target":"wasm32"}}
 
-{"ir":"sir-v1.0","k":"type","id":1,"kind":"prim","name":"i32"}
+{"ir":"sir-v1.0","k":"type","id":1,"kind":"prim","prim":"i32"}
 
-{"ir":"sir-v1.0","k":"decl","id":10,"kind":"param","name":"a","ty":{"t":"type","id":1}}
-{"ir":"sir-v1.0","k":"decl","id":11,"kind":"param","name":"b","ty":{"t":"type","id":1}}
+{"ir":"sir-v1.0","k":"sym","id":10,"name":"add","kind":"fn","linkage":"public","type_ref":1}
 
-{"ir":"sir-v1.0","k":"expr","id":20,"kind":"name","name":"a"}
-{"ir":"sir-v1.0","k":"expr","id":21,"kind":"name","name":"b"}
-{"ir":"sir-v1.0","k":"expr","id":22,"kind":"binop","op":"add","lhs":{"t":"expr","id":20},"rhs":{"t":"expr","id":21}}
-
-{"ir":"sir-v1.0","k":"stmt","id":30,"kind":"return","value":{"t":"expr","id":22}}
-{"ir":"sir-v1.0","k":"block","id":40,"stmts":[{"t":"stmt","id":30}]}
-
-{"ir":"sir-v1.0","k":"decl","id":50,"kind":"fn","name":"add","params":[{"t":"decl","id":10},{"t":"decl","id":11}],"ret":{"t":"type","id":1},"body":{"t":"block","id":40}}
+{"ir":"sir-v1.0","k":"node","id":20,"tag":"fn","type_ref":1,
+ "inputs":[{"t":"ref","id":10,"k":"sym"}],
+ "fields":{"name":"add","params":["a","b"],"body":"..."}}
 ```
+
+Notes:
+
+- The schema does not force a single canonical AST; the `node` tag + fields carry the shape.
+- For richer structure (blocks/exprs), you typically introduce more `node` records and connect them by `inputs`/`ref`s.
+
+---
+
+## Example: tiny mnemonic stream
+
+```jsonl
+{"ir":"sir-v1.0","k":"label","name":"L0"}
+{"ir":"sir-v1.0","k":"instr","m":"i32.add","ops":[{"t":"reg","v":"a"},{"t":"reg","v":"b"}]}
+{"ir":"sir-v1.0","k":"instr","m":"ret","ops":[{"t":"reg","v":"$0"}]}
+```
+
+---
 
 ## Practical guidance
 
-- **Front-ends**: Lower surface CST/AST into SIR by emitting stable core nodes and recording `loc`/`src_ref` for traceability.
-- **Back-ends**: Consume SIR as a graph of nodes (IDs + typed refs) and run normalization passes before lowering to a target IR.
-- **Tooling**: JSONL enables grep-friendly debugging and streaming diagnostics.
+### For producers
 
+- Choose a stable `id` allocation strategy (monotonic integers are fine).
+- Emit `src` and `loc` aggressively; it pays off immediately in diagnostics.
+- Use `sym` for anything you want tooling to “remember”.
+- Use `ext` rather than sprinkling ad-hoc fields into core records.
+
+### For consumers
+
+- Treat the stream as authoritative.
+- Build maps keyed by numeric `id`.
+- Accept that SIR can be partially present (some producers emit only a subset).
+- Prefer semantic `ref` links over name/spans when reasoning about identity.
+
+---
+
+## Non-goals
+
+- SIR is not a UI format; it is an interchange contract.
+- SIR does not try to encode every source-language surface feature directly.
+- SIR does not promise cross-build stable IDs unless a producer chooses to.
+
+If you want a human-friendly syntax, compile it *to* SIR JSONL.
