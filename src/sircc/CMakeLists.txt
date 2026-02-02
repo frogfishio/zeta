@@ -63,6 +63,11 @@ add_test(
 )
 
 add_test(
+  NAME sircc_verify_float_cmp
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/float_cmp.sir.jsonl
+)
+
+add_test(
   NAME sircc_verify_call_mnemonic_tags
   COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/call_mnemonic_tags.sir.jsonl
 )
@@ -80,6 +85,51 @@ add_test(
 add_test(
   NAME sircc_verify_cfg_join_phi
   COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/cfg_join_phi.sir.jsonl
+)
+
+add_test(
+  NAME sircc_verify_mem_stack
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/mem_stack.sir.jsonl
+)
+
+add_test(
+  NAME sircc_verify_ptr_cmp
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/ptr_cmp.sir.jsonl
+)
+
+add_test(
+  NAME sircc_verify_mem_stack_widths
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/mem_stack_widths.sir.jsonl
+)
+
+add_test(
+  NAME sircc_verify_mem_copy_fill
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/mem_copy_fill.sir.jsonl
+)
+
+add_test(
+  NAME sircc_emit_llvm_ptr_layout
+  COMMAND sircc ${CMAKE_CURRENT_LIST_DIR}/examples/ptr_layout.sir.jsonl -o ${CMAKE_CURRENT_BINARY_DIR}/ptr_layout.ll --emit-llvm
+)
+
+add_test(
+  NAME sircc_emit_llvm_rot_mnemonic_tags
+  COMMAND sircc ${CMAKE_CURRENT_LIST_DIR}/examples/rot_mnemonic_tags.sir.jsonl -o ${CMAKE_CURRENT_BINARY_DIR}/rot_mnemonic_tags.ll --emit-llvm
+)
+
+add_test(
+  NAME sircc_emit_llvm_divrem_mnemonic_tags
+  COMMAND sircc ${CMAKE_CURRENT_LIST_DIR}/examples/divrem_mnemonic_tags.sir.jsonl -o ${CMAKE_CURRENT_BINARY_DIR}/divrem_mnemonic_tags.ll --emit-llvm
+)
+
+add_test(
+  NAME sircc_emit_llvm_conv_mnemonic_tags
+  COMMAND sircc ${CMAKE_CURRENT_LIST_DIR}/examples/conv_mnemonic_tags.sir.jsonl -o ${CMAKE_CURRENT_BINARY_DIR}/conv_mnemonic_tags.ll --emit-llvm
+)
+
+add_test(
+  NAME sircc_emit_llvm_eqz_mnemonic_tags
+  COMMAND sircc ${CMAKE_CURRENT_LIST_DIR}/examples/eqz_mnemonic_tags.sir.jsonl -o ${CMAKE_CURRENT_BINARY_DIR}/eqz_mnemonic_tags.ll --emit-llvm
 )
 
 add_test(

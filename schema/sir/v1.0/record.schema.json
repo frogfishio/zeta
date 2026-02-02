@@ -37,27 +37,35 @@
     },
 
     "SrcId": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Source record identifier; MUST be unique within a stream; src_ref MUST reference a prior SrcRecord.id."
+      "description": "Source record identifier; MUST be unique within a stream; src_ref MUST reference a prior SrcRecord.id.",
+      "oneOf": [
+        { "type": "integer", "minimum": 0 },
+        { "type": "string", "minLength": 1 }
+      ]
     },
 
     "RecordId": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Optional record identifier; if present, SHOULD be unique across the stream."
+      "description": "Optional record identifier; if present, SHOULD be unique across the stream.",
+      "oneOf": [
+        { "type": "integer", "minimum": 0 },
+        { "type": "string", "minLength": 1 }
+      ]
     },
 
     "NodeId": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Semantic node identifier; MUST be unique within a stream for records that carry semantic graph identity (sym/type/node)."
+      "description": "Semantic node identifier; MUST be unique within a stream for records that carry semantic graph identity (sym/type/node).",
+      "oneOf": [
+        { "type": "integer", "minimum": 0 },
+        { "type": "string", "minLength": 1 }
+      ]
     },
 
     "TypeId": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Type identifier; MUST reference a prior TypeRecord.id (or be resolvable within the same unit by the consumer)."
+      "description": "Type identifier; MUST reference a prior TypeRecord.id (or be resolvable within the same unit by the consumer).",
+      "oneOf": [
+        { "type": "integer", "minimum": 0 },
+        { "type": "string", "minLength": 1 }
+      ]
     },
 
     "Loc": {
@@ -130,6 +138,61 @@
       }
     },
 
+    "Bool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "v"],
+      "properties": {
+        "t": { "const": "bool" },
+        "v": { "type": "boolean" }
+      }
+    },
+
+    "Bytes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "v"],
+      "properties": {
+        "t": { "const": "bytes" },
+        "v": { "type": "string" }
+      },
+      "description": "Byte string literal; encoding is producer-defined (often base64 or \"0x..\")."
+    },
+
+    "IntLit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "v"],
+      "properties": {
+        "t": { "type": "string", "pattern": "^(i|u)(8|16|32|64|128)$" },
+        "v": { "type": "integer" }
+      },
+      "description": "Typed integer literal, e.g. {t:i32,v:1} or {t:u64,v:42}."
+    },
+
+    "FloatBits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "bits"],
+      "properties": {
+        "t": { "type": "string", "enum": ["f32", "f64"] },
+        "bits": { "type": "string", "pattern": "^0x[0-9A-Fa-f]+$" }
+      },
+      "description": "Typed float literal encoded by raw IEEE-754 bits in hex (mnemonic-friendly, lossless)."
+    },
+
+
+    "ValRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "id"],
+      "properties": {
+        "t": { "const": "val" },
+        "id": { "$ref": "#/$defs/NodeId" }
+      },
+      "description": "SSA/value reference used by mnemonic streams (distinct from record refs)."
+    },
+
     "Mem": {
       "type": "object",
       "additionalProperties": false,
@@ -170,9 +233,14 @@
         { "$ref": "#/$defs/Lbl" },
         { "$ref": "#/$defs/Reg" },
         { "$ref": "#/$defs/Num" },
+        { "$ref": "#/$defs/IntLit" },
+        { "$ref": "#/$defs/FloatBits" },
+        { "$ref": "#/$defs/Bool" },
         { "$ref": "#/$defs/Str" },
+        { "$ref": "#/$defs/Bytes" },
         { "$ref": "#/$defs/Mem" },
-        { "$ref": "#/$defs/NodeRef" }
+        { "$ref": "#/$defs/NodeRef" },
+        { "$ref": "#/$defs/ValRef" }
       ]
     },
 

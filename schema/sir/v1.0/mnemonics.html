@@ -179,7 +179,7 @@
         Records with <code>k:"diag"</code> are non-semantic and MUST be ignored
         for program meaning. Records with <code>k:"ext"</code> provide optional
         debugging and tooling extensions. In SIR v1.0 they are non-semantic:
-        consumers MUST ignore unknown <code>ns</code> namespaces without failing
+        consumers MUST ignore unknown <code>name</code> identifiers without failing
         the stream.
       </p>
       <p>
@@ -203,9 +203,24 @@
           <code>ref</code> value.
         </li>
         <li>
-          All <code>{"t":"ref","id":...}</code> cross-references MUST be
-          backward references: a <code>{"t":"ref","id":...}</code> MUST refer to
-          a record defined earlier in the stream.
+          All <code>{"t":"ref","id":...}</code> references to declarations
+          (<code>type</code>, <code>sig</code>, <code>sym</code>, <code>const</code>,
+          <code>global</code>, <code>fn</code>, etc.) MUST be backward references:
+          a <code>{"t":"ref","id":...}</code> MUST refer to a record defined
+          earlier in the stream.
+        </li>
+        <li>
+          <code>{"t":"ref","id":...}</code> references to basic blocks MAY be
+          forward or backward references. A “block ref” is any
+          <code>{"t":"ref","id":...}</code> that appears in a terminator target
+          field: <code>term.*.to</code>, <code>term.*.then.to</code>,
+          <code>term.*.else.to</code>, <code>term.switch.cases[*].to</code>,
+          <code>term.switch.default.to</code>, <code>term.invoke.normal.to</code>,
+          or <code>term.invoke.unwind.to</code>.
+        </li>
+        <li>
+          A consumer MUST validate that every block ref resolves to exactly one
+          <code>block</code> record within the current function.
         </li>
         <li>
           SSA value references (<code>{"t":"val","id":...}</code>) are scoped to
@@ -237,6 +252,99 @@
         </li>
       </ul>
 
+      <h2>Record kinds (normative)</h2>
+      <p>
+        This section defines the required minimal shapes for the semantic record
+        kinds referenced by this document. Fields not listed here may appear but
+        MUST be ignored unless a later section says otherwise.
+      </p>
+      <ul>
+        <li>
+          <strong><code>k:"unit"</code></strong>: declares stream-wide defaults and
+          negotiated capabilities.
+          <pre>{"ir":"sir-v1.0","k":"unit","id":ID,
+  "features":["agg:v1",...],
+  "target": "wasm32" | {"arch":STR,"ptrBits":NUM,"endian":"le"|"be",
+    "intAlign":{...},"floatAlign":{...},"structAlign":"max"|"packed1"}}
+</pre>
+        </li>
+        <li>
+          <strong><code>k:"type"</code></strong>: type declaration.
+          <pre>{"ir":"sir-v1.0","k":"type","id":ID,"def":{...}}
+</pre>
+        </li>
+        <li>
+          <strong><code>k:"sig"</code></strong>: function signature declaration.
+          <pre>{"ir":"sir-v1.0","k":"sig","id":ID,
+  "params":[{"ty":{ "t":"ref","id":TYPE_ID }},...],
+  "ret": {"ty":{ "t":"ref","id":TYPE_ID }} | null,
+  "varargs":true|false}
+</pre>
+        </li>
+        <li>
+          <strong><code>k:"sym"</code></strong>: symbol declaration.
+          <pre>{"ir":"sir-v1.0","k":"sym","id":ID,"name":ID,
+  "kind":"fn"|"global"|"const"|"type"|"param"|"field"|"label",
+  "ref": {"t":"ref","id":DECL_ID} }
+</pre>
+        </li>
+        <li>
+          <strong><code>k:"const"</code></strong>: constant pool entry.
+          <pre>{"ir":"sir-v1.0","k":"const","id":ID,
+  "ty": {"t":"ref","id":TYPE_ID},
+  "value": VALUE | {"kind":"zero"|"array"|"repeat"|"struct", ...}}
+</pre>
+        </li>
+        <li>
+          <strong><code>k:"global"</code></strong>: global object declaration.
+          <pre>{"ir":"sir-v1.0","k":"global","id":ID,"name":ID,
+  "ty": {"t":"ref","id":TYPE_ID},
+  "init": {"t":"ref","id":CONST_ID} | null,
+  "linkage":"local"|"public"|"extern"}
+</pre>
+        </li>
+        <li>
+          <strong><code>k:"fn"</code></strong>: function declaration / body header.
+          <pre>{"ir":"sir-v1.0","k":"fn","id":ID,"name":ID,
+  "sig": {"t":"ref","id":SIG_ID},
+  "linkage":"local"|"public"|"extern"}
+</pre>
+        </li>
+        <li>
+          <strong><code>k:"block"</code></strong>: begins a basic block.
+          <pre>{"ir":"sir-v1.0","k":"block","id":ID,
+  "params":[{"id":ID,"ty":{ "t":"ref","id":TYPE_ID }},...]}
+</pre>
+        </li>
+        <li>
+          <strong><code>k:"op"</code></strong>: pure SSA operation.
+          <pre>{"ir":"sir-v1.0","k":"op","m":STR,
+  "dst": {"t":"val","id":ID},
+  "ty": {"t":"ref","id":TYPE_ID} | null,
+  "args":[VALUE,...],"flags":{...}}
+</pre>
+        </li>
+        <li>
+          <strong><code>k:"eff"</code></strong>: effectful instruction; may yield SSA results.
+          <pre>{"ir":"sir-v1.0","k":"eff","m":STR,
+  "results":[{"id":ID,"ty":{ "t":"ref","id":TYPE_ID }},...],
+  "ty": {"t":"ref","id":TYPE_ID} | null,
+  "args":[VALUE,...],"flags":{...}}
+</pre>
+        </li>
+        <li>
+          <strong><code>k:"term"</code></strong>: terminator; ends a block.
+          <pre>{"ir":"sir-v1.0","k":"term","m":STR, ...}
+</pre>
+        </li>
+      </ul>
+      <p>
+        Notes: <code>loc</code> and <code>meta</code> may appear on any record.
+        Declarations referenced by <code>{"t":"ref"}</code> MUST appear earlier
+        in the stream, except block targets which MAY be forward references as
+        described above.
+      </p>
+
       <h2>Value encoding (normative)</h2>
       <p>
         Fields that accept a “value” use a tagged encoding to distinguish
@@ -246,7 +354,9 @@
         <li>
           <strong>Record reference:</strong>
           <code>{"t":"ref","id":ID}</code> points at another record’s
-          <code>id</code> and MUST be a backward reference.
+          <code>id</code>. References to declarations MUST be backward
+          references. References to basic blocks (terminator targets) MAY be
+          forward or backward references.
         </li>
         <li>
           <strong>SSA value reference:</strong>
@@ -313,8 +423,8 @@
         <li>
           Even if a consumer rejects other unknown <code>k</code> values, it
           MUST still accept and ignore <code>k:"ext"</code> records with unknown
-          <code>ns</code> and/or <code>tag</code> values (extensions MUST NOT be
-          required for correctness in v1.0).
+          <code>name</code> values (extensions MUST NOT be required for
+          correctness in v1.0).
         </li>
         <li>
           Consumers MUST ignore unknown fields on any record kind
@@ -354,7 +464,7 @@
         </li>
         <li>
           <code>ext</code> records are non-semantic in SIR v1.0. Consumers MUST
-          ignore unknown <code>ns</code> namespaces and MUST NOT treat
+          ignore unknown <code>name</code> values and MUST NOT treat
           <code>ext</code> as required for correctness.
         </li>
       </ul>
@@ -394,8 +504,11 @@
         </li>
         <li>
           Reference integrity is mandatory: any
-          <code>{"t":"ref","id":...}</code> MUST point to exactly one prior
-          definition of that <code>id</code> within the stream.
+          <code>{"t":"ref","id":...}</code> MUST resolve to exactly one
+          definition of that <code>id</code>. For declarations, the definition
+          MUST appear earlier in the stream. For block refs (terminator
+          targets), the definition MAY appear later but MUST resolve within the
+          same function.
         </li>
       </ul>
 
@@ -705,12 +818,37 @@
       <p>
         The table below is normative for SIR v1.0. Consumers MUST reject unknown
         typed mnemonics in semantic records
-        (<code>op</code>/<code>eff</code>/<code>term</code>), except where
-        explicitly marked “extensible”. Some mnemonics are defined by a closed
-        grammar (e.g., <code>i&lt;dst&gt;.zext.i&lt;src&gt;</code>); these are
-        still part of the closed v1.0 set and MUST be validated against the
-        grammar and type rules below.
+        (<code>op</code>/<code>eff</code>/<code>term</code>). Feature packs
+        listed in <code>unit.features</code> may add additional mnemonics beyond
+        the core; when enabled, each pack defines a <strong>closed</strong>
+        admitted set. Consumers MUST reject any mnemonic that is not in the core
+        table and not admitted by an enabled pack. Some mnemonics are defined by
+        a closed grammar (e.g., <code>i&lt;dst&gt;.zext.i&lt;src&gt;</code>);
+        these are still part of the closed v1.0 set and MUST be validated against
+        the grammar and type rules below.
       </p>
+
+      <h4>Extensibility rules (normative)</h4>
+      <ul>
+        <li>
+          Unless explicitly stated otherwise, the set of valid mnemonics for
+          semantic records (<code>op</code>/<code>eff</code>/<code>term</code>)
+          is <strong>closed</strong> in SIR v1.0: unknown mnemonics MUST be
+          rejected.
+        </li>
+        <li>
+          Feature packs extend the vocabulary by adding additional
+          <strong>closed</strong> mnemonic sets. If a stream uses any mnemonic
+          from a feature pack, the producer MUST list that pack in
+          <code>unit.features</code>; otherwise consumers MUST reject the stream.
+        </li>
+        <li>
+          Even when a feature pack is enabled, unknown mnemonics in that pack’s
+          namespace/family MUST be rejected. Producers MUST NOT emit private or
+          experimental mnemonics in semantic records; use <code>ext</code>
+          records for tooling/debug data instead.
+        </li>
+      </ul>
 
       <div class="table-wrap">
         <table>
@@ -1198,7 +1336,7 @@
             </tr>
             <tr>
               <td data-label="Mnemonic">select</td>
-              <td data-label="Kind"><code>op</code> (extensible)</td>
+              <td data-label="Kind"><code>op</code></td>
               <td data-label="Shape"><code>ty:ref, args:[cond, a, b]</code></td>
               <td data-label="Type rule">cond: bool, a:ty, b:ty → dst: ty</td>
               <td data-label="Semantics">
@@ -1513,15 +1651,14 @@
             </tr>
             <tr>
               <td data-label="Mnemonic">eff.fence</td>
-              <td data-label="Kind"><code>eff</code> (extensible)</td>
+              <td data-label="Kind"><code>eff</code></td>
               <td data-label="Shape"><code>args:[]</code>, flags:{mode:STR}</td>
               <td data-label="Type rule">—</td>
               <td data-label="Semantics">
-                Memory ordering barrier. The meaning of <code>mode</code> MUST
-                be declared by <code>unit.features</code> (e.g.,
-                <code>seqcst</code>, <code>acquire</code>,
-                <code>release</code>). If unsupported, consumers MAY reject the
-                stream.
+                Memory ordering barrier. <code>flags.mode</code> is a closed set
+                in v1.0 and MUST be one of: <code>relaxed</code>,
+                <code>acquire</code>, <code>release</code>, <code>acqrel</code>,
+                <code>seqcst</code>. Consumers MUST reject unknown modes.
               </td>
             </tr>
             <tr>
@@ -1533,13 +1670,16 @@
                   All atomic ops MUST specify ordering via
                   <code>flags.mode</code> (e.g., <code>relaxed</code>,
                   <code>acquire</code>, <code>release</code>,
-                  <code>acqrel</code>, <code>seqcst</code>).</span
-                >
+                  <code>acqrel</code>, <code>seqcst</code>).
+                  The set of <code>atomic.*</code> mnemonics listed below is
+                  closed; consumers MUST reject unknown <code>atomic.*</code>
+                  mnemonics even when <code>atomics:v1</code> is enabled.
+                </span>
               </td>
             </tr>
             <tr>
               <td data-label="Mnemonic">atomic.load.i8/i16/i32/i64</td>
-              <td data-label="Kind"><code>eff</code> (extensible)</td>
+              <td data-label="Kind"><code>eff</code></td>
               <td data-label="Shape">
                 <code>args:[addr]</code>, results:[{id,ty}], flags:{mode:STR,
                 align?:i32}
@@ -1552,7 +1692,7 @@
             </tr>
             <tr>
               <td data-label="Mnemonic">atomic.store.i8/i16/i32/i64</td>
-              <td data-label="Kind"><code>eff</code> (extensible)</td>
+              <td data-label="Kind"><code>eff</code></td>
               <td data-label="Shape">
                 <code>args:[addr,val]</code>, flags:{mode:STR, align?:i32}
               </td>
@@ -1568,19 +1708,20 @@
               <td data-label="Mnemonic">
                 atomic.rmw.add / and / or / xor / xchg (i8/i16/i32/i64)
               </td>
-              <td data-label="Kind"><code>eff</code> (extensible)</td>
+              <td data-label="Kind"><code>eff</code></td>
               <td data-label="Shape">
                 <code>args:[addr,val]</code>, results:[{id,ty}],
                 flags:{mode:STR, align?:i32}
               </td>
               <td data-label="Type rule">addr: ptr, val: iN → result: iN</td>
               <td data-label="Semantics">
-                Atomic read-modify-write returning the prior value.
+                Atomic read-modify-write returning the prior value. Consumers
+                MUST reject if <code>atomics:v1</code> is not enabled.
               </td>
             </tr>
             <tr>
               <td data-label="Mnemonic">atomic.cmpxchg (i8/i16/i32/i64)</td>
-              <td data-label="Kind"><code>eff</code> (extensible)</td>
+              <td data-label="Kind"><code>eff</code></td>
               <td data-label="Shape">
                 <code>args:[addr, expected, desired]</code>,
                 results:[{id,ty},{id,ty}], flags:{modeSucc:STR, modeFail:STR,
@@ -1592,7 +1733,8 @@
               </td>
               <td data-label="Semantics">
                 Compare-and-swap. Returns the loaded value and whether the swap
-                occurred.
+                occurred. Consumers MUST reject if <code>atomics:v1</code> is not
+                enabled.
               </td>
             </tr>
 
@@ -1617,7 +1759,7 @@
             </tr>
             <tr>
               <td data-label="Mnemonic">call.indirect</td>
-              <td data-label="Kind"><code>eff</code> (extensible)</td>
+              <td data-label="Kind"><code>eff</code></td>
               <td data-label="Shape">
                 <code>sig:ref, args:[callee_ptr, ...]</code>, results?:[...]
               </td>

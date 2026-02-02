@@ -1,0 +1,14 @@
+{"ir":"sir-v1.0","k":"meta","producer":"sircc-example","unit":"float_cmp"}
+
+{"ir":"sir-v1.0","k":"type","id":1,"kind":"prim","prim":"f64"}
+{"ir":"sir-v1.0","k":"type","id":2,"kind":"prim","prim":"bool"}
+{"ir":"sir-v1.0","k":"type","id":3,"kind":"fn","params":[],"ret":2}
+
+{"ir":"sir-v1.0","k":"node","id":10,"tag":"const.f64","type_ref":1,"fields":{"bits":"0x3ff0000000000000"}}
+{"ir":"sir-v1.0","k":"node","id":11,"tag":"const.f64","type_ref":1,"fields":{"bits":"0x4000000000000000"}}
+{"ir":"sir-v1.0","k":"node","id":12,"tag":"f64.cmp.olt","type_ref":2,"fields":{"args":[{"t":"ref","id":10},{"t":"ref","id":11}]}}
+{"ir":"sir-v1.0","k":"node","id":20,"tag":"term.ret","fields":{"value":{"t":"ref","id":12}}}
+{"ir":"sir-v1.0","k":"node","id":30,"tag":"block","fields":{"stmts":[{"t":"ref","id":20}]}}
+
+{"ir":"sir-v1.0","k":"node","id":40,"tag":"fn","type_ref":3,"fields":{"name":"main","params":[],"body":{"t":"ref","id":30}}}
+

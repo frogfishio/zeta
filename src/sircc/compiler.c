@@ -12,6 +12,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -27,6 +28,7 @@ typedef enum TypeKind {
   TYPE_INVALID = 0,
   TYPE_PRIM,
   TYPE_PTR,
+  TYPE_ARRAY,
   TYPE_FN,
 } TypeKind;
 
@@ -59,6 +61,7 @@ typedef struct TypeRec {
 
   const char* prim;
   int64_t of;
+  int64_t len;
 
   int64_t* params;
   size_t param_len;
@@ -233,6 +236,23 @@ static bool parse_node_ref_id(const JsonValue* v, int64_t* out_id) {
   if (!ts || strcmp(ts, "ref") != 0) return false;
   JsonValue* idv = json_obj_get(v, "id");
   return json_get_i64(idv, out_id);
+}
+
+static bool parse_type_ref_id(const JsonValue* v, int64_t* out_id) {
+  if (!v) return false;
+  int64_t id = 0;
+  if (json_get_i64((JsonValue*)v, &id)) {
+    *out_id = id;
+    return true;
+  }
+  if (v->type != JSON_OBJECT) return false;
+  const char* t = json_get_string(json_obj_get((JsonValue*)v, "t"));
+  if (!t || strcmp(t, "ref") != 0) return false;
+  const char* k = json_get_string(json_obj_get((JsonValue*)v, "k"));
+  if (k && strcmp(k, "type") != 0) return false;
+  if (!json_get_i64(json_obj_get((JsonValue*)v, "id"), &id)) return false;
+  *out_id = id;
+  return true;
 }
 
 static bool is_ident(const char* s) {
@@ -625,6 +645,7 @@ static bool parse_type_record(SirProgram* p, JsonValue* obj) {
   tr->id = id;
   tr->kind = TYPE_INVALID;
   tr->of = 0;
+  tr->len = 0;
   tr->ret = 0;
   tr->params = NULL;
   tr->param_len = 0;
@@ -637,11 +658,19 @@ static bool parse_type_record(SirProgram* p, JsonValue* obj) {
   } else if (strcmp(kind, "ptr") == 0) {
     tr->kind = TYPE_PTR;
     if (!must_i64(p, json_obj_get(obj, "of"), &tr->of, "type.of")) return false;
+  } else if (strcmp(kind, "array") == 0) {
+    tr->kind = TYPE_ARRAY;
+    if (!must_i64(p, json_obj_get(obj, "of"), &tr->of, "type.of")) return false;
+    if (!must_i64(p, json_obj_get(obj, "len"), &tr->len, "type.len")) return false;
+    if (tr->len < 0) {
+      errf(p, "sircc: type.array len must be >= 0");
+      return false;
+    }
   } else if (strcmp(kind, "fn") == 0) {
     tr->kind = TYPE_FN;
     JsonValue* params = json_obj_get(obj, "params");
     if (!params || params->type != JSON_ARRAY) {
-      fatalf("sircc: expected array for type.params");
+      errf(p, "sircc: expected array for type.params");
       return false;
     }
     tr->param_len = params->v.arr.len;
@@ -1199,6 +1228,106 @@ static LLVMTypeRef lower_type_prim(LLVMContextRef ctx, const char* prim) {
   return NULL;
 }
 
+static bool type_size_align_rec(SirProgram* p, int64_t type_id, unsigned char* visiting, int64_t* out_size,
+                                int64_t* out_align) {
+  if (!p || !out_size || !out_align) return false;
+  if (type_id < 0 || (size_t)type_id >= p->types_cap || !p->types[type_id]) return false;
+  if (visiting && visiting[type_id]) return false;
+  if (visiting) visiting[type_id] = 1;
+
+  TypeRec* tr = p->types[type_id];
+  int64_t size = 0;
+  int64_t align = 0;
+  switch (tr->kind) {
+    case TYPE_PRIM:
+      if (strcmp(tr->prim, "i1") == 0 || strcmp(tr->prim, "bool") == 0) {
+        size = 1;
+        align = 1;
+      } else if (strcmp(tr->prim, "i8") == 0) {
+        size = 1;
+        align = 1;
+      } else if (strcmp(tr->prim, "i16") == 0) {
+        size = 2;
+        align = 2;
+      } else if (strcmp(tr->prim, "i32") == 0) {
+        size = 4;
+        align = 4;
+      } else if (strcmp(tr->prim, "i64") == 0) {
+        size = 8;
+        align = 8;
+      } else if (strcmp(tr->prim, "f32") == 0) {
+        size = 4;
+        align = 4;
+      } else if (strcmp(tr->prim, "f64") == 0) {
+        size = 8;
+        align = 8;
+      } else if (strcmp(tr->prim, "void") == 0) {
+        if (visiting) visiting[type_id] = 0;
+        return false;
+      } else {
+        if (visiting) visiting[type_id] = 0;
+        return false;
+      }
+      break;
+    case TYPE_PTR:
+      size = (int64_t)sizeof(void*);
+      align = (int64_t)sizeof(void*);
+      break;
+    case TYPE_ARRAY: {
+      int64_t el_size = 0;
+      int64_t el_align = 0;
+      if (!type_size_align_rec(p, tr->of, visiting, &el_size, &el_align)) {
+        if (visiting) visiting[type_id] = 0;
+        return false;
+      }
+      if (el_align <= 0) {
+        if (visiting) visiting[type_id] = 0;
+        return false;
+      }
+      int64_t stride = el_size;
+      int64_t rem = stride % el_align;
+      if (rem) stride += (el_align - rem);
+      if (tr->len < 0) {
+        if (visiting) visiting[type_id] = 0;
+        return false;
+      }
+      if (tr->len == 0) {
+        size = 0;
+        align = el_align;
+        break;
+      }
+      if (stride != 0 && tr->len > INT64_MAX / stride) {
+        if (visiting) visiting[type_id] = 0;
+        return false;
+      }
+      size = stride * tr->len;
+      align = el_align;
+      break;
+    }
+    case TYPE_FN:
+    case TYPE_INVALID:
+    default:
+      if (visiting) visiting[type_id] = 0;
+      return false;
+  }
+
+  if (visiting) visiting[type_id] = 0;
+  if (size < 0 || align <= 0) return false;
+  *out_size = size;
+  *out_align = align;
+  return true;
+}
+
+static bool type_size_align(SirProgram* p, int64_t type_id, int64_t* out_size, int64_t* out_align) {
+  if (!p || !out_size || !out_align) return false;
+  if (type_id < 0 || (size_t)type_id >= p->types_cap || !p->types[type_id]) return false;
+  unsigned char* visiting = (unsigned char*)calloc(p->types_cap ? p->types_cap : 1, 1);
+  if (!visiting) return false;
+  bool ok = type_size_align_rec(p, type_id, visiting, out_size, out_align);
+  free(visiting);
+  return ok;
+}
+
 static LLVMValueRef get_or_declare_intrinsic(LLVMModuleRef mod, const char* name, LLVMTypeRef ret,
                                              LLVMTypeRef* params, unsigned param_count) {
   LLVMValueRef fn = LLVMGetNamedFunction(mod, name);
@@ -1207,6 +1336,49 @@ static LLVMValueRef get_or_declare_intrinsic(LLVMModuleRef mod, const char* name
   fn = LLVMAddFunction(mod, name, fnty);
   LLVMSetLinkage(fn, LLVMExternalLinkage);
   return fn;
+}
+
+static LLVMValueRef canonical_qnan(FunctionCtx* f, LLVMTypeRef fty) {
+  if (LLVMGetTypeKind(fty) == LLVMFloatTypeKind) {
+    LLVMValueRef ib = LLVMConstInt(LLVMInt32TypeInContext(f->ctx), 0x7fc00000u, 0);
+    return LLVMConstBitCast(ib, fty);
+  }
+  if (LLVMGetTypeKind(fty) == LLVMDoubleTypeKind) {
+    LLVMValueRef ib = LLVMConstInt(LLVMInt64TypeInContext(f->ctx), 0x7ff8000000000000ULL, 0);
+    return LLVMConstBitCast(ib, fty);
+  }
+  return LLVMGetUndef(fty);
+}
+
+static LLVMValueRef canonicalize_float(FunctionCtx* f, LLVMValueRef v) {
+  LLVMTypeRef ty = LLVMTypeOf(v);
+  if (LLVMGetTypeKind(ty) != LLVMFloatTypeKind && LLVMGetTypeKind(ty) != LLVMDoubleTypeKind) return v;
+  LLVMValueRef isnan = LLVMBuildFCmp(f->builder, LLVMRealUNO, v, v, "isnan");
+  LLVMValueRef qnan = canonical_qnan(f, ty);
+  return LLVMBuildSelect(f->builder, isnan, qnan, v, "canon");
+}
+
+static void emit_trap_unreachable(FunctionCtx* f) {
+  LLVMTypeRef v = LLVMVoidTypeInContext(f->ctx);
+  LLVMValueRef fn = get_or_declare_intrinsic(f->mod, "llvm.trap", v, NULL, 0);
+  LLVMBuildCall2(f->builder, LLVMGetElementType(LLVMTypeOf(fn)), fn, NULL, 0, "");
+  LLVMBuildUnreachable(f->builder);
+}
+
+static bool emit_trap_if(FunctionCtx* f, LLVMValueRef cond) {
+  if (!f || !f->builder || !f->fn) return false;
+  if (!cond || LLVMGetTypeKind(LLVMTypeOf(cond)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(cond)) != 1) return false;
+
+  if (LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(f->builder))) return false;
+  LLVMBasicBlockRef trap_bb = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "trap");
+  LLVMBasicBlockRef cont_bb = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "cont");
+  LLVMBuildCondBr(f->builder, cond, trap_bb, cont_bb);
+
+  LLVMPositionBuilderAtEnd(f->builder, trap_bb);
+  emit_trap_unreachable(f);
+
+  LLVMPositionBuilderAtEnd(f->builder, cont_bb);
+  return true;
 }
 
 static LLVMTypeRef lower_type(SirProgram* p, LLVMContextRef ctx, int64_t id) {
@@ -1224,6 +1396,11 @@ static LLVMTypeRef lower_type(SirProgram* p, LLVMContextRef ctx, int64_t id) {
     case TYPE_PTR: {
       LLVMTypeRef of = lower_type(p, ctx, tr->of);
       if (of) out = LLVMPointerType(of, 0);
+      break;
+    }
+    case TYPE_ARRAY: {
+      LLVMTypeRef of = lower_type(p, ctx, tr->of);
+      if (of && tr->len >= 0 && tr->len <= (int64_t)UINT_MAX) out = LLVMArrayType(of, (unsigned)tr->len);
       break;
     }
     case TYPE_FN: {
@@ -1443,6 +1620,41 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
             out = LLVMBuildNeg(f->builder, a, "ineg");
             goto done;
           }
+          if (strcmp(op, "eqz") == 0) {
+            if (b) {
+              errf(f->p, "sircc: %s node %lld requires 1 arg", n->tag, (long long)node_id);
+              goto done;
+            }
+            LLVMTypeRef aty = LLVMTypeOf(a);
+            if (LLVMGetTypeKind(aty) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(aty) != (unsigned)width) {
+              errf(f->p, "sircc: %s requires i%d operand", n->tag, width);
+              goto done;
+            }
+            LLVMValueRef zero = LLVMConstInt(aty, 0, 0);
+            out = LLVMBuildICmp(f->builder, LLVMIntEQ, a, zero, "eqz");
+            goto done;
+          }
+          if (strcmp(op, "min.s") == 0 || strcmp(op, "min.u") == 0 || strcmp(op, "max.s") == 0 || strcmp(op, "max.u") == 0) {
+            if (!b) {
+              errf(f->p, "sircc: %s node %lld requires 2 args", n->tag, (long long)node_id);
+              goto done;
+            }
+            LLVMTypeRef aty = LLVMTypeOf(a);
+            LLVMTypeRef bty = LLVMTypeOf(b);
+            if (LLVMGetTypeKind(aty) != LLVMIntegerTypeKind || LLVMGetTypeKind(bty) != LLVMIntegerTypeKind ||
+                LLVMGetIntTypeWidth(aty) != (unsigned)width || LLVMGetIntTypeWidth(bty) != (unsigned)width) {
+              errf(f->p, "sircc: %s requires i%d operands", n->tag, width);
+              goto done;
+            }
+            bool is_min = (strncmp(op, "min.", 4) == 0);
+            bool is_signed = (op[4] == 's');
+            LLVMIntPredicate pred;
+            if (is_min) pred = is_signed ? LLVMIntSLE : LLVMIntULE;
+            else pred = is_signed ? LLVMIntSGE : LLVMIntUGE;
+            LLVMValueRef cmp = LLVMBuildICmp(f->builder, pred, a, b, "minmax.cmp");
+            out = LLVMBuildSelect(f->builder, cmp, a, b, "minmax");
+            goto done;
+          }
           if (strcmp(op, "shl") == 0 || strcmp(op, "shr.s") == 0 || strcmp(op, "shr.u") == 0) {
             if (!b) {
               errf(f->p, "sircc: %s node %lld requires 2 args", n->tag, (long long)node_id);
@@ -1477,6 +1689,247 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
               goto done;
             }
             out = LLVMBuildLShr(f->builder, a, shift, "lshr");
+            goto done;
+          }
+
+          if (strcmp(op, "div.s.trap") == 0 || strcmp(op, "div.u.trap") == 0 || strcmp(op, "rem.s.trap") == 0 ||
+              strcmp(op, "rem.u.trap") == 0) {
+            if (!b) {
+              errf(f->p, "sircc: %s node %lld requires 2 args", n->tag, (long long)node_id);
+              goto done;
+            }
+            LLVMTypeRef aty = LLVMTypeOf(a);
+            LLVMTypeRef bty = LLVMTypeOf(b);
+            if (LLVMGetTypeKind(aty) != LLVMIntegerTypeKind || LLVMGetTypeKind(bty) != LLVMIntegerTypeKind ||
+                LLVMGetIntTypeWidth(aty) != (unsigned)width || LLVMGetIntTypeWidth(bty) != (unsigned)width) {
+              errf(f->p, "sircc: %s requires i%d operands", n->tag, width);
+              goto done;
+            }
+            LLVMValueRef zero = LLVMConstInt(aty, 0, 0);
+            LLVMValueRef b_is_zero = LLVMBuildICmp(f->builder, LLVMIntEQ, b, zero, "b.iszero");
+            LLVMValueRef trap_cond = b_is_zero;
+
+            bool is_div = (strncmp(op, "div.", 4) == 0);
+            bool is_signed = (op[4] == 's');
+            if (is_div && is_signed) {
+              unsigned long long min_bits = 1ULL << (unsigned)(width - 1);
+              LLVMValueRef minv = LLVMConstInt(aty, min_bits, 0);
+              LLVMValueRef neg1 = LLVMConstAllOnes(aty);
+              LLVMValueRef a_is_min = LLVMBuildICmp(f->builder, LLVMIntEQ, a, minv, "a.ismin");
+              LLVMValueRef b_is_neg1 = LLVMBuildICmp(f->builder, LLVMIntEQ, b, neg1, "b.isneg1");
+              LLVMValueRef ov = LLVMBuildAnd(f->builder, a_is_min, b_is_neg1, "div.ov");
+              trap_cond = LLVMBuildOr(f->builder, trap_cond, ov, "trap.cond");
+            }
+            if (!emit_trap_if(f, trap_cond)) goto done;
+
+            if (is_div) {
+              out = is_signed ? LLVMBuildSDiv(f->builder, a, b, "div") : LLVMBuildUDiv(f->builder, a, b, "div");
+            } else {
+              out = is_signed ? LLVMBuildSRem(f->builder, a, b, "rem") : LLVMBuildURem(f->builder, a, b, "rem");
+            }
+            goto done;
+          }
+
+          if (strncmp(op, "trunc_sat_f", 11) == 0) {
+            // iN.trunc_sat_f32.s / iN.trunc_sat_f32.u (and f64.*)
+            if (!args || args->type != JSON_ARRAY || args->v.arr.len != 1) {
+              errf(f->p, "sircc: %s node %lld requires args:[x]", n->tag, (long long)node_id);
+              goto done;
+            }
+            int srcw = 0;
+            char su = 0;
+            if (sscanf(op, "trunc_sat_f%d.%c", &srcw, &su) != 2 || (srcw != 32 && srcw != 64) || (su != 's' && su != 'u')) {
+              errf(f->p, "sircc: unsupported trunc_sat form '%s' in %s", op, n->tag);
+              goto done;
+            }
+            int64_t x_id = 0;
+            if (!parse_node_ref_id(args->v.arr.items[0], &x_id)) {
+              errf(f->p, "sircc: %s node %lld arg must be node ref", n->tag, (long long)node_id);
+              goto done;
+            }
+            LLVMValueRef x = lower_expr(f, x_id);
+            if (!x) goto done;
+
+            LLVMTypeRef ity = LLVMIntTypeInContext(f->ctx, (unsigned)width);
+            LLVMTypeRef fty = (srcw == 32) ? LLVMFloatTypeInContext(f->ctx) : LLVMDoubleTypeInContext(f->ctx);
+            if (LLVMTypeOf(x) != fty) {
+              errf(f->p, "sircc: %s requires f%d operand", n->tag, srcw);
+              goto done;
+            }
+            if (LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(f->builder))) goto done;
+
+            LLVMBasicBlockRef bb_nan = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "sat.nan");
+            LLVMBasicBlockRef bb_chk1 = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "sat.chk1");
+            LLVMBasicBlockRef bb_min = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "sat.min");
+            LLVMBasicBlockRef bb_chk2 = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "sat.chk2");
+            LLVMBasicBlockRef bb_max = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "sat.max");
+            LLVMBasicBlockRef bb_conv = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "sat.conv");
+            LLVMBasicBlockRef bb_merge = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "sat.merge");
+
+            LLVMValueRef isnan = LLVMBuildFCmp(f->builder, LLVMRealUNO, x, x, "isnan");
+            LLVMBuildCondBr(f->builder, isnan, bb_nan, bb_chk1);
+
+            LLVMPositionBuilderAtEnd(f->builder, bb_nan);
+            LLVMValueRef z = LLVMConstInt(ity, 0, 0);
+            LLVMBuildBr(f->builder, bb_merge);
+
+            LLVMPositionBuilderAtEnd(f->builder, bb_chk1);
+            LLVMValueRef min_i = NULL;
+            LLVMValueRef max_i = NULL;
+            if (su == 's') {
+              unsigned long long min_bits = 1ULL << (unsigned)(width - 1);
+              min_i = LLVMConstInt(ity, min_bits, 0);
+              max_i = LLVMConstInt(ity, min_bits - 1ULL, 0);
+              LLVMValueRef min_f = LLVMConstSIToFP(min_i, fty);
+              LLVMValueRef too_low = LLVMBuildFCmp(f->builder, LLVMRealOLT, x, min_f, "too_low");
+              LLVMBuildCondBr(f->builder, too_low, bb_min, bb_chk2);
+            } else {
+              min_i = LLVMConstInt(ity, 0, 0);
+              max_i = LLVMConstAllOnes(ity);
+              LLVMValueRef zf = LLVMConstReal(fty, 0.0);
+              LLVMValueRef too_low = LLVMBuildFCmp(f->builder, LLVMRealOLE, x, zf, "too_low");
+              LLVMBuildCondBr(f->builder, too_low, bb_min, bb_chk2);
+            }
+
+            LLVMPositionBuilderAtEnd(f->builder, bb_min);
+            LLVMBuildBr(f->builder, bb_merge);
+
+            LLVMPositionBuilderAtEnd(f->builder, bb_chk2);
+            LLVMValueRef max_f = (su == 's') ? LLVMConstSIToFP(max_i, fty) : LLVMConstUIToFP(max_i, fty);
+            LLVMValueRef too_high = LLVMBuildFCmp(f->builder, LLVMRealOGE, x, max_f, "too_high");
+            LLVMBuildCondBr(f->builder, too_high, bb_max, bb_conv);
+
+            LLVMPositionBuilderAtEnd(f->builder, bb_max);
+            LLVMBuildBr(f->builder, bb_merge);
+
+            LLVMPositionBuilderAtEnd(f->builder, bb_conv);
+            LLVMValueRef conv = (su == 's') ? LLVMBuildFPToSI(f->builder, x, ity, "fptosi") : LLVMBuildFPToUI(f->builder, x, ity, "fptoui");
+            LLVMBuildBr(f->builder, bb_merge);
+
+            LLVMPositionBuilderAtEnd(f->builder, bb_merge);
+            LLVMValueRef phi = LLVMBuildPhi(f->builder, ity, "trunc_sat");
+            LLVMValueRef inc_vals[4] = {z, min_i, max_i, conv};
+            LLVMBasicBlockRef inc_bbs[4] = {bb_nan, bb_min, bb_max, bb_conv};
+            LLVMAddIncoming(phi, inc_vals, inc_bbs, 4);
+            out = phi;
+            goto done;
+          }
+
+          if (strcmp(op, "div.s.sat") == 0 || strcmp(op, "div.u.sat") == 0 || strcmp(op, "rem.s.sat") == 0 ||
+              strcmp(op, "rem.u.sat") == 0) {
+            if (!b) {
+              errf(f->p, "sircc: %s node %lld requires 2 args", n->tag, (long long)node_id);
+              goto done;
+            }
+            LLVMTypeRef aty = LLVMTypeOf(a);
+            LLVMTypeRef bty = LLVMTypeOf(b);
+            if (LLVMGetTypeKind(aty) != LLVMIntegerTypeKind || LLVMGetTypeKind(bty) != LLVMIntegerTypeKind ||
+                LLVMGetIntTypeWidth(aty) != (unsigned)width || LLVMGetIntTypeWidth(bty) != (unsigned)width) {
+              errf(f->p, "sircc: %s requires i%d operands", n->tag, width);
+              goto done;
+            }
+            if (LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(f->builder))) goto done;
+
+            bool is_div = (strncmp(op, "div.", 4) == 0);
+            bool is_signed = (op[4] == 's');
+
+            LLVMBasicBlockRef cur = LLVMGetInsertBlock(f->builder);
+            LLVMBasicBlockRef bb_zero = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "sat.zero");
+            LLVMBasicBlockRef bb_chk = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "sat.chk");
+            LLVMBasicBlockRef bb_norm = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "sat.norm");
+            LLVMBasicBlockRef bb_over = NULL;
+            LLVMBasicBlockRef bb_merge = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "sat.merge");
+
+            LLVMValueRef zero = LLVMConstInt(aty, 0, 0);
+            LLVMValueRef b_is_zero = LLVMBuildICmp(f->builder, LLVMIntEQ, b, zero, "b.iszero");
+            LLVMBuildCondBr(f->builder, b_is_zero, bb_zero, bb_chk);
+
+            // b==0 case: result 0
+            LLVMPositionBuilderAtEnd(f->builder, bb_zero);
+            LLVMBuildBr(f->builder, bb_merge);
+
+            // check overflow (signed div only), otherwise jump to normal
+            LLVMPositionBuilderAtEnd(f->builder, bb_chk);
+            if (is_div && is_signed) {
+              bb_over = LLVMAppendBasicBlockInContext(f->ctx, f->fn, "sat.over");
+              unsigned long long min_bits = 1ULL << (unsigned)(width - 1);
+              LLVMValueRef minv = LLVMConstInt(aty, min_bits, 0);
+              LLVMValueRef neg1 = LLVMConstAllOnes(aty);
+              LLVMValueRef a_is_min = LLVMBuildICmp(f->builder, LLVMIntEQ, a, minv, "a.ismin");
+              LLVMValueRef b_is_neg1 = LLVMBuildICmp(f->builder, LLVMIntEQ, b, neg1, "b.isneg1");
+              LLVMValueRef ov = LLVMBuildAnd(f->builder, a_is_min, b_is_neg1, "div.ov");
+              LLVMBuildCondBr(f->builder, ov, bb_over, bb_norm);
+
+              LLVMPositionBuilderAtEnd(f->builder, bb_over);
+              LLVMBuildBr(f->builder, bb_merge);
+            } else {
+              LLVMBuildBr(f->builder, bb_norm);
+            }
+
+            // normal division/rem
+            LLVMPositionBuilderAtEnd(f->builder, bb_norm);
+            LLVMValueRef norm = NULL;
+            if (is_div) {
+              norm = is_signed ? LLVMBuildSDiv(f->builder, a, b, "div") : LLVMBuildUDiv(f->builder, a, b, "div");
+            } else {
+              norm = is_signed ? LLVMBuildSRem(f->builder, a, b, "rem") : LLVMBuildURem(f->builder, a, b, "rem");
+            }
+            LLVMBuildBr(f->builder, bb_merge);
+
+            // merge
+            LLVMPositionBuilderAtEnd(f->builder, bb_merge);
+            LLVMValueRef phi = LLVMBuildPhi(f->builder, aty, "sat");
+            LLVMValueRef inc_vals[3];
+            LLVMBasicBlockRef inc_bbs[3];
+            unsigned inc_n = 0;
+            inc_vals[inc_n] = zero;
+            inc_bbs[inc_n] = bb_zero;
+            inc_n++;
+            if (bb_over) {
+              unsigned long long min_bits = 1ULL << (unsigned)(width - 1);
+              LLVMValueRef minv = LLVMConstInt(aty, min_bits, 0);
+              inc_vals[inc_n] = minv;
+              inc_bbs[inc_n] = bb_over;
+              inc_n++;
+            }
+            inc_vals[inc_n] = norm;
+            inc_bbs[inc_n] = bb_norm;
+            inc_n++;
+            LLVMAddIncoming(phi, inc_vals, inc_bbs, inc_n);
+            (void)cur;
+            out = phi;
+            goto done;
+          }
+
+          if (strcmp(op, "rotl") == 0 || strcmp(op, "rotr") == 0) {
+            if (!b) {
+              errf(f->p, "sircc: %s node %lld requires 2 args", n->tag, (long long)node_id);
+              goto done;
+            }
+            LLVMTypeRef xty = LLVMTypeOf(a);
+            if (LLVMGetTypeKind(xty) != LLVMIntegerTypeKind) {
+              errf(f->p, "sircc: %s node %lld requires integer lhs", n->tag, (long long)node_id);
+              goto done;
+            }
+            LLVMTypeRef sty = LLVMTypeOf(b);
+            if (LLVMGetTypeKind(sty) != LLVMIntegerTypeKind) {
+              errf(f->p, "sircc: %s node %lld requires integer rotate amount", n->tag, (long long)node_id);
+              goto done;
+            }
+            LLVMValueRef amt = b;
+            if (LLVMGetIntTypeWidth(sty) != LLVMGetIntTypeWidth(xty)) {
+              amt = LLVMBuildZExtOrTrunc(f->builder, b, xty, "rot.cast");
+            }
+            unsigned mask = (unsigned)(width - 1);
+            LLVMValueRef maskv = LLVMConstInt(xty, mask, 0);
+            amt = LLVMBuildAnd(f->builder, amt, maskv, "rot.mask");
+
+            char full[32];
+            snprintf(full, sizeof(full), "llvm.%s.i%d", (strcmp(op, "rotl") == 0) ? "fshl" : "fshr", width);
+            LLVMTypeRef params[3] = {xty, xty, xty};
+            LLVMValueRef fn = get_or_declare_intrinsic(f->mod, full, xty, params, 3);
+            LLVMValueRef argv[3] = {a, a, amt};
+            out = LLVMBuildCall2(f->builder, LLVMGetElementType(LLVMTypeOf(fn)), fn, argv, 3, "rot");
             goto done;
           }
 
@@ -1678,6 +2131,263 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
     goto done;
   }
 
+  if (strncmp(n->tag, "ptr.", 4) == 0) {
+    const char* op = n->tag + 4;
+    JsonValue* args = n->fields ? json_obj_get(n->fields, "args") : NULL;
+
+    if (strcmp(op, "sym") == 0) {
+      const char* name = NULL;
+      if (n->fields) name = json_get_string(json_obj_get(n->fields, "name"));
+      if (!name) {
+        errf(f->p, "sircc: ptr.sym node %lld missing fields.name", (long long)node_id);
+        goto done;
+      }
+      LLVMValueRef fn = LLVMGetNamedFunction(f->mod, name);
+      if (!fn) {
+        errf(f->p, "sircc: ptr.sym references unknown function '%s'", name);
+        goto done;
+      }
+      out = fn; // function values are pointers in LLVM
+      goto done;
+    }
+
+    if (strcmp(op, "sizeof") == 0 || strcmp(op, "alignof") == 0 || strcmp(op, "offset") == 0) {
+      if (!n->fields) {
+        errf(f->p, "sircc: %s node %lld missing fields", n->tag, (long long)node_id);
+        goto done;
+      }
+      int64_t ty_id = 0;
+      if (!parse_type_ref_id(json_obj_get(n->fields, "ty"), &ty_id)) {
+        errf(f->p, "sircc: %s node %lld missing fields.ty (type ref)", n->tag, (long long)node_id);
+        goto done;
+      }
+      int64_t size = 0;
+      int64_t align = 0;
+      if (!type_size_align(f->p, ty_id, &size, &align)) {
+        errf(f->p, "sircc: %s node %lld has invalid/unsized type %lld", n->tag, (long long)node_id, (long long)ty_id);
+        goto done;
+      }
+
+      if (!args || args->type != JSON_ARRAY) {
+        errf(f->p, "sircc: %s node %lld missing args array", n->tag, (long long)node_id);
+        goto done;
+      }
+
+      if (strcmp(op, "sizeof") == 0) {
+        if (args->v.arr.len != 0) {
+          errf(f->p, "sircc: %s node %lld requires args:[]", n->tag, (long long)node_id);
+          goto done;
+        }
+        out = LLVMConstInt(LLVMInt64TypeInContext(f->ctx), (unsigned long long)size, 0);
+        goto done;
+      }
+
+      if (strcmp(op, "alignof") == 0) {
+        if (args->v.arr.len != 0) {
+          errf(f->p, "sircc: %s node %lld requires args:[]", n->tag, (long long)node_id);
+          goto done;
+        }
+        out = LLVMConstInt(LLVMInt32TypeInContext(f->ctx), (unsigned long long)align, 0);
+        goto done;
+      }
+
+      if (strcmp(op, "offset") == 0) {
+        if (args->v.arr.len != 2) {
+          errf(f->p, "sircc: %s node %lld requires args:[base,index]", n->tag, (long long)node_id);
+          goto done;
+        }
+        int64_t base_id = 0, idx_id = 0;
+        if (!parse_node_ref_id(args->v.arr.items[0], &base_id) || !parse_node_ref_id(args->v.arr.items[1], &idx_id)) {
+          errf(f->p, "sircc: %s node %lld args must be node refs", n->tag, (long long)node_id);
+          goto done;
+        }
+        LLVMValueRef base = lower_expr(f, base_id);
+        LLVMValueRef idx = lower_expr(f, idx_id);
+        if (!base || !idx) goto done;
+        if (LLVMGetTypeKind(LLVMTypeOf(base)) != LLVMPointerTypeKind) {
+          errf(f->p, "sircc: %s requires ptr base", n->tag);
+          goto done;
+        }
+        if (LLVMGetTypeKind(LLVMTypeOf(idx)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(idx)) != 64) {
+          errf(f->p, "sircc: %s requires i64 index", n->tag);
+          goto done;
+        }
+
+        unsigned ptr_bits = (unsigned)(sizeof(void*) * 8u);
+        LLVMTypeRef ip = LLVMIntTypeInContext(f->ctx, ptr_bits);
+        LLVMValueRef base_bits = LLVMBuildPtrToInt(f->builder, base, ip, "base.bits");
+        LLVMValueRef idx_bits = LLVMBuildTruncOrBitCast(f->builder, idx, ip, "idx.bits");
+        LLVMValueRef scale = LLVMConstInt(ip, (unsigned long long)size, 0);
+        LLVMValueRef off_bits = LLVMBuildMul(f->builder, idx_bits, scale, "off.bits");
+        LLVMValueRef sum_bits = LLVMBuildAdd(f->builder, base_bits, off_bits, "addr.bits");
+        out = LLVMBuildIntToPtr(f->builder, sum_bits, LLVMTypeOf(base), "ptr.off");
+        goto done;
+      }
+    }
+
+    if (!args || args->type != JSON_ARRAY) {
+      errf(f->p, "sircc: %s node %lld missing args array", n->tag, (long long)node_id);
+      goto done;
+    }
+
+    if (strcmp(op, "cmp.eq") == 0 || strcmp(op, "cmp.ne") == 0) {
+      if (args->v.arr.len != 2) {
+        errf(f->p, "sircc: %s node %lld requires 2 args", n->tag, (long long)node_id);
+        goto done;
+      }
+      int64_t a_id = 0, b_id = 0;
+      if (!parse_node_ref_id(args->v.arr.items[0], &a_id) || !parse_node_ref_id(args->v.arr.items[1], &b_id)) {
+        errf(f->p, "sircc: %s node %lld args must be node refs", n->tag, (long long)node_id);
+        goto done;
+      }
+      LLVMValueRef a = lower_expr(f, a_id);
+      LLVMValueRef b = lower_expr(f, b_id);
+      if (!a || !b) goto done;
+      if (LLVMGetTypeKind(LLVMTypeOf(a)) == LLVMPointerTypeKind && LLVMGetTypeKind(LLVMTypeOf(b)) == LLVMPointerTypeKind &&
+          LLVMTypeOf(a) != LLVMTypeOf(b)) {
+        LLVMTypeRef i8p = LLVMPointerType(LLVMInt8TypeInContext(f->ctx), 0);
+        a = LLVMBuildBitCast(f->builder, a, i8p, "pcmp.a");
+        b = LLVMBuildBitCast(f->builder, b, i8p, "pcmp.b");
+      }
+      LLVMIntPredicate pred = (strcmp(op, "cmp.eq") == 0) ? LLVMIntEQ : LLVMIntNE;
+      out = LLVMBuildICmp(f->builder, pred, a, b, "pcmp");
+      goto done;
+    }
+
+    if (strcmp(op, "add") == 0 || strcmp(op, "sub") == 0) {
+      if (args->v.arr.len != 2) {
+        errf(f->p, "sircc: %s node %lld requires 2 args", n->tag, (long long)node_id);
+        goto done;
+      }
+      int64_t p_id = 0, off_id = 0;
+      if (!parse_node_ref_id(args->v.arr.items[0], &p_id) || !parse_node_ref_id(args->v.arr.items[1], &off_id)) {
+        errf(f->p, "sircc: %s node %lld args must be node refs", n->tag, (long long)node_id);
+        goto done;
+      }
+      LLVMValueRef pval = lower_expr(f, p_id);
+      LLVMValueRef oval = lower_expr(f, off_id);
+      if (!pval || !oval) goto done;
+      LLVMTypeRef pty = LLVMTypeOf(pval);
+      if (LLVMGetTypeKind(pty) != LLVMPointerTypeKind) {
+        errf(f->p, "sircc: %s requires pointer lhs", n->tag);
+        goto done;
+      }
+      if (LLVMGetTypeKind(LLVMTypeOf(oval)) != LLVMIntegerTypeKind) {
+        errf(f->p, "sircc: %s requires integer byte offset rhs", n->tag);
+        goto done;
+      }
+      LLVMTypeRef i8p = LLVMPointerType(LLVMInt8TypeInContext(f->ctx), 0);
+      LLVMValueRef p8 = LLVMBuildBitCast(f->builder, pval, i8p, "p8");
+      LLVMValueRef off = oval;
+      LLVMTypeRef i64 = LLVMInt64TypeInContext(f->ctx);
+      if (LLVMGetIntTypeWidth(LLVMTypeOf(off)) != 64) {
+        off = LLVMBuildSExtOrTrunc(f->builder, off, i64, "off64");
+      }
+      if (strcmp(op, "sub") == 0) {
+        off = LLVMBuildNeg(f->builder, off, "off.neg");
+      }
+      LLVMValueRef idx[1] = {off};
+      LLVMValueRef gep = LLVMBuildGEP2(f->builder, LLVMInt8TypeInContext(f->ctx), p8, idx, 1, "p.gep");
+      out = LLVMBuildBitCast(f->builder, gep, pty, "p.cast");
+      goto done;
+    }
+
+    if (strcmp(op, "to_i64") == 0 || strcmp(op, "from_i64") == 0) {
+      if (!args || args->type != JSON_ARRAY || args->v.arr.len != 1) {
+        errf(f->p, "sircc: %s node %lld requires args:[x]", n->tag, (long long)node_id);
+        goto done;
+      }
+      int64_t x_id = 0;
+      if (!parse_node_ref_id(args->v.arr.items[0], &x_id)) {
+        errf(f->p, "sircc: %s node %lld arg must be node ref", n->tag, (long long)node_id);
+        goto done;
+      }
+      LLVMValueRef x = lower_expr(f, x_id);
+      if (!x) goto done;
+
+      LLVMTypeRef i64 = LLVMInt64TypeInContext(f->ctx);
+      unsigned ptr_bits = (unsigned)(sizeof(void*) * 8u);
+      LLVMTypeRef ip = LLVMIntTypeInContext(f->ctx, ptr_bits);
+      LLVMTypeRef pty = LLVMPointerType(LLVMInt8TypeInContext(f->ctx), 0);
+
+      if (strcmp(op, "to_i64") == 0) {
+        if (LLVMGetTypeKind(LLVMTypeOf(x)) != LLVMPointerTypeKind) {
+          errf(f->p, "sircc: ptr.to_i64 requires ptr operand");
+          goto done;
+        }
+        LLVMValueRef bits = LLVMBuildPtrToInt(f->builder, x, ip, "ptr.bits");
+        out = LLVMBuildZExtOrTrunc(f->builder, bits, i64, "ptr.i64");
+        goto done;
+      }
+
+      if (LLVMGetTypeKind(LLVMTypeOf(x)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(x)) != 64) {
+        errf(f->p, "sircc: ptr.from_i64 requires i64 operand");
+        goto done;
+      }
+      LLVMValueRef bits = LLVMBuildTruncOrBitCast(f->builder, x, ip, "i64.ptrbits");
+      out = LLVMBuildIntToPtr(f->builder, bits, pty, "ptr");
+      goto done;
+    }
+  }
+
+  if (strncmp(n->tag, "alloca.", 7) == 0) {
+    const char* tname = n->tag + 7;
+    LLVMTypeRef el = NULL;
+    if (strcmp(tname, "ptr") == 0) {
+      el = LLVMPointerType(LLVMInt8TypeInContext(f->ctx), 0);
+    } else {
+      el = lower_type_prim(f->ctx, tname);
+    }
+    if (!el) {
+      errf(f->p, "sircc: unsupported alloca type '%s'", tname);
+      goto done;
+    }
+    out = LLVMBuildAlloca(f->builder, el, "alloca");
+    goto done;
+  }
+
+  if (strncmp(n->tag, "load.", 5) == 0) {
+    const char* tname = n->tag + 5;
+    if (!n->fields) {
+      errf(f->p, "sircc: %s node %lld missing fields", n->tag, (long long)node_id);
+      goto done;
+    }
+    JsonValue* addr = json_obj_get(n->fields, "addr");
+    int64_t aid = 0;
+    if (!parse_node_ref_id(addr, &aid)) {
+      errf(f->p, "sircc: %s node %lld missing fields.addr ref", n->tag, (long long)node_id);
+      goto done;
+    }
+    LLVMValueRef pval = lower_expr(f, aid);
+    if (!pval) goto done;
+    LLVMTypeRef pty = LLVMTypeOf(pval);
+    if (LLVMGetTypeKind(pty) != LLVMPointerTypeKind) {
+      errf(f->p, "sircc: %s requires pointer addr", n->tag);
+      goto done;
+    }
+    LLVMTypeRef el = NULL;
+    if (strcmp(tname, "ptr") == 0) {
+      el = LLVMPointerType(LLVMInt8TypeInContext(f->ctx), 0);
+    } else {
+      el = lower_type_prim(f->ctx, tname);
+    }
+    if (!el) {
+      errf(f->p, "sircc: unsupported load type '%s'", tname);
+      goto done;
+    }
+    LLVMTypeRef want_ptr = LLVMPointerType(el, 0);
+    if (want_ptr != pty) {
+      pval = LLVMBuildBitCast(f->builder, pval, want_ptr, "ld.cast");
+    }
+    out = LLVMBuildLoad2(f->builder, el, pval, "load");
+    JsonValue* alignv = json_obj_get(n->fields, "align");
+    if (alignv) {
+      int64_t a = 0;
+      if (json_get_i64(alignv, &a) && a > 0) LLVMSetAlignment(out, (unsigned)a);
+    }
+    goto done;
+  }
+
   if (strncmp(n->tag, "f32.", 4) == 0 || strncmp(n->tag, "f64.", 4) == 0) {
     int width = (n->tag[1] == '3') ? 32 : 64;
     const char* op = n->tag + 4;
@@ -1728,7 +2438,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
         errf(f->p, "sircc: %s requires 2 args", n->tag);
         goto done;
       }
-      out = LLVMBuildFAdd(f->builder, a, b, "fadd");
+      out = canonicalize_float(f, LLVMBuildFAdd(f->builder, a, b, "fadd"));
       goto done;
     }
     if (strcmp(op, "sub") == 0) {
@@ -1736,7 +2446,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
         errf(f->p, "sircc: %s requires 2 args", n->tag);
         goto done;
       }
-      out = LLVMBuildFSub(f->builder, a, b, "fsub");
+      out = canonicalize_float(f, LLVMBuildFSub(f->builder, a, b, "fsub"));
       goto done;
     }
     if (strcmp(op, "mul") == 0) {
@@ -1744,7 +2454,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
         errf(f->p, "sircc: %s requires 2 args", n->tag);
         goto done;
       }
-      out = LLVMBuildFMul(f->builder, a, b, "fmul");
+      out = canonicalize_float(f, LLVMBuildFMul(f->builder, a, b, "fmul"));
       goto done;
     }
     if (strcmp(op, "div") == 0) {
@@ -1752,11 +2462,11 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
         errf(f->p, "sircc: %s requires 2 args", n->tag);
         goto done;
       }
-      out = LLVMBuildFDiv(f->builder, a, b, "fdiv");
+      out = canonicalize_float(f, LLVMBuildFDiv(f->builder, a, b, "fdiv"));
       goto done;
     }
     if (strcmp(op, "neg") == 0) {
-      out = LLVMBuildFNeg(f->builder, a, "fneg");
+      out = canonicalize_float(f, LLVMBuildFNeg(f->builder, a, "fneg"));
       goto done;
     }
     if (strcmp(op, "abs") == 0) {
@@ -1765,7 +2475,7 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
       LLVMTypeRef params[1] = {fty};
       LLVMValueRef fn = get_or_declare_intrinsic(f->mod, full, fty, params, 1);
       LLVMValueRef argsv[1] = {a};
-      out = LLVMBuildCall2(f->builder, LLVMGetElementType(LLVMTypeOf(fn)), fn, argsv, 1, "fabs");
+      out = canonicalize_float(f, LLVMBuildCall2(f->builder, LLVMGetElementType(LLVMTypeOf(fn)), fn, argsv, 1, "fabs"));
       goto done;
     }
     if (strcmp(op, "sqrt") == 0) {
@@ -1774,22 +2484,111 @@ static LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
       LLVMTypeRef params[1] = {fty};
       LLVMValueRef fn = get_or_declare_intrinsic(f->mod, full, fty, params, 1);
       LLVMValueRef argsv[1] = {a};
-      out = LLVMBuildCall2(f->builder, LLVMGetElementType(LLVMTypeOf(fn)), fn, argsv, 1, "fsqrt");
+      out = canonicalize_float(f, LLVMBuildCall2(f->builder, LLVMGetElementType(LLVMTypeOf(fn)), fn, argsv, 1, "fsqrt"));
+      goto done;
+    }
+
+    if (strcmp(op, "min") == 0 || strcmp(op, "max") == 0) {
+      if (!b) {
+        errf(f->p, "sircc: %s requires 2 args", n->tag);
+        goto done;
+      }
+      LLVMValueRef isnan_a = LLVMBuildFCmp(f->builder, LLVMRealUNO, a, a, "isnan.a");
+      LLVMValueRef isnan_b = LLVMBuildFCmp(f->builder, LLVMRealUNO, b, b, "isnan.b");
+      LLVMValueRef anynan = LLVMBuildOr(f->builder, isnan_a, isnan_b, "isnan.any");
+      LLVMValueRef qnan = canonical_qnan(f, fty);
+
+      LLVMRealPredicate pred = (strcmp(op, "min") == 0) ? LLVMRealOLT : LLVMRealOGT;
+      LLVMValueRef cmp = LLVMBuildFCmp(f->builder, pred, a, b, "fcmp");
+      LLVMValueRef sel = LLVMBuildSelect(f->builder, cmp, a, b, "fsel");
+      out = LLVMBuildSelect(f->builder, anynan, qnan, sel, "fminmax");
+      goto done;
+    }
+
+    if (strncmp(op, "cmp.", 4) == 0) {
+      if (!b) {
+        errf(f->p, "sircc: %s requires 2 args", n->tag);
+        goto done;
+      }
+      const char* cc = op + 4;
+      LLVMRealPredicate pred;
+      if (strcmp(cc, "oeq") == 0) pred = LLVMRealOEQ;
+      else if (strcmp(cc, "one") == 0) pred = LLVMRealONE;
+      else if (strcmp(cc, "olt") == 0) pred = LLVMRealOLT;
+      else if (strcmp(cc, "ole") == 0) pred = LLVMRealOLE;
+      else if (strcmp(cc, "ogt") == 0) pred = LLVMRealOGT;
+      else if (strcmp(cc, "oge") == 0) pred = LLVMRealOGE;
+      else if (strcmp(cc, "ueq") == 0) pred = LLVMRealUEQ;
+      else if (strcmp(cc, "une") == 0) pred = LLVMRealUNE;
+      else if (strcmp(cc, "ult") == 0) pred = LLVMRealULT;
+      else if (strcmp(cc, "ule") == 0) pred = LLVMRealULE;
+      else if (strcmp(cc, "ugt") == 0) pred = LLVMRealUGT;
+      else if (strcmp(cc, "uge") == 0) pred = LLVMRealUGE;
+      else {
+        errf(f->p, "sircc: unsupported float compare '%s' in %s", cc, n->tag);
+        goto done;
+      }
+      out = LLVMBuildFCmp(f->builder, pred, a, b, "fcmp");
+      goto done;
+    }
+
+    if (strncmp(op, "from_i", 6) == 0) {
+      if (!a || b) {
+        errf(f->p, "sircc: %s requires args:[x]", n->tag);
+        goto done;
+      }
+      int srcw = 0;
+      char su = 0;
+      if (sscanf(op, "from_i%d.%c", &srcw, &su) != 2 || (srcw != 32 && srcw != 64) || (su != 's' && su != 'u')) {
+        errf(f->p, "sircc: unsupported int->float conversion '%s' in %s", op, n->tag);
+        goto done;
+      }
+      if (LLVMGetTypeKind(LLVMTypeOf(a)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(a)) != (unsigned)srcw) {
+        errf(f->p, "sircc: %s requires i%d operand", n->tag, srcw);
+        goto done;
+      }
+      LLVMTypeRef fty = (width == 32) ? LLVMFloatTypeInContext(f->ctx) : LLVMDoubleTypeInContext(f->ctx);
+      out = (su == 's') ? LLVMBuildSIToFP(f->builder, a, fty, "sitofp") : LLVMBuildUIToFP(f->builder, a, fty, "uitofp");
       goto done;
     }
   }
 
   if (strncmp(n->tag, "const.", 6) == 0) {
     const char* tyname = n->tag + 6;
-    int64_t value = 0;
-    if (!n->fields || !must_i64(f->p, json_obj_get(n->fields, "value"), &value, "const.value")) goto done;
+    if (!n->fields) goto done;
     LLVMTypeRef ty = lower_type_prim(f->ctx, tyname);
     if (!ty) {
       errf(f->p, "sircc: unsupported const type '%s'", tyname);
       goto done;
     }
-    out = LLVMConstInt(ty, (unsigned long long)value, 1);
-    goto done;
+    if (LLVMGetTypeKind(ty) == LLVMIntegerTypeKind) {
+      int64_t value = 0;
+      if (!must_i64(f->p, json_obj_get(n->fields, "value"), &value, "const.value")) goto done;
+      out = LLVMConstInt(ty, (unsigned long long)value, 1);
+      goto done;
+    }
+    if (LLVMGetTypeKind(ty) == LLVMFloatTypeKind || LLVMGetTypeKind(ty) == LLVMDoubleTypeKind) {
+      // Prefer exact bit-pattern constants: fields.bits = "0x..." (hex).
+      const char* bits = json_get_string(json_obj_get(n->fields, "bits"));
+      if (!bits || strncmp(bits, "0x", 2) != 0) {
+        errf(f->p, "sircc: const.%s requires fields.bits hex string (0x...)", tyname);
+        goto done;
+      }
+      char* end = NULL;
+      unsigned long long raw = strtoull(bits + 2, &end, 16);
+      if (!end || *end != 0) {
+        errf(f->p, "sircc: const.%s invalid bits '%s'", tyname, bits);
+        goto done;
+      }
+      if (LLVMGetTypeKind(ty) == LLVMFloatTypeKind) {
+        LLVMValueRef ib = LLVMConstInt(LLVMInt32TypeInContext(f->ctx), raw & 0xFFFFFFFFu, 0);
+        out = LLVMConstBitCast(ib, ty);
+      } else {
+        LLVMValueRef ib = LLVMConstInt(LLVMInt64TypeInContext(f->ctx), raw, 0);
+        out = LLVMConstBitCast(ib, ty);
+      }
+      goto done;
+    }
   }
 
   errf(f->p, "sircc: unsupported expr tag '%s' (node %lld)", n->tag, (long long)node_id);
@@ -1805,6 +2604,147 @@ static bool lower_stmt(FunctionCtx* f, int64_t node_id) {
   if (!n) {
     errf(f->p, "sircc: unknown stmt node %lld", (long long)node_id);
     return false;
+  }
+
+  if (strncmp(n->tag, "store.", 6) == 0) {
+    const char* tname = n->tag + 6;
+    if (!n->fields) {
+      errf(f->p, "sircc: %s node %lld missing fields", n->tag, (long long)node_id);
+      return false;
+    }
+    int64_t aid = 0, vid = 0;
+    if (!parse_node_ref_id(json_obj_get(n->fields, "addr"), &aid) || !parse_node_ref_id(json_obj_get(n->fields, "value"), &vid)) {
+      errf(f->p, "sircc: %s node %lld requires fields.addr and fields.value refs", n->tag, (long long)node_id);
+      return false;
+    }
+    LLVMValueRef pval = lower_expr(f, aid);
+    LLVMValueRef vval = lower_expr(f, vid);
+    if (!pval || !vval) return false;
+    LLVMTypeRef el = NULL;
+    if (strcmp(tname, "ptr") == 0) {
+      el = LLVMPointerType(LLVMInt8TypeInContext(f->ctx), 0);
+    } else {
+      el = lower_type_prim(f->ctx, tname);
+    }
+    if (!el) {
+      errf(f->p, "sircc: unsupported store type '%s'", tname);
+      return false;
+    }
+    if (LLVMGetTypeKind(el) == LLVMFloatTypeKind || LLVMGetTypeKind(el) == LLVMDoubleTypeKind) {
+      vval = canonicalize_float(f, vval);
+    }
+    LLVMTypeRef want_ptr = LLVMPointerType(el, 0);
+    LLVMTypeRef pty = LLVMTypeOf(pval);
+    if (LLVMGetTypeKind(pty) != LLVMPointerTypeKind) {
+      errf(f->p, "sircc: %s requires pointer addr", n->tag);
+      return false;
+    }
+    if (want_ptr != pty) {
+      pval = LLVMBuildBitCast(f->builder, pval, want_ptr, "st.cast");
+    }
+    LLVMValueRef st = LLVMBuildStore(f->builder, vval, pval);
+    JsonValue* alignv = json_obj_get(n->fields, "align");
+    if (alignv) {
+      int64_t a = 0;
+      if (json_get_i64(alignv, &a) && a > 0) LLVMSetAlignment(st, (unsigned)a);
+    }
+    return true;
+  }
+
+  if (strcmp(n->tag, "mem.copy") == 0) {
+    if (!n->fields) {
+      errf(f->p, "sircc: mem.copy node %lld missing fields", (long long)node_id);
+      return false;
+    }
+    JsonValue* args = json_obj_get(n->fields, "args");
+    if (!args || args->type != JSON_ARRAY || args->v.arr.len != 3) {
+      errf(f->p, "sircc: mem.copy node %lld requires args:[dst, src, len]", (long long)node_id);
+      return false;
+    }
+    int64_t did = 0, sid = 0, lid = 0;
+    if (!parse_node_ref_id(args->v.arr.items[0], &did) || !parse_node_ref_id(args->v.arr.items[1], &sid) ||
+        !parse_node_ref_id(args->v.arr.items[2], &lid)) {
+      errf(f->p, "sircc: mem.copy node %lld args must be node refs", (long long)node_id);
+      return false;
+    }
+    LLVMValueRef dst = lower_expr(f, did);
+    LLVMValueRef src = lower_expr(f, sid);
+    LLVMValueRef len = lower_expr(f, lid);
+    if (!dst || !src || !len) return false;
+
+    LLVMTypeRef i8p = LLVMPointerType(LLVMInt8TypeInContext(f->ctx), 0);
+    dst = LLVMBuildBitCast(f->builder, dst, i8p, "dst.i8p");
+    src = LLVMBuildBitCast(f->builder, src, i8p, "src.i8p");
+
+    LLVMTypeRef i64 = LLVMInt64TypeInContext(f->ctx);
+    if (LLVMGetTypeKind(LLVMTypeOf(len)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(len)) != 64) {
+      len = LLVMBuildZExtOrTrunc(f->builder, len, i64, "len.i64");
+    }
+
+    unsigned align_dst = 1;
+    unsigned align_src = 1;
+    bool use_memmove = false;
+    JsonValue* flags = json_obj_get(n->fields, "flags");
+    if (flags && flags->type == JSON_OBJECT) {
+      int64_t a = 0;
+      if (json_get_i64(json_obj_get(flags, "alignDst"), &a) && a > 0) align_dst = (unsigned)a;
+      if (json_get_i64(json_obj_get(flags, "alignSrc"), &a) && a > 0) align_src = (unsigned)a;
+      const char* ov = json_get_string(json_obj_get(flags, "overlap"));
+      if (ov && strcmp(ov, "allow") == 0) use_memmove = true;
+    }
+
+    // Note: overlap="disallow" is specified as a deterministic trap; currently lowered as memcpy (no trap).
+    if (use_memmove) {
+      LLVMBuildMemMove(f->builder, dst, align_dst, src, align_src, len);
+    } else {
+      LLVMBuildMemCpy(f->builder, dst, align_dst, src, align_src, len);
+    }
+    return true;
+  }
+
+  if (strcmp(n->tag, "mem.fill") == 0) {
+    if (!n->fields) {
+      errf(f->p, "sircc: mem.fill node %lld missing fields", (long long)node_id);
+      return false;
+    }
+    JsonValue* args = json_obj_get(n->fields, "args");
+    if (!args || args->type != JSON_ARRAY || args->v.arr.len != 3) {
+      errf(f->p, "sircc: mem.fill node %lld requires args:[dst, byte, len]", (long long)node_id);
+      return false;
+    }
+    int64_t did = 0, bid = 0, lid = 0;
+    if (!parse_node_ref_id(args->v.arr.items[0], &did) || !parse_node_ref_id(args->v.arr.items[1], &bid) ||
+        !parse_node_ref_id(args->v.arr.items[2], &lid)) {
+      errf(f->p, "sircc: mem.fill node %lld args must be node refs", (long long)node_id);
+      return false;
+    }
+    LLVMValueRef dst = lower_expr(f, did);
+    LLVMValueRef bytev = lower_expr(f, bid);
+    LLVMValueRef len = lower_expr(f, lid);
+    if (!dst || !bytev || !len) return false;
+
+    LLVMTypeRef i8p = LLVMPointerType(LLVMInt8TypeInContext(f->ctx), 0);
+    dst = LLVMBuildBitCast(f->builder, dst, i8p, "dst.i8p");
+
+    LLVMTypeRef i8 = LLVMInt8TypeInContext(f->ctx);
+    if (LLVMGetTypeKind(LLVMTypeOf(bytev)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(bytev)) != 8) {
+      bytev = LLVMBuildTruncOrBitCast(f->builder, bytev, i8, "byte.i8");
+    }
+
+    LLVMTypeRef i64 = LLVMInt64TypeInContext(f->ctx);
+    if (LLVMGetTypeKind(LLVMTypeOf(len)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(len)) != 64) {
+      len = LLVMBuildZExtOrTrunc(f->builder, len, i64, "len.i64");
+    }
+
+    unsigned align_dst = 1;
+    JsonValue* flags = json_obj_get(n->fields, "flags");
+    if (flags && flags->type == JSON_OBJECT) {
+      int64_t a = 0;
+      if (json_get_i64(json_obj_get(flags, "alignDst"), &a) && a > 0) align_dst = (unsigned)a;
+    }
+
+    LLVMBuildMemSet(f->builder, dst, bytev, len, align_dst);
+    return true;
   }
 
   if (strncmp(n->tag, "term.", 5) == 0) {

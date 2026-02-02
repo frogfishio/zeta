@@ -64,15 +64,16 @@ Implement in the same order as below (earlier items unblock later ones). Each bu
 
 ### 3.1 Integer arithmetic and bitwise (pure) — 18
 - [x] `i8/i16/i32/i64`: `add sub mul and or xor not neg` (lowering implemented for `node.tag` `iN.*`)
-- [ ] Shifts/rotates with masked shift count: `shl shr.s shr.u rotl rotr` (implemented: `shl shr.s shr.u`; TODO: `rotl rotr`)
-- [ ] Min/max/select-style ops in this section (if present in the table)
+- [x] Shifts/rotates with masked shift count: `shl shr.s shr.u rotl rotr` (implemented for `node.tag`; rotates lowered via `llvm.fshl/fshr`)
+- [x] Min/max: `min.s min.u max.s max.u` (implemented for `node.tag` with deterministic tie-break: if `a==b` result is `a`)
 
 ### 3.2 Integer division and remainder (explicit behavior) — 4
-- [ ] `.trap` variants: emit explicit trap path (e.g. `llvm.trap`) on div-by-zero / overflow where specified
-- [ ] `.sat` variants: emit saturating semantics exactly as spec says
+- [x] `.trap` variants: emit explicit trap path (`llvm.trap`) on div-by-zero / overflow where specified (implemented for `node.tag` `iN.(div|rem).(s|u).trap`)
+- [x] `.sat` variants: total semantics (implemented for `node.tag` `iN.(div|rem).(s|u).sat` with CFG to avoid UB)
 
 ### 3.3 Integer comparisons (pure) — 1
 - [x] `cmp.eq ne slt sle sgt sge ult ule ugt uge` families → `i1` (lowering implemented for `node.tag` `iN.cmp.*`)
+- [x] `eqz` family → `bool` (implemented for `node.tag` `iN.eqz`)
 
 ### 3.4 Bit-twiddling (pure) — 3
 - [x] `clz ctz popc` (lowering implemented for `node.tag` `iN.clz/ctz/popc` via LLVM intrinsics)
@@ -81,8 +82,9 @@ Implement in the same order as below (earlier items unblock later ones). Each bu
 - [x] `bool.not`, `bool.and/or/xor` (lowering implemented for `node.tag` `bool.*`)
 
 ### 3.6 Floating point (pure, deterministic) — 10
-- [ ] `f32/f64`: `add sub mul div neg abs sqrt min max` (implemented: `add sub mul div neg abs sqrt`; TODO: `min max` + NaN canonicalization details)
-- [ ] Canonical NaN rules (no payload propagation): document implementation strategy + tests
+- [x] `f32/f64`: `add sub mul div neg abs sqrt min max` (implemented for `node.tag`)
+- [ ] Canonical NaN rules (no payload propagation): implemented by canonicalizing NaN results to qNaN bits; TODO: add IR-based tests
+  - [x] Float comparisons and conversions (implemented for `node.tag`: `f32/f64.cmp.*`, `f32/f64.from_i{32,64}.{s,u}`, `i{32,64}.trunc_sat_f{32,64}.{s,u}`)
 
 ### 3.7 Value-level conditional (pure) — 1
 - [x] `select` lowering with type checking (lowering implemented for `node.tag` `select`; TODO: strict type checks)
@@ -91,14 +93,14 @@ Implement in the same order as below (earlier items unblock later ones). Each bu
 - [x] `zext`, `sext`, `trunc` (lowering implemented for `node.tag` `i<dst>.(zext|sext|trunc).i<src>`)
 
 ### 3.9 Pointer ops (pure) — 4
-- [ ] `ptr.sym`, `ptr.add/sub`, `ptr.cmp.eq/ne`
+- [x] `ptr.sym`, `ptr.add/sub`, `ptr.cmp.eq/ne` (implemented for `node.tag` `ptr.sym`, `ptr.add/sub`, `ptr.cmp.eq/ne`, `ptr.to_i64`, `ptr.from_i64`)
 
 ### 3.10 Address calculation and layout (pure; target-explicit) — 3
-- [ ] `ptr.offset`, `ptr.alignof`, `ptr.sizeof`
+- [x] `ptr.offset`, `ptr.alignof`, `ptr.sizeof` (implemented for `node.tag`; current layout uses a deterministic host-layout subset: prim sizes + host `sizeof(void*)`, plus `type.kind:"array"`/`"ptr"` recursion; TODO: wire real `unit.target.ptrBits`/data-layout reporting)
 
 ### 3.11 Memory effects — 10
-- [ ] `load.*` / `store.*` for ints and floats (alignment + optional width rules)
-- [ ] `memcpy/memmove/memset` (or whatever the table defines) via LLVM intrinsics
+- [ ] `load.*` / `store.*` for ints and floats (alignment + optional width rules) (implemented: `alloca/load/store` for `i8/i16/i32/i64/f32/f64`)
+- [ ] `mem.copy` / `mem.fill` (and overlap semantics) via LLVM intrinsics (implemented: `mem.copy`, `mem.fill`; TODO: overlap=\"disallow\" trap behavior)
 
 ### 3.12 Calls (effects) — 2
 - [ ] `call` with signature/type checking (implemented: direct `call` to referenced `fn` node; TODO: signature checks + indirect/varargs)
