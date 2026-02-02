@@ -14,6 +14,15 @@ $SIRCC ./dist/test/examples/cfg_switch.sir.jsonl -o /tmp/cfg_switch && /tmp/cfg_
 $SIRCC ./dist/test/examples/hello_world_puts.sir.jsonl -o /tmp/hello && /tmp/hello; echo $?
 ```
 
+If you also built `sirc`, `dist/test/examples/` includes matching `.sir` sources for many examples:
+
+```sh
+SIRC=./dist/bin/<os>/sirc
+
+$SIRC ./dist/test/examples/hello.sir -o /tmp/hello.sir.jsonl
+$SIRCC /tmp/hello.sir.jsonl -o /tmp/hello && /tmp/hello
+```
+
 Expected exit codes:
 
 - `mem_copy_fill.sir.jsonl` → `42`

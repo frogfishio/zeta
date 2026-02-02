@@ -1,0 +1,12 @@
+unit call_indirect_ptrsym target host
+
+fn add(x:i32, y:i32) -> i32 public
+  return i32.add(x, y)
+end
+
+fn main() -> i32 public
+  let fp: ptr = ptr.sym(add)
+  let r: i32 = call.indirect(fp, 40:i32, 2:i32) sig add
+  return r
+end
+

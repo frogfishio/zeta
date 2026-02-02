@@ -1,0 +1,13 @@
+unit mem_copy_fill target host
+
+fn main() -> i32 public
+  let src: ptr = alloca.i8()
+  let dst: ptr = alloca.i8()
+
+  mem.fill(dst, 0:i8, 1:i64) flags alignDst 1
+  store.i8(src, 42:i8)
+  mem.copy(dst, src, 1:i64) flags alignDst 1 flags alignSrc 1 flags overlap disallow
+
+  let x: i8 = load.i8(dst)
+  return i32.zext.i8(x)
+end

@@ -1,0 +1,9 @@
+unit load_store_no_align target host
+
+fn main(x:i32) -> i32 public
+  let p: ptr = alloca(i32)
+  store.i32(p, x)
+  let y: i32 = load.i32(p)
+  return y
+end
+

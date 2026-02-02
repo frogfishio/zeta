@@ -19,6 +19,7 @@ If you installed LLVM with Homebrew:
 
 - `cmake -S . -B build -G Ninja -DLLVM_DIR=$(brew --prefix llvm)/lib/cmake/llvm`
 - `cmake --build build`
+- Build the copy-pasteable bundle in `./dist/`: `cmake --build build --target dist`
 
 ### Run
 
@@ -34,13 +35,24 @@ Optional flags:
 
 ## Build `sirc` (experimental .sir parser)
 
-`sirc` is an experimental flex/bison-based parser for a textual `.sir` syntax. It is currently a syntax checker only (it does not emit JSONL yet).
+`sirc` is an experimental flex/bison-based translator for a textual `.sir` syntax. It translates `.sir` to `sir-v1.0` `*.sir.jsonl`.
 
 - Configure with: `cmake -S . -B build -G Ninja -DSIR_ENABLE_SIRC=ON -DLLVM_DIR=$(brew --prefix llvm)/lib/cmake/llvm`
 - Build: `cmake --build build`
-- Run: `./build/sirc/sirc sirc/hello.sir`
+- Bundle both `sircc` + `sirc` into `./dist/`: `cmake --build build --target dist`
+- Translate: `./build/src/sirc/sirc src/sirc/examples/hello.sir -o /tmp/hello.sir.jsonl`
+- Compile: `./build/src/sircc/sircc /tmp/hello.sir.jsonl -o /tmp/hello && /tmp/hello`
 
-Current lowering support is intentionally small (enough to smoke-test the pipeline):
+### Using the dist bundle
 
-- `type` records: `prim`, `fn`, `ptr`
-- `node` tags: `fn`, `param`, `block`, `return`, `name`, `binop.add`, `const.i32`
+After building `dist`, you can hand the whole `./dist/` folder to alpha users. It contains:
+
+- `dist/bin/<os>/sircc` (JSONL → native)
+- `dist/bin/<os>/sirc` (optional, if built with `-DSIR_ENABLE_SIRC=ON`) (`.sir` → JSONL)
+- `dist/doc/src.md` and `dist/doc/sirc.md`
+- `dist/test/examples/` (paired `.sir` and `.sir.jsonl` examples)
+
+Quick run (macOS example path):
+
+- `./dist/bin/macos/sirc ./dist/test/examples/hello.sir -o /tmp/hello.sir.jsonl`
+- `./dist/bin/macos/sircc /tmp/hello.sir.jsonl -o /tmp/hello && /tmp/hello`

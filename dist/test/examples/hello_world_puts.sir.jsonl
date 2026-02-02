@@ -1,0 +1,16 @@
+{"ir":"sir-v1.0","k":"meta","producer":"sircc-example","unit":"hello_world_puts"}
+
+{"ir":"sir-v1.0","k":"type","id":1,"kind":"prim","prim":"i8"}
+{"ir":"sir-v1.0","k":"type","id":2,"kind":"ptr","of":1}
+{"ir":"sir-v1.0","k":"type","id":3,"kind":"prim","prim":"i32"}
+{"ir":"sir-v1.0","k":"type","id":4,"kind":"fn","params":[2],"ret":3}
+{"ir":"sir-v1.0","k":"type","id":5,"kind":"fn","params":[],"ret":3}
+
+{"ir":"sir-v1.0","k":"node","id":10,"tag":"decl.fn","type_ref":4,"fields":{"name":"puts"}}
+{"ir":"sir-v1.0","k":"node","id":11,"tag":"cstr","fields":{"value":"hello world from sircc"}}
+{"ir":"sir-v1.0","k":"node","id":12,"tag":"call.indirect","type_ref":3,"fields":{"sig":{"t":"ref","id":4},"args":[{"t":"ref","id":10},{"t":"ref","id":11}]}}
+
+{"ir":"sir-v1.0","k":"node","id":20,"tag":"const.i32","type_ref":3,"fields":{"value":0}}
+{"ir":"sir-v1.0","k":"node","id":21,"tag":"term.ret","fields":{"value":{"t":"ref","id":20}}}
+{"ir":"sir-v1.0","k":"node","id":22,"tag":"block","fields":{"stmts":[{"t":"ref","id":12},{"t":"ref","id":21}]}}
+{"ir":"sir-v1.0","k":"node","id":30,"tag":"fn","type_ref":5,"fields":{"name":"main","params":[],"body":{"t":"ref","id":22}}}

@@ -5,6 +5,7 @@
 This repo’s “shipable bundle” is produced by the build target `dist`, which creates:
 
 - `dist/bin/<os>/sircc` (the compiler binary)
+- `dist/bin/<os>/sirc` (optional: `.sir` → `.sir.jsonl`, when built with `-DSIR_ENABLE_SIRC=ON`)
 - `dist/test/` (a small normative example set you can run immediately)
 
 ## Quickstart
@@ -22,6 +23,13 @@ Then run:
 ./dist/bin/<os>/sircc --help
 ./dist/bin/<os>/sircc --print-target
 ./dist/bin/<os>/sircc ./dist/test/examples/mem_copy_fill.sir.jsonl -o /tmp/mem_copy_fill && /tmp/mem_copy_fill; echo $?
+```
+
+If you also built `sirc`, you can do the full pipeline from `.sir`:
+
+```sh
+./dist/bin/<os>/sirc ./dist/test/examples/hello.sir -o /tmp/hello.sir.jsonl
+./dist/bin/<os>/sircc /tmp/hello.sir.jsonl -o /tmp/hello && /tmp/hello
 ```
 
 ## CLI

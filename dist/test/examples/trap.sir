@@ -1,0 +1,6 @@
+unit trap target host
+
+fn main() -> i32 public
+  term.trap code "bounds" msg "index out of range"
+end
+

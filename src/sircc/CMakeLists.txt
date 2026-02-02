@@ -43,49 +43,8 @@ target_compile_options(sircc PRIVATE
 )
 
 #
-# dist bundle (copy-pasteable for alpha users)
+# dist bundle is defined at repo root (see top-level CMakeLists.txt)
 #
-set(SIRCC_DIST_ROOT ${CMAKE_SOURCE_DIR}/dist)
-set(SIRCC_DIST_BIN ${SIRCC_DIST_ROOT}/bin)
-set(SIRCC_DIST_DOC ${SIRCC_DIST_ROOT}/doc)
-set(SIRCC_DIST_TEST ${SIRCC_DIST_ROOT}/test)
-set(SIRCC_DIST_TEST_EXAMPLES ${SIRCC_DIST_TEST}/examples)
-
-set(SIRCC_DIST_OS "${CMAKE_SYSTEM_NAME}")
-if(SIRCC_DIST_OS STREQUAL "Darwin")
-  set(SIRCC_DIST_OS "macos")
-elseif(SIRCC_DIST_OS STREQUAL "Linux")
-  set(SIRCC_DIST_OS "linux")
-elseif(SIRCC_DIST_OS STREQUAL "Windows")
-  set(SIRCC_DIST_OS "windows")
-endif()
-
-set(SIRCC_DIST_BIN_OS ${SIRCC_DIST_BIN}/${SIRCC_DIST_OS})
-
-add_custom_target(dist
-  DEPENDS sircc
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${SIRCC_DIST_BIN_OS}
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${SIRCC_DIST_DOC}
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${SIRCC_DIST_TEST_EXAMPLES}
-
-  # binary
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:sircc> ${SIRCC_DIST_BIN_OS}/sircc
-
-  # docs
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/docs/src.md ${SIRCC_DIST_DOC}/src.md
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/docs/test.md ${SIRCC_DIST_TEST}/README.md
-
-  # normative examples (subset)
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/examples/add.sir.jsonl ${SIRCC_DIST_TEST_EXAMPLES}/add.sir.jsonl
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/examples/mem_copy_fill.sir.jsonl ${SIRCC_DIST_TEST_EXAMPLES}/mem_copy_fill.sir.jsonl
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/examples/cfg_if.sir.jsonl ${SIRCC_DIST_TEST_EXAMPLES}/cfg_if.sir.jsonl
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/examples/cfg_switch.sir.jsonl ${SIRCC_DIST_TEST_EXAMPLES}/cfg_switch.sir.jsonl
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/examples/hello_world_puts.sir.jsonl ${SIRCC_DIST_TEST_EXAMPLES}/hello_world_puts.sir.jsonl
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/examples/float_nan_canon_ops.sir.jsonl ${SIRCC_DIST_TEST_EXAMPLES}/float_nan_canon_ops.sir.jsonl
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/examples/call_indirect_ptrsym.sir.jsonl ${SIRCC_DIST_TEST_EXAMPLES}/call_indirect_ptrsym.sir.jsonl
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/examples/misaligned_load_traps.sir.jsonl ${SIRCC_DIST_TEST_EXAMPLES}/misaligned_load_traps.sir.jsonl
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/examples/ptr_layout.sir.jsonl ${SIRCC_DIST_TEST_EXAMPLES}/ptr_layout.sir.jsonl
-)
 
 add_test(
   NAME sircc_verify_add
