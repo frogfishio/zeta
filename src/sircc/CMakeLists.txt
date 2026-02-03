@@ -14,6 +14,7 @@ add_executable(sircc
   compiler_tables.c
   compiler_types.c
   compiler_validate.c
+  compiler_zasm.c
   support.c
   check.c
   sircc.c
@@ -350,6 +351,18 @@ add_test(
   NAME sircc_emit_llvm_misaligned_load_traps
   COMMAND sircc ${CMAKE_CURRENT_LIST_DIR}/examples/misaligned_load_traps.sir.jsonl -o ${CMAKE_CURRENT_BINARY_DIR}/misaligned_load_traps.ll --emit-llvm
 )
+
+if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck")
+  add_test(
+    NAME sircc_emit_zasm_hello_zabi25_write_ircheck
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/hello_zabi25_write.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/hello_zabi25_write.zasm.jsonl
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_ircheck.cmake
+  )
+endif()
 
 add_test(
   NAME sircc_verify_reject_cfg_early_term

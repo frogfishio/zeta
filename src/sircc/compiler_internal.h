@@ -153,6 +153,9 @@ bool emit_module_ir(SirProgram* p, LLVMModuleRef mod, const char* out_path);
 bool init_target_for_module(SirProgram* p, LLVMModuleRef mod, const char* triple);
 bool emit_module_obj(SirProgram* p, LLVMModuleRef mod, const char* triple, const char* out_path);
 
+// ZASM (zir) emission (zasm-v1.1 JSONL).
+bool emit_zasm_v11(SirProgram* p, const char* out_path);
+
 // Link
 bool run_clang_link(SirProgram* p, const char* clang_path, const char* obj_path, const char* out_path);
 bool run_clang_link_zabi25(SirProgram* p, const char* clang_path, const char* guest_obj_path, const char* out_path);

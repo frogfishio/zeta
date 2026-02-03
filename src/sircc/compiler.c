@@ -35,6 +35,11 @@ int sircc_compile(const SirccOptions* opt) {
     goto done;
   }
 
+  if (opt->emit == SIRCC_EMIT_ZASM_IR) {
+    ok = emit_zasm_v11(&p, opt->output_path);
+    goto done;
+  }
+
   // After parsing, clear record-local location so later errors don't point at the last JSONL line.
   p.cur_path = opt->input_path;
   p.cur_line = 0;

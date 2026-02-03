@@ -35,7 +35,7 @@ If you also built `sirc`, you can do the full pipeline from `.sir`:
 ## CLI
 
 ```text
-sircc <input.sir.jsonl> -o <output> [--emit-llvm|--emit-obj] [--clang <path>] [--target-triple <triple>]
+sircc <input.sir.jsonl> -o <output> [--emit-llvm|--emit-obj|--emit-zasm] [--clang <path>] [--target-triple <triple>]
 sircc --verify-only <input.sir.jsonl>
 sircc --dump-records --verify-only <input.sir.jsonl>
 sircc --print-target [--target-triple <triple>]
@@ -50,6 +50,7 @@ Notes:
 - default output is a native executable (links via `clang`)
 - `--emit-llvm` writes LLVM IR (`.ll`)
 - `--emit-obj` writes an object file (`.o`)
+- `--emit-zasm` writes a `zasm-v1.1` JSONL stream (zir) (`.jsonl`)
 - if `meta.ext.target.triple` is present, it is used unless `--target-triple` overrides it
 - `--strip` runs `strip` on the output executable (useful for smaller distribution artifacts)
 - `--require-pinned-triple` fails if neither `--target-triple` nor `meta.ext.target.triple` is provided

@@ -9,6 +9,7 @@ typedef enum SirccEmitKind {
   SIRCC_EMIT_EXE = 0,
   SIRCC_EMIT_LLVM_IR,
   SIRCC_EMIT_OBJ,
+  SIRCC_EMIT_ZASM_IR,
 } SirccEmitKind;
 
 typedef enum SirccExitCode {

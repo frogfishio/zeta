@@ -16,7 +16,7 @@
 static void usage(FILE* out) {
   fprintf(out,
           "Usage:\n"
-          "  sircc <input.sir.jsonl> -o <output> [--emit-llvm|--emit-obj] [--clang <path>] [--target-triple <triple>]\n"
+          "  sircc <input.sir.jsonl> -o <output> [--emit-llvm|--emit-obj|--emit-zasm] [--clang <path>] [--target-triple <triple>]\n"
           "  sircc --verify-only <input.sir.jsonl>\n"
           "  sircc --dump-records --verify-only <input.sir.jsonl>\n"
           "  sircc --print-target [--target-triple <triple>]\n"
@@ -159,6 +159,10 @@ int main(int argc, char** argv) {
     }
     if (strcmp(a, "--emit-obj") == 0) {
       opt.emit = SIRCC_EMIT_OBJ;
+      continue;
+    }
+    if (strcmp(a, "--emit-zasm") == 0) {
+      opt.emit = SIRCC_EMIT_ZASM_IR;
       continue;
     }
     if (strcmp(a, "-o") == 0) {
