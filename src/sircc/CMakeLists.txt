@@ -647,6 +647,54 @@ if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ze
       "-DEXPECT_STDOUT=XXX"
       -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
   )
+
+  add_test(
+    NAME sircc_emit_zasm_run_zem_i64_clz_ptr_add_prints_E
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DZEM=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_i64_clz_ptr_add_print_E.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_i64_clz_ptr_add_print_E.zem.zasm.jsonl
+      "-DEXPECT_STDOUT=E"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
+  )
+
+  add_test(
+    NAME sircc_emit_zasm_run_zem_i64_ctz_ptr_add_prints_D
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DZEM=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_i64_ctz_ptr_add_print_D.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_i64_ctz_ptr_add_print_D.zem.zasm.jsonl
+      "-DEXPECT_STDOUT=D"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
+  )
+
+  add_test(
+    NAME sircc_emit_zasm_run_zem_i64_popc_ptr_add_prints_Z
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DZEM=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_i64_popc_ptr_add_print_Z.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_i64_popc_ptr_add_print_Z.zem.zasm.jsonl
+      "-DEXPECT_STDOUT=Z"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
+  )
+
+  add_test(
+    NAME sircc_emit_zasm_run_zem_regcache_store_invalidate_prints_B
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DZEM=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_regcache_store_invalidate_print_B.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_regcache_store_invalidate_print_B.zem.zasm.jsonl
+      "-DEXPECT_STDOUT=B"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
+  )
 endif()
 
 add_test(
@@ -678,6 +726,28 @@ add_test(
     -DEXPECT=\\\"k\\\":\\\"diag\\\"
     -DEXPECT2=\\\"about\\\":{\\\"k\\\":\\\"node\\\"
     -DEXPECT3=\\\"tag\\\":\\\"i32.add\\\"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
+)
+
+add_test(
+  NAME sircc_emit_zasm_diag_ptr_offset_missing_ty_json
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DARGS=--diagnostics\\;json\\;${CMAKE_CURRENT_LIST_DIR}/examples/zasm_bad_ptr_offset_missing_ty.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/zasm_bad_ptr_offset_missing_ty.zasm.jsonl\\;--emit-zasm
+    -DEXPECT=\\\"k\\\":\\\"diag\\\"
+    -DEXPECT2=\\\"about\\\":{\\\"k\\\":\\\"node\\\"
+    -DEXPECT3=\\\"tag\\\":\\\"ptr.offset\\\"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
+)
+
+add_test(
+  NAME sircc_emit_zasm_diag_call_too_many_args_json
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DARGS=--diagnostics\\;json\\;${CMAKE_CURRENT_LIST_DIR}/examples/zasm_bad_call_too_many_args.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/zasm_bad_call_too_many_args.zasm.jsonl\\;--emit-zasm
+    -DEXPECT=\\\"k\\\":\\\"diag\\\"
+    -DEXPECT2=\\\"about\\\":{\\\"k\\\":\\\"node\\\"
+    -DEXPECT3=\\\"tag\\\":\\\"call.indirect\\\"
     -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
 )
 

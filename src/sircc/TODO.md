@@ -211,5 +211,7 @@ This is a separate emission path (`sircc --emit-zasm`) targeting `zasm-v1.1` JSO
 - [x] ZASM unary ops: `i32/i64.{clz,ctz,popc}` (let-bound)
 - [x] ZASM diagnostics include node context (`about.k/id/tag`) in JSON mode where possible
 - [x] ZASM test: JSON diagnostics include `about` for backend lowering errors
+- [x] ZASM negative tests: invalid `ptr.offset` and “too many call args” produce JSON diagnostics
 - [x] ZASM micro-opt: avoid duplicate slot loads for `a op a`
 - [x] ZASM block-local reg cache: reuse repeated slot loads into `HL`/`DE` (conservative; reset at labels and around calls)
+- [x] ZASM reg-cache regression test: store then reload same slot must reflect new value
