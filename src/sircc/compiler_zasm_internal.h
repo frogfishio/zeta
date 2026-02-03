@@ -200,4 +200,7 @@ bool zasm_emit_addr_to_reg(
     const char* dst_reg,
     int64_t* io_line);
 
+// diagnostics helpers (adds node context to errf)
+void zasm_err_nodef(SirProgram* p, int64_t node_id, const char* node_tag, const char* fmt, ...);
+
 #endif

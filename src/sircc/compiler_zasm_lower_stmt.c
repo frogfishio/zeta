@@ -114,25 +114,26 @@ bool zasm_emit_call_stmt(
 
   JsonValue* args = json_obj_get(n->fields, "args");
   if (!args || args->type != JSON_ARRAY || args->v.arr.len < 1) {
-    errf(p, "sircc: zasm: %s node %lld missing args array", n->tag, (long long)call_id);
+    zasm_err_nodef(p, call_id, n->tag, "sircc: zasm: %s node %lld missing args array", n->tag, (long long)call_id);
     return false;
   }
 
   int64_t callee_id = 0;
   if (!parse_node_ref_id(args->v.arr.items[0], &callee_id)) {
-    errf(p, "sircc: zasm: %s node %lld args[0] must be node ref", n->tag, (long long)call_id);
+    zasm_err_nodef(p, call_id, n->tag, "sircc: zasm: %s node %lld args[0] must be node ref", n->tag, (long long)call_id);
     return false;
   }
   ZasmOp callee = {0};
   if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, callee_id, &callee) || callee.k != ZOP_SYM) {
-    errf(p, "sircc: zasm: %s node %lld callee must be a direct symbol (decl.fn/ptr.sym)", n->tag, (long long)call_id);
+    zasm_err_nodef(
+        p, call_id, n->tag, "sircc: zasm: %s node %lld callee must be a direct symbol (decl.fn/ptr.sym)", n->tag, (long long)call_id);
     return false;
   }
 
   size_t op_count = args->v.arr.len;
   ZasmOp* lowered = (ZasmOp*)calloc(op_count, sizeof(ZasmOp));
   if (!lowered) {
-    errf(p, "sircc: zasm: out of memory");
+    zasm_err_nodef(p, call_id, n->tag, "sircc: zasm: out of memory");
     return false;
   }
   lowered[0] = callee;
@@ -141,7 +142,7 @@ bool zasm_emit_call_stmt(
     int64_t aid = 0;
     if (!parse_node_ref_id(args->v.arr.items[i], &aid)) {
       free(lowered);
-      errf(p, "sircc: zasm: %s node %lld arg[%zu] must be node ref", n->tag, (long long)call_id, i);
+      zasm_err_nodef(p, call_id, n->tag, "sircc: zasm: %s node %lld arg[%zu] must be node ref", n->tag, (long long)call_id, i);
       return false;
     }
     ZasmOp op = {0};
@@ -153,13 +154,14 @@ bool zasm_emit_call_stmt(
     if (!zasm_op_is_value(&op)) {
       if (op.k != ZOP_SLOT) {
         free(lowered);
-        errf(p, "sircc: zasm: %s node %lld arg[%zu] unsupported", n->tag, (long long)call_id, i);
+        zasm_err_nodef(p, call_id, n->tag, "sircc: zasm: %s node %lld arg[%zu] unsupported", n->tag, (long long)call_id, i);
         return false;
       }
       const char* reg = call_arg_reg(i);
       if (!reg) {
         free(lowered);
-        errf(p, "sircc: zasm: %s node %lld has too many args for current ABI model", n->tag, (long long)call_id);
+        zasm_err_nodef(
+            p, call_id, n->tag, "sircc: zasm: %s node %lld has too many args for current ABI model", n->tag, (long long)call_id);
         return false;
       }
       if (!emit_load_slot_into_reg(out, reg, &op, (*io_line)++)) {

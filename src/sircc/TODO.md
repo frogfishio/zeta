@@ -206,3 +206,7 @@ This is a separate emission path (`sircc --emit-zasm`) targeting `zasm-v1.1` JSO
 - [x] Dynamic pointer arithmetic (non-const `ptr.add` / `ptr.offset`)
 - [x] `mem.fill` / `mem.copy` accept pointer expressions (not just allocas)
 - [x] More ZASM integer ops: `i32/i64.{mul,and,or,xor,shl,shr.s,shr.u,rotl,rotr}`
+- [x] ZASM div/rem: `i32/i64.{div.{s,u},rem.{s,u}}`
+- [x] ZASM CFG loop smoke test (bparam + condbr + br args)
+- [x] ZASM diagnostics include node context (`about.k/id/tag`) in JSON mode where possible
+- [x] ZASM micro-opt: avoid duplicate slot loads for `a op a`

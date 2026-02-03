@@ -18,6 +18,7 @@ add_executable(sircc
   compiler_zasm_addr.c
   compiler_zasm_addr_emit.c
   compiler_zasm_collect.c
+  compiler_zasm_diag.c
   compiler_zasm_emit.c
   compiler_zasm_lower_stmt.c
   compiler_zasm_lower_value.c
@@ -572,6 +573,42 @@ if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ze
       -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_i32_shl_len_print_SS.sir.jsonl
       -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_i32_shl_len_print_SS.zem.zasm.jsonl
       "-DEXPECT_STDOUT=SS"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
+  )
+
+  add_test(
+    NAME sircc_emit_zasm_run_zem_i32_div_len_prints_DD
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DZEM=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_i32_div_len_print_DD.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_i32_div_len_print_DD.zem.zasm.jsonl
+      "-DEXPECT_STDOUT=DD"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
+  )
+
+  add_test(
+    NAME sircc_emit_zasm_run_zem_i32_rem_len_prints_RR
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DZEM=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_i32_rem_len_print_RR.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_i32_rem_len_print_RR.zem.zasm.jsonl
+      "-DEXPECT_STDOUT=RR"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
+  )
+
+  add_test(
+    NAME sircc_emit_zasm_run_zem_cfg_loop_fill3_prints_XXX
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DZEM=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_cfg_loop_fill3_print.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_cfg_loop_fill3_print.zem.zasm.jsonl
+      "-DEXPECT_STDOUT=XXX"
       -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
   )
 endif()

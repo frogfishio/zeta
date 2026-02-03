@@ -250,10 +250,16 @@ static bool emit_binop_into_hl(
   if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, b_id, &b)) return false;
   ZasmOp rhs = b;
   if (b.k == ZOP_SLOT) {
-    // Materialize RHS into DE for binary ops.
-    if (!emit_load_slot_to_reg(out, b.s, b.n, "DE", (*io_line)++)) return false;
-    rhs.k = ZOP_REG;
-    rhs.s = "DE";
+    if (a.k == ZOP_SLOT && a.s && b.s && strcmp(a.s, b.s) == 0 && a.n == b.n) {
+      // Optional micro-opt: avoid a duplicate load when a and b are the same slot.
+      rhs.k = ZOP_REG;
+      rhs.s = "HL";
+    } else {
+      // Materialize RHS into DE for binary ops.
+      if (!emit_load_slot_to_reg(out, b.s, b.n, "DE", (*io_line)++)) return false;
+      rhs.k = ZOP_REG;
+      rhs.s = "DE";
+    }
   }
 
   zasm_write_ir_k(out, "instr");
@@ -276,6 +282,10 @@ static const char* zasm_mnemonic_for_binop(const char* tag) {
   if (strcmp(tag, "i32.add") == 0) return "ADD";
   if (strcmp(tag, "i32.sub") == 0) return "SUB";
   if (strcmp(tag, "i32.mul") == 0) return "MUL";
+  if (strcmp(tag, "i32.div.s") == 0) return "DIVS";
+  if (strcmp(tag, "i32.div.u") == 0) return "DIVU";
+  if (strcmp(tag, "i32.rem.s") == 0) return "REMS";
+  if (strcmp(tag, "i32.rem.u") == 0) return "REMU";
   if (strcmp(tag, "i32.and") == 0) return "AND";
   if (strcmp(tag, "i32.or") == 0) return "OR";
   if (strcmp(tag, "i32.xor") == 0) return "XOR";
@@ -289,6 +299,10 @@ static const char* zasm_mnemonic_for_binop(const char* tag) {
   if (strcmp(tag, "i64.add") == 0) return "ADD64";
   if (strcmp(tag, "i64.sub") == 0) return "SUB64";
   if (strcmp(tag, "i64.mul") == 0) return "MUL64";
+  if (strcmp(tag, "i64.div.s") == 0) return "DIVS64";
+  if (strcmp(tag, "i64.div.u") == 0) return "DIVU64";
+  if (strcmp(tag, "i64.rem.s") == 0) return "REMS64";
+  if (strcmp(tag, "i64.rem.u") == 0) return "REMU64";
   if (strcmp(tag, "i64.and") == 0) return "AND64";
   if (strcmp(tag, "i64.or") == 0) return "OR64";
   if (strcmp(tag, "i64.xor") == 0) return "XOR64";
@@ -1127,17 +1141,22 @@ bool emit_zasm_v11(SirProgram* p, const char* out_path) {
             }
             ZasmOp rhs = b_op;
             if (b_op.k == ZOP_SLOT) {
-              if (!emit_load_slot_to_reg(out, b_op.s, b_op.n, "DE", line++)) {
-                fclose(out);
-                free(strs);
-                free(allocas);
-                free(decls);
-                free(names);
-                free(tmps);
-                return false;
+              if (a.k == ZOP_SLOT && a.s && b_op.s && strcmp(a.s, b_op.s) == 0 && a.n == b_op.n) {
+                rhs.k = ZOP_REG;
+                rhs.s = "HL";
+              } else {
+                if (!emit_load_slot_to_reg(out, b_op.s, b_op.n, "DE", line++)) {
+                  fclose(out);
+                  free(strs);
+                  free(allocas);
+                  free(decls);
+                  free(names);
+                  free(tmps);
+                  return false;
+                }
+                rhs.k = ZOP_REG;
+                rhs.s = "DE";
               }
-              rhs.k = ZOP_REG;
-              rhs.s = "DE";
             }
 
             if (!emit_cmp_set_hl(out, cmp_m, &rhs, line++)) {
