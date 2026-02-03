@@ -364,6 +364,20 @@ if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ir
   )
 endif()
 
+if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem" AND EXISTS "${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck")
+  add_test(
+    NAME sircc_emit_zasm_run_zem_hello_zabi25_write
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DZEM=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/hello_zabi25_write.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/hello_zabi25_write.zem.zasm.jsonl
+      "-DEXPECT_STDOUT=hello from zABI25"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
+  )
+endif()
+
 add_test(
   NAME sircc_verify_reject_cfg_early_term
   COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/cfg_bad_early_term.sir.jsonl
