@@ -111,7 +111,7 @@ bool zasm_emit_store_stmt(
     ZasmBParamSlot* bps,
     size_t bps_len,
     NodeRec* s,
-    int64_t line_no);
+    int64_t* io_line);
 bool zasm_emit_mem_fill_stmt(
     FILE* out,
     SirProgram* p,
@@ -124,7 +124,7 @@ bool zasm_emit_mem_fill_stmt(
     ZasmBParamSlot* bps,
     size_t bps_len,
     NodeRec* s,
-    int64_t line_no);
+    int64_t* io_line);
 bool zasm_emit_mem_copy_stmt(
     FILE* out,
     SirProgram* p,
@@ -137,7 +137,7 @@ bool zasm_emit_mem_copy_stmt(
     ZasmBParamSlot* bps,
     size_t bps_len,
     NodeRec* s,
-    int64_t line_no);
+    int64_t* io_line);
 bool zasm_emit_ret_value_to_hl(
     FILE* out,
     SirProgram* p,
@@ -150,7 +150,7 @@ bool zasm_emit_ret_value_to_hl(
     ZasmBParamSlot* bps,
     size_t bps_len,
     int64_t value_id,
-    int64_t line_no);
+    int64_t* io_line);
 
 // address lowering (for mem operands)
 bool zasm_lower_addr_to_mem(
@@ -166,5 +166,22 @@ bool zasm_lower_addr_to_mem(
     int64_t addr_id,
     ZasmOp* out_base,
     int64_t* out_disp);
+
+// address lowering (may emit instructions to materialize dynamic addresses)
+bool zasm_emit_addr_to_mem(
+    FILE* out,
+    SirProgram* p,
+    ZasmStr* strs,
+    size_t strs_len,
+    ZasmAlloca* allocas,
+    size_t allocas_len,
+    ZasmNameBinding* names,
+    size_t names_len,
+    ZasmBParamSlot* bps,
+    size_t bps_len,
+    int64_t addr_id,
+    ZasmOp* out_base,
+    int64_t* out_disp,
+    int64_t* io_line);
 
 #endif

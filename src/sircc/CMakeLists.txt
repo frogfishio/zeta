@@ -16,6 +16,7 @@ add_executable(sircc
   compiler_validate.c
   compiler_zasm_backend.c
   compiler_zasm_addr.c
+  compiler_zasm_addr_emit.c
   compiler_zasm_collect.c
   compiler_zasm_emit.c
   compiler_zasm_lower_stmt.c
@@ -499,6 +500,30 @@ if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ze
       -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_cfg_condbr_sgt_slot_print_T.sir.jsonl
       -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_cfg_condbr_sgt_slot_print_T.zem.zasm.jsonl
       "-DEXPECT_STDOUT=T"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
+  )
+
+  add_test(
+    NAME sircc_emit_zasm_run_zem_ptr_add_dynamic_prints_C
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DZEM=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_ptr_add_dynamic_print_C.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_ptr_add_dynamic_print_C.zem.zasm.jsonl
+      "-DEXPECT_STDOUT=C"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
+  )
+
+  add_test(
+    NAME sircc_emit_zasm_run_zem_ptr_offset_dynamic_prints_D
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DZEM=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_ptr_offset_dynamic_print_D.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_ptr_offset_dynamic_print_D.zem.zasm.jsonl
+      "-DEXPECT_STDOUT=D"
       -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
   )
 endif()

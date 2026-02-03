@@ -409,8 +409,8 @@ static bool emit_zir_nonterm_stmt(
       }
       ZasmOp base = {0};
       int64_t disp = 0;
-      if (!zasm_lower_addr_to_mem(
-              p, strs, strs_len, allocas, allocas_len, *names, *name_len, bps, bps_len, addr_id, &base, &disp))
+      if (!zasm_emit_addr_to_mem(
+              out, p, strs, strs_len, allocas, allocas_len, *names, *name_len, bps, bps_len, addr_id, &base, &disp, io_line))
         return false;
 
       zasm_write_ir_k(out, "instr");
@@ -482,20 +482,17 @@ static bool emit_zir_nonterm_stmt(
   }
 
   if (strcmp(s->tag, "mem.fill") == 0) {
-    if (!zasm_emit_mem_fill_stmt(out, p, strs, strs_len, allocas, allocas_len, *names, *name_len, bps, bps_len, s, *io_line)) return false;
-    *io_line += 4;
+    if (!zasm_emit_mem_fill_stmt(out, p, strs, strs_len, allocas, allocas_len, *names, *name_len, bps, bps_len, s, io_line)) return false;
     return true;
   }
 
   if (strcmp(s->tag, "mem.copy") == 0) {
-    if (!zasm_emit_mem_copy_stmt(out, p, strs, strs_len, allocas, allocas_len, *names, *name_len, bps, bps_len, s, *io_line)) return false;
-    *io_line += 4;
+    if (!zasm_emit_mem_copy_stmt(out, p, strs, strs_len, allocas, allocas_len, *names, *name_len, bps, bps_len, s, io_line)) return false;
     return true;
   }
 
   if (strncmp(s->tag, "store.", 6) == 0) {
-    if (!zasm_emit_store_stmt(out, p, strs, strs_len, allocas, allocas_len, *names, *name_len, bps, bps_len, s, *io_line)) return false;
-    *io_line += 2;
+    if (!zasm_emit_store_stmt(out, p, strs, strs_len, allocas, allocas_len, *names, *name_len, bps, bps_len, s, io_line)) return false;
     return true;
   }
 
@@ -819,7 +816,7 @@ bool emit_zasm_v11(SirProgram* p, const char* out_path) {
           JsonValue* rv = s->fields ? json_obj_get(s->fields, "value") : NULL;
           int64_t rid = 0;
           if (rv && parse_node_ref_id(rv, &rid)) {
-            if (!zasm_emit_ret_value_to_hl(out, p, strs, strs_len, allocas, allocas_len, names, name_len, bps, bp_len, rid, line++)) {
+            if (!zasm_emit_ret_value_to_hl(out, p, strs, strs_len, allocas, allocas_len, names, name_len, bps, bp_len, rid, &line)) {
               fclose(out);
               free(strs);
               free(allocas);
@@ -1300,7 +1297,7 @@ bool emit_zasm_v11(SirProgram* p, const char* out_path) {
       JsonValue* rv = s->fields ? json_obj_get(s->fields, "value") : NULL;
       int64_t rid = 0;
       if (rv && parse_node_ref_id(rv, &rid)) {
-        if (!zasm_emit_ret_value_to_hl(out, p, strs, strs_len, allocas, allocas_len, names, name_len, bps, bp_len, rid, line++)) {
+        if (!zasm_emit_ret_value_to_hl(out, p, strs, strs_len, allocas, allocas_len, names, name_len, bps, bp_len, rid, &line)) {
           fclose(out);
           free(strs);
           free(allocas);

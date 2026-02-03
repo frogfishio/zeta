@@ -201,8 +201,8 @@ bool zasm_emit_store_stmt(
     ZasmBParamSlot* bps,
     size_t bps_len,
     NodeRec* s,
-    int64_t line_no) {
-  if (!out || !p || !s || !s->fields) return false;
+    int64_t* io_line) {
+  if (!out || !p || !s || !s->fields || !io_line) return false;
   int64_t width = 0;
   const char* mnemonic = NULL;
   const char* value_reg = NULL;
@@ -238,26 +238,27 @@ bool zasm_emit_store_stmt(
 
   ZasmOp base = {0};
   int64_t disp = 0;
-  if (!zasm_lower_addr_to_mem(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, addr_id, &base, &disp)) return false;
+  if (!zasm_emit_addr_to_mem(out, p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, addr_id, &base, &disp, io_line))
+    return false;
   ZasmOp val = {0};
   if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, value_id, &val)) return false;
 
   if (val.k == ZOP_SLOT) {
-    if (!emit_load_slot_into_reg(out, value_reg, &val, line_no)) return false;
+    if (!emit_load_slot_into_reg(out, value_reg, &val, (*io_line)++)) return false;
   } else {
     if (width == 1) {
       if (val.k == ZOP_NUM) {
         ZasmOp byte = {.k = ZOP_NUM, .n = (uint8_t)val.n};
-        if (!emit_ld(out, value_reg, &byte, line_no)) return false;
+        if (!emit_ld(out, value_reg, &byte, (*io_line)++)) return false;
       } else if (val.k == ZOP_SYM || val.k == ZOP_REG) {
-        if (!emit_ld(out, value_reg, &val, line_no)) return false;
+        if (!emit_ld(out, value_reg, &val, (*io_line)++)) return false;
       } else {
         errf(p, "sircc: zasm: %s value unsupported", s->tag);
         return false;
       }
     } else {
       if (val.k == ZOP_NUM || val.k == ZOP_SYM || val.k == ZOP_REG) {
-        if (!emit_ld(out, value_reg, &val, line_no)) return false;
+        if (!emit_ld(out, value_reg, &val, (*io_line)++)) return false;
       } else {
         errf(p, "sircc: zasm: %s value unsupported", s->tag);
         return false;
@@ -273,7 +274,7 @@ bool zasm_emit_store_stmt(
   fprintf(out, ",");
   zasm_write_op_reg(out, value_reg);
   fprintf(out, "]");
-  zasm_write_loc(out, line_no + 1);
+  zasm_write_loc(out, (*io_line)++);
   fprintf(out, "}\n");
   return true;
 }
@@ -290,8 +291,8 @@ bool zasm_emit_mem_fill_stmt(
     ZasmBParamSlot* bps,
     size_t bps_len,
     NodeRec* s,
-    int64_t line_no) {
-  if (!out || !p || !s || !s->fields) return false;
+    int64_t* io_line) {
+  if (!out || !p || !s || !s->fields || !io_line) return false;
   JsonValue* args = json_obj_get(s->fields, "args");
   if (!args || args->type != JSON_ARRAY || args->v.arr.len != 3) {
     errf(p, "sircc: zasm: mem.fill node %lld requires args:[dst, byte, len]", (long long)s->id);
@@ -321,14 +322,14 @@ bool zasm_emit_mem_fill_stmt(
     return false;
   }
 
-  if (!emit_ld(out, "HL", &dst, line_no)) return false;
+  if (!emit_ld(out, "HL", &dst, (*io_line)++)) return false;
   ZasmOp b8 = {.k = ZOP_NUM, .n = (uint8_t)byte.n};
-  if (!emit_ld(out, "A", &b8, line_no + 1)) return false;
-  if (!emit_ld(out, "BC", &len, line_no + 2)) return false;
+  if (!emit_ld(out, "A", &b8, (*io_line)++)) return false;
+  if (!emit_ld(out, "BC", &len, (*io_line)++)) return false;
 
   zasm_write_ir_k(out, "instr");
   fprintf(out, ",\"m\":\"FILL\",\"ops\":[]");
-  zasm_write_loc(out, line_no + 3);
+  zasm_write_loc(out, (*io_line)++);
   fprintf(out, "}\n");
   return true;
 }
@@ -345,8 +346,8 @@ bool zasm_emit_mem_copy_stmt(
     ZasmBParamSlot* bps,
     size_t bps_len,
     NodeRec* s,
-    int64_t line_no) {
-  if (!out || !p || !s || !s->fields) return false;
+    int64_t* io_line) {
+  if (!out || !p || !s || !s->fields || !io_line) return false;
   JsonValue* args = json_obj_get(s->fields, "args");
   if (!args || args->type != JSON_ARRAY || args->v.arr.len != 3) {
     errf(p, "sircc: zasm: mem.copy node %lld requires args:[dst, src, len]", (long long)s->id);
@@ -376,13 +377,13 @@ bool zasm_emit_mem_copy_stmt(
     return false;
   }
 
-  if (!emit_ld(out, "DE", &dst, line_no)) return false;
-  if (!emit_ld(out, "HL", &src, line_no + 1)) return false;
-  if (!emit_ld(out, "BC", &len, line_no + 2)) return false;
+  if (!emit_ld(out, "DE", &dst, (*io_line)++)) return false;
+  if (!emit_ld(out, "HL", &src, (*io_line)++)) return false;
+  if (!emit_ld(out, "BC", &len, (*io_line)++)) return false;
 
   zasm_write_ir_k(out, "instr");
   fprintf(out, ",\"m\":\"LDIR\",\"ops\":[]");
-  zasm_write_loc(out, line_no + 3);
+  zasm_write_loc(out, (*io_line)++);
   fprintf(out, "}\n");
   return true;
 }
@@ -399,8 +400,8 @@ bool zasm_emit_ret_value_to_hl(
     ZasmBParamSlot* bps,
     size_t bps_len,
     int64_t value_id,
-    int64_t line_no) {
-  if (!out || !p) return false;
+    int64_t* io_line) {
+  if (!out || !p || !io_line) return false;
 
   NodeRec* v = get_node(p, value_id);
   if (!v) {
@@ -434,7 +435,8 @@ bool zasm_emit_ret_value_to_hl(
       }
       ZasmOp base = {0};
       int64_t disp = 0;
-      if (!zasm_lower_addr_to_mem(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, addr_id, &base, &disp)) return false;
+      if (!zasm_emit_addr_to_mem(out, p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, addr_id, &base, &disp, io_line))
+        return false;
 
       zasm_write_ir_k(out, "instr");
       fprintf(out, ",\"m\":\"LD8U\",\"ops\":[");
@@ -442,7 +444,7 @@ bool zasm_emit_ret_value_to_hl(
       fprintf(out, ",");
       zasm_write_op_mem(out, &base, disp, 1);
       fprintf(out, "]");
-      zasm_write_loc(out, line_no);
+      zasm_write_loc(out, (*io_line)++);
       fprintf(out, "}\n");
       return true;
     }
@@ -453,7 +455,7 @@ bool zasm_emit_ret_value_to_hl(
       return false;
     }
     ZasmOp z = {.k = ZOP_NUM, .n = (uint8_t)op.n};
-    return emit_ld(out, "HL", &z, line_no);
+    return emit_ld(out, "HL", &z, (*io_line)++);
   }
 
   if (strcmp(v->tag, "load.i8") == 0) {
@@ -465,7 +467,8 @@ bool zasm_emit_ret_value_to_hl(
     }
     ZasmOp base = {0};
     int64_t disp = 0;
-    if (!zasm_lower_addr_to_mem(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, addr_id, &base, &disp)) return false;
+    if (!zasm_emit_addr_to_mem(out, p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, addr_id, &base, &disp, io_line))
+      return false;
 
     zasm_write_ir_k(out, "instr");
     fprintf(out, ",\"m\":\"LD8U\",\"ops\":[");
@@ -473,18 +476,18 @@ bool zasm_emit_ret_value_to_hl(
     fprintf(out, ",");
     zasm_write_op_mem(out, &base, disp, 1);
     fprintf(out, "]");
-    zasm_write_loc(out, line_no);
+    zasm_write_loc(out, (*io_line)++);
     fprintf(out, "}\n");
     return true;
   }
 
   ZasmOp rop = {0};
   if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, value_id, &rop)) return false;
-  if (rop.k == ZOP_SLOT) return emit_load_slot_into_reg(out, "HL", &rop, line_no);
-  if (rop.k == ZOP_NUM || rop.k == ZOP_SYM) return emit_ld(out, "HL", &rop, line_no);
+  if (rop.k == ZOP_SLOT) return emit_load_slot_into_reg(out, "HL", &rop, (*io_line)++);
+  if (rop.k == ZOP_NUM || rop.k == ZOP_SYM) return emit_ld(out, "HL", &rop, (*io_line)++);
   if (rop.k == ZOP_REG) {
     if (!rop.s || strcmp(rop.s, "HL") == 0) return true;
-    return emit_ld(out, "HL", &rop, line_no);
+    return emit_ld(out, "HL", &rop, (*io_line)++);
   }
 
   errf(p, "sircc: zasm: unsupported return value shape");
