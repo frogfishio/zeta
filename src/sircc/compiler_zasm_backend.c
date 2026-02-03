@@ -15,6 +15,53 @@ typedef struct {
   int64_t size_bytes;
 } ZasmTempSlot;
 
+typedef struct {
+  const char* hl_slot;
+  int64_t hl_width;
+  const char* de_slot;
+  int64_t de_width;
+} ZasmRegCache;
+
+static ZasmRegCache* g_regcache = NULL;
+static ZasmRegCache s_regcache;
+
+static void regcache_clear_all(void) {
+  if (!g_regcache) return;
+  g_regcache->hl_slot = NULL;
+  g_regcache->hl_width = 0;
+  g_regcache->de_slot = NULL;
+  g_regcache->de_width = 0;
+}
+
+static void regcache_invalidate_reg(const char* reg) {
+  if (!g_regcache || !reg) return;
+  if (strcmp(reg, "HL") == 0) {
+    g_regcache->hl_slot = NULL;
+    g_regcache->hl_width = 0;
+  } else if (strcmp(reg, "DE") == 0) {
+    g_regcache->de_slot = NULL;
+    g_regcache->de_width = 0;
+  }
+}
+
+static bool regcache_matches_slot(const char* reg, const char* slot_sym, int64_t width_bytes) {
+  if (!g_regcache || !reg || !slot_sym) return false;
+  if (strcmp(reg, "HL") == 0) return g_regcache->hl_slot && strcmp(g_regcache->hl_slot, slot_sym) == 0 && g_regcache->hl_width == width_bytes;
+  if (strcmp(reg, "DE") == 0) return g_regcache->de_slot && strcmp(g_regcache->de_slot, slot_sym) == 0 && g_regcache->de_width == width_bytes;
+  return false;
+}
+
+static void regcache_set_slot(const char* reg, const char* slot_sym, int64_t width_bytes) {
+  if (!g_regcache || !reg) return;
+  if (strcmp(reg, "HL") == 0) {
+    g_regcache->hl_slot = slot_sym;
+    g_regcache->hl_width = width_bytes;
+  } else if (strcmp(reg, "DE") == 0) {
+    g_regcache->de_slot = slot_sym;
+    g_regcache->de_width = width_bytes;
+  }
+}
+
 static int64_t width_for_prim(const char* prim) {
   if (!prim) return 0;
   if (strcmp(prim, "i8") == 0 || strcmp(prim, "bool") == 0) return 1;
@@ -163,6 +210,7 @@ static const char* reg_for_width(int64_t width_bytes) {
 
 static bool emit_load_slot_to_reg(FILE* out, const char* slot_sym, int64_t width_bytes, const char* dst_reg, int64_t line_no) {
   if (!out || !slot_sym || !dst_reg) return false;
+  if (regcache_matches_slot(dst_reg, slot_sym, width_bytes)) return true;
   ZasmOp base = {.k = ZOP_SYM, .s = slot_sym};
 
   const char* m = NULL;
@@ -193,11 +241,13 @@ static bool emit_load_slot_to_reg(FILE* out, const char* slot_sym, int64_t width
   fprintf(out, "]");
   zasm_write_loc(out, line_no);
   fprintf(out, "}\n");
+  regcache_set_slot(dst_reg, slot_sym, width_bytes);
   return true;
 }
 
 static bool emit_ld_reg_or_imm(FILE* out, const char* dst_reg, const ZasmOp* op, int64_t line_no) {
   if (!out || !dst_reg || !op) return false;
+  regcache_invalidate_reg(dst_reg);
   zasm_write_ir_k(out, "instr");
   fprintf(out, ",\"m\":\"LD\",\"ops\":[");
   zasm_write_op_reg(out, dst_reg);
@@ -272,6 +322,7 @@ static bool emit_binop_into_hl(
   fprintf(out, "]");
   zasm_write_loc(out, (*io_line)++);
   fprintf(out, "}\n");
+  regcache_invalidate_reg("HL");
   return true;
 }
 
@@ -312,6 +363,17 @@ static const char* zasm_mnemonic_for_binop(const char* tag) {
   if (strcmp(tag, "i64.rotl") == 0) return "ROL64";
   if (strcmp(tag, "i64.rotr") == 0) return "ROR64";
 
+  return NULL;
+}
+
+static const char* zasm_mnemonic_for_unop(const char* tag) {
+  if (!tag) return NULL;
+  if (strcmp(tag, "i32.clz") == 0) return "CLZ";
+  if (strcmp(tag, "i32.ctz") == 0) return "CTZ";
+  if (strcmp(tag, "i32.popc") == 0) return "POPC";
+  if (strcmp(tag, "i64.clz") == 0) return "CLZ64";
+  if (strcmp(tag, "i64.ctz") == 0) return "CTZ64";
+  if (strcmp(tag, "i64.popc") == 0) return "POPC64";
   return NULL;
 }
 
@@ -408,7 +470,9 @@ static bool emit_zir_nonterm_stmt(
     }
 
     if (strcmp(vn->tag, "call") == 0 || strcmp(vn->tag, "call.indirect") == 0) {
+      regcache_clear_all();
       if (!zasm_emit_call_stmt(out, p, strs, strs_len, allocas, allocas_len, *names, *name_len, bps, bps_len, vid, io_line)) return false;
+      regcache_clear_all();
 
       if (bind_name && strcmp(bind_name, "_") != 0) {
         const char* slot_sym = NULL;
@@ -455,6 +519,7 @@ static bool emit_zir_nonterm_stmt(
       }
       ZasmOp base = {0};
       int64_t disp = 0;
+      regcache_clear_all();
       if (!zasm_emit_addr_to_mem(
               out, p, strs, strs_len, allocas, allocas_len, *names, *name_len, bps, bps_len, addr_id, &base, &disp, io_line))
         return false;
@@ -469,6 +534,7 @@ static bool emit_zir_nonterm_stmt(
       fprintf(out, "]");
       zasm_write_loc(out, (*io_line)++);
       fprintf(out, "}\n");
+      regcache_invalidate_reg(dst_reg);
 
       if (bind_name && strcmp(bind_name, "_") != 0) {
         const char* slot_sym = NULL;
@@ -511,6 +577,58 @@ static bool emit_zir_nonterm_stmt(
       return true;
     }
 
+    const char* um = zasm_mnemonic_for_unop(vn->tag);
+    if (um) {
+      int64_t width = 0;
+      if (strncmp(vn->tag, "i32.", 4) == 0) width = 4;
+      if (strncmp(vn->tag, "i64.", 4) == 0) width = 8;
+      if (!width) {
+        errf(p, "sircc: zasm: %s width unsupported", vn->tag);
+        return false;
+      }
+      if (!bind_name || strcmp(bind_name, "_") == 0) {
+        errf(p, "sircc: zasm: %s must be bound via let name", vn->tag);
+        return false;
+      }
+
+      JsonValue* args = vn->fields ? json_obj_get(vn->fields, "args") : NULL;
+      if (!args || args->type != JSON_ARRAY || args->v.arr.len != 1) {
+        errf(p, "sircc: zasm: %s node %lld requires args:[x]", vn->tag, (long long)vn->id);
+        return false;
+      }
+      int64_t x_id = 0;
+      if (!parse_node_ref_id(args->v.arr.items[0], &x_id)) {
+        errf(p, "sircc: zasm: %s node %lld arg must be node ref", vn->tag, (long long)vn->id);
+        return false;
+      }
+      ZasmOp x = {0};
+      if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, *names, *name_len, bps, bps_len, x_id, &x)) return false;
+      if (x.k == ZOP_SLOT) {
+        if (!emit_load_slot_to_reg(out, x.s, x.n, "HL", (*io_line)++)) return false;
+      } else {
+        if (!emit_ld_reg_or_imm(out, "HL", &x, (*io_line)++)) return false;
+      }
+
+      zasm_write_ir_k(out, "instr");
+      fprintf(out, ",\"m\":");
+      json_write_escaped(out, um);
+      fprintf(out, ",\"ops\":[");
+      zasm_write_op_reg(out, "HL");
+      fprintf(out, "]");
+      zasm_write_loc(out, (*io_line)++);
+      fprintf(out, "}\n");
+      regcache_invalidate_reg("HL");
+
+      const char* slot_sym = NULL;
+      if (!add_temp_slot(p, tmps, tmp_len, tmp_cap, s->id, width, &slot_sym)) {
+        errf(p, "sircc: zasm: out of memory");
+        return false;
+      }
+      if (!emit_store_reg_to_slot(out, slot_sym, width, "HL", (*io_line)++)) return false;
+      if (!emit_bind_slot(p, names, name_len, name_cap, bind_name, slot_sym, width)) return false;
+      return true;
+    }
+
     // Pure-ish binding of stable values (consts/symbols); no code emitted.
     if (bind_name && strcmp(bind_name, "_") != 0) {
       ZasmOp op = {0};
@@ -521,17 +639,23 @@ static bool emit_zir_nonterm_stmt(
   }
 
   if (strcmp(s->tag, "mem.fill") == 0) {
+    regcache_clear_all();
     if (!zasm_emit_mem_fill_stmt(out, p, strs, strs_len, allocas, allocas_len, *names, *name_len, bps, bps_len, s, io_line)) return false;
+    regcache_clear_all();
     return true;
   }
 
   if (strcmp(s->tag, "mem.copy") == 0) {
+    regcache_clear_all();
     if (!zasm_emit_mem_copy_stmt(out, p, strs, strs_len, allocas, allocas_len, *names, *name_len, bps, bps_len, s, io_line)) return false;
+    regcache_clear_all();
     return true;
   }
 
   if (strncmp(s->tag, "store.", 6) == 0) {
+    regcache_clear_all();
     if (!zasm_emit_store_stmt(out, p, strs, strs_len, allocas, allocas_len, *names, *name_len, bps, bps_len, s, io_line)) return false;
+    regcache_clear_all();
     return true;
   }
 
@@ -607,6 +731,7 @@ static bool emit_cmp_set_hl(FILE* out, const char* mnemonic, const ZasmOp* rhs, 
   fprintf(out, "]");
   zasm_write_loc(out, line_no);
   fprintf(out, "}\n");
+  regcache_invalidate_reg("HL");
   return true;
 }
 
@@ -654,6 +779,9 @@ bool emit_zasm_v11(SirProgram* p, const char* out_path) {
     errf(p, "sircc: failed to open output: %s", strerror(errno));
     return false;
   }
+
+  g_regcache = &s_regcache;
+  regcache_clear_all();
 
   int64_t line = 1;
   size_t name_cap = 0;
@@ -795,6 +923,7 @@ bool emit_zasm_v11(SirProgram* p, const char* out_path) {
       json_write_escaped(out, lbl);
       zasm_write_loc(out, line++);
       fprintf(out, "}\n");
+      regcache_clear_all();
 
       JsonValue* stmts = json_obj_get(b->fields, "stmts");
       if (!stmts || stmts->type != JSON_ARRAY) {
@@ -851,10 +980,13 @@ bool emit_zasm_v11(SirProgram* p, const char* out_path) {
           continue;
         }
 
+        regcache_clear_all();
+
         if (strcmp(s->tag, "term.ret") == 0 || strcmp(s->tag, "return") == 0) {
           JsonValue* rv = s->fields ? json_obj_get(s->fields, "value") : NULL;
           int64_t rid = 0;
           if (rv && parse_node_ref_id(rv, &rid)) {
+            regcache_clear_all();
             if (!zasm_emit_ret_value_to_hl(out, p, strs, strs_len, allocas, allocas_len, names, name_len, bps, bp_len, rid, &line)) {
               fclose(out);
               free(strs);
@@ -880,6 +1012,7 @@ bool emit_zasm_v11(SirProgram* p, const char* out_path) {
           fprintf(out, ",\"m\":\"RET\",\"ops\":[]");
           zasm_write_loc(out, line++);
           fprintf(out, "}\n");
+          regcache_clear_all();
           terminated = true;
           break;
         }
@@ -1026,6 +1159,7 @@ bool emit_zasm_v11(SirProgram* p, const char* out_path) {
             free(bps);
             return false;
           }
+          regcache_clear_all();
           terminated = true;
           break;
         }
@@ -1232,6 +1366,7 @@ bool emit_zasm_v11(SirProgram* p, const char* out_path) {
             free(tmps);
             return false;
           }
+          regcache_clear_all();
           terminated = true;
           break;
         }
@@ -1269,6 +1404,7 @@ bool emit_zasm_v11(SirProgram* p, const char* out_path) {
   fprintf(out, ",\"name\":\"zir_main\"");
   zasm_write_loc(out, line++);
   fprintf(out, "}\n");
+  regcache_clear_all();
 
   JsonValue* bodyv = zir_main->fields ? json_obj_get(zir_main->fields, "body") : NULL;
   int64_t body_id = 0;
@@ -1341,6 +1477,7 @@ bool emit_zasm_v11(SirProgram* p, const char* out_path) {
       JsonValue* rv = s->fields ? json_obj_get(s->fields, "value") : NULL;
       int64_t rid = 0;
       if (rv && parse_node_ref_id(rv, &rid)) {
+        regcache_clear_all();
         if (!zasm_emit_ret_value_to_hl(out, p, strs, strs_len, allocas, allocas_len, names, name_len, bps, bp_len, rid, &line)) {
           fclose(out);
           free(strs);
@@ -1366,6 +1503,7 @@ bool emit_zasm_v11(SirProgram* p, const char* out_path) {
       fprintf(out, ",\"m\":\"RET\",\"ops\":[]");
       zasm_write_loc(out, line++);
       fprintf(out, "}\n");
+      regcache_clear_all();
       break;
     }
   }

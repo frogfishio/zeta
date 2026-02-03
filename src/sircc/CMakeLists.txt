@@ -601,6 +601,42 @@ if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ze
   )
 
   add_test(
+    NAME sircc_emit_zasm_run_zem_i32_clz_len_prints_CC
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DZEM=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_i32_clz_len_print_CC.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_i32_clz_len_print_CC.zem.zasm.jsonl
+      "-DEXPECT_STDOUT=CC"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
+  )
+
+  add_test(
+    NAME sircc_emit_zasm_run_zem_i32_ctz_len_prints_TT
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DZEM=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_i32_ctz_len_print_TT.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_i32_ctz_len_print_TT.zem.zasm.jsonl
+      "-DEXPECT_STDOUT=TT"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
+  )
+
+  add_test(
+    NAME sircc_emit_zasm_run_zem_i32_popc_len_prints_PP
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DZEM=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_i32_popc_len_print_PP.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_i32_popc_len_print_PP.zem.zasm.jsonl
+      "-DEXPECT_STDOUT=PP"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
+  )
+
+  add_test(
     NAME sircc_emit_zasm_run_zem_cfg_loop_fill3_prints_XXX
     COMMAND ${CMAKE_COMMAND}
       -DSIRCC=$<TARGET_FILE:sircc>
@@ -632,6 +668,17 @@ add_test(
     "-DEXPECT=\"m\":\"ST64\""
     "-DEXPECT2=\"m\":\"LD64\""
     -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_expect_contains.cmake
+)
+
+add_test(
+  NAME sircc_emit_zasm_diag_unsupported_value_node_json
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DARGS=--diagnostics\\;json\\;${CMAKE_CURRENT_LIST_DIR}/examples/zasm_bad_unsupported_value_node_diag.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/zasm_bad_unsupported_value_node_diag.zasm.jsonl\\;--emit-zasm
+    -DEXPECT=\\\"k\\\":\\\"diag\\\"
+    -DEXPECT2=\\\"about\\\":{\\\"k\\\":\\\"node\\\"
+    -DEXPECT3=\\\"tag\\\":\\\"i32.add\\\"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
 )
 
 add_test(

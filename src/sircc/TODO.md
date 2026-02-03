@@ -208,5 +208,8 @@ This is a separate emission path (`sircc --emit-zasm`) targeting `zasm-v1.1` JSO
 - [x] More ZASM integer ops: `i32/i64.{mul,and,or,xor,shl,shr.s,shr.u,rotl,rotr}`
 - [x] ZASM div/rem: `i32/i64.{div.{s,u},rem.{s,u}}`
 - [x] ZASM CFG loop smoke test (bparam + condbr + br args)
+- [x] ZASM unary ops: `i32/i64.{clz,ctz,popc}` (let-bound)
 - [x] ZASM diagnostics include node context (`about.k/id/tag`) in JSON mode where possible
+- [x] ZASM test: JSON diagnostics include `about` for backend lowering errors
 - [x] ZASM micro-opt: avoid duplicate slot loads for `a op a`
+- [x] ZASM block-local reg cache: reuse repeated slot loads into `HL`/`DE` (conservative; reset at labels and around calls)

@@ -60,3 +60,16 @@ Notes:
 - `--check` runs a small “try immediately” suite over `dist/test/examples` (or a custom `--examples-dir`)
 - `--runtime zabi25` links against the zABI 2.5 host runtime (default root is autodetected; override via `--zabi25-root` or `SIRCC_ZABI25_ROOT`)
   - zABI mode expects you to export an entrypoint named `zir_main` (the host shim provides `main()` and calls `zir_main()` after installing the zABI host).
+
+## ZASM backend (zir) notes
+
+`--emit-zasm` is an experimental backend that emits a `zasm-v1.1` JSONL stream intended to be checked by `ircheck` and executed by `zem`.
+
+Current calling convention model (ZASM64 “Lembeh” ABI, as used by the backend):
+- integer/pointer args are passed in registers in order: `HL`, `DE`, `BC`, `IX`
+- integer return value is in `HL`
+- `CALL` is treated as clobbering all general registers (`HL`, `DE`, `BC`, `IX`, `A`) unless explicitly saved/restored by the caller
+
+If you call an extern from ZASM output, design it as if it were a freestanding ABI:
+- don’t rely on preserved registers unless you save them yourself
+- pass only primitive ints/pointers (no structs, no varargs) until the ABI model is extended
