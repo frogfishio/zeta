@@ -14,10 +14,10 @@ typedef enum {
 } SirccCheckFormat;
 
 typedef struct {
+  const char* argv0;         // optional; used to infer dist root (best-effort)
   const char* dist_root;     // optional; if set, uses <dist_root>/test/examples
   const char* examples_dir;  // optional; if set, uses this directory directly
   SirccCheckFormat format;
 } SirccCheckOptions;
 
 int sircc_run_check(FILE* out, const SirccOptions* base_opt, const SirccCheckOptions* chk);
-

@@ -93,6 +93,7 @@ bool sircc_print_support(FILE* out, SirccSupportFormat fmt, bool full) {
   fprintf(out, "  spec: %zu mnemonics (core: %zu)\n", sircc_support_spec_all_count, sircc_support_spec_core_count);
   fprintf(out, "  implemented: %zu\n", sircc_support_impl_in_spec_count);
   fprintf(out, "  missing: %zu (core: %zu)\n", missing_total, missing_core);
+  fprintf(out, "  milestone3: %s (%zu candidates)\n", sircc_support_m3_missing_count == 0 ? "OK" : "MISSING", sircc_support_m3_candidates_count);
   fprintf(out, "\n");
 
   if (sircc_support_m3_missing_count > 0) {
@@ -111,4 +112,3 @@ bool sircc_print_support(FILE* out, SirccSupportFormat fmt, bool full) {
 
   return true;
 }
-

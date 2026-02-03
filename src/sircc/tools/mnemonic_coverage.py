@@ -219,11 +219,10 @@ def infer_implemented_mnemonics(csrc: str) -> set[str]:
 
 
 def pick_m3_core_candidates(spec: Iterable[SpecMnemonic]) -> set[str]:
-    # Milestone 3 is the “base” set (ungated). We select the “core” pack
-    # (pack=None) and then bucket into the families sircc uses for Stage 3.
-    # This is intentionally conservative and excludes feature-pack-only ops
-    # that do not have a distinguishing prefix (e.g., load.vec, term.invoke).
-    core = {m.name for m in spec if m.pack is None}
+    # Milestone 3 is the “base” set (ungated). Pack association in the HTML is
+    # descriptive, but we derive gating from mnemonic prefixes to stay robust
+    # even if heading markup changes.
+    core = {m.name for m in spec if pack_for_mnemonic(m.name) == "core"}
 
     # Note: `alloca` is a bare mnemonic in the spec.
     m3_re = re.compile(
@@ -244,6 +243,32 @@ def pick_m3_core_candidates(spec: Iterable[SpecMnemonic]) -> set[str]:
     return {m for m in core if m3_re.match(m)}
 
 
+def pack_for_mnemonic(m: str) -> str:
+    if m.startswith("atomic."):
+        return "atomics:v1"
+    if m == "load.vec" or m == "store.vec":
+        return "simd:v1"
+    if m.startswith("vec."):
+        return "simd:v1"
+    if m.startswith("adt."):
+        return "adt:v1"
+    if m.startswith("fun."):
+        return "fun:v1"
+    if m == "call.fun":
+        return "fun:v1"
+    if m.startswith("closure.") or m.startswith("call.closure"):
+        return "closure:v1"
+    if m.startswith("coro."):
+        return "coro:v1"
+    if m.startswith("eh.") or m.startswith("term.invoke") or m.startswith("term.throw") or m.startswith("term.resume"):
+        return "eh:v1"
+    if m.startswith("gc."):
+        return "gc:v1"
+    if m.startswith("sem."):
+        return "sem:v1"
+    return "core"
+
+
 def c_escape(s: str) -> str:
     # Minimal C string literal escaping (UTF-8 preserved).
     return (
@@ -257,24 +282,20 @@ def c_escape(s: str) -> str:
 
 def emit_support_table(spec: list[SpecMnemonic], impl: set[str], out_c: pathlib.Path, out_h: pathlib.Path) -> None:
     spec_all = sorted({m.name for m in spec})
-    spec_core = sorted({m.name for m in spec if m.pack is None})
+    spec_core = sorted([m for m in spec_all if pack_for_mnemonic(m) == "core"])
     impl_in_spec = sorted([m for m in impl if m in set(spec_all)])
 
     # Missing from spec, grouped by pack.
     missing_by_pack: dict[str, list[str]] = {}
-    for m in spec:
-        pack = m.pack or "core"
-        missing_by_pack.setdefault(pack, [])
-    # ensure stable keys even if a pack is absent for some reason
     for pack in ["core", "atomics:v1", "simd:v1", "adt:v1", "fun:v1", "closure:v1", "coro:v1", "eh:v1", "gc:v1", "sem:v1"]:
         missing_by_pack.setdefault(pack, [])
 
     impl_set = set(impl_in_spec)
-    for m in spec:
-        if m.name in impl_set:
+    for m in spec_all:
+        if m in impl_set:
             continue
-        pack = m.pack or "core"
-        missing_by_pack[pack].append(m.name)
+        pack = pack_for_mnemonic(m)
+        missing_by_pack.setdefault(pack, []).append(m)
     for k in list(missing_by_pack.keys()):
         missing_by_pack[k] = sorted(set(missing_by_pack[k]))
 

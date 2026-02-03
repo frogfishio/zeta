@@ -245,6 +245,7 @@ int main(int argc, char** argv) {
 
   if (check) {
     SirccCheckOptions chk = {
+        .argv0 = (argc > 0) ? argv[0] : NULL,
         .dist_root = dist_root,
         .examples_dir = examples_dir,
         .format = streq(format, "json") ? SIRCC_CHECK_JSON : SIRCC_CHECK_TEXT,

@@ -166,6 +166,37 @@ add_test(
 )
 
 add_test(
+  NAME sircc_print_support_json
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    "-DARGS=--print-support;--format;json"
+    "-DEXPECT=\\\"tool\\\":\\\"sircc\\\""
+    "-DEXPECT2=\\\"missing\\\""
+    "-DEXPECT3=\\\"milestone3\\\""
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stdout_contains.cmake
+)
+
+add_test(
+  NAME sircc_diag_json_includes_context
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    "-DARGS=--diagnostics;json;--diag-context;1;--verify-only;${CMAKE_CURRENT_LIST_DIR}/examples/bad_unknown_field.sir.jsonl"
+    "-DEXPECT=\\\"context\\\""
+    "-DEXPECT2=\\\"context_line\\\""
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
+)
+
+add_test(
+  NAME sircc_check_smoke
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    "-DARGS=--check;--examples-dir;${CMAKE_CURRENT_LIST_DIR}/examples;--format;json"
+    "-DEXPECT=\\\"k\\\":\\\"check\\\""
+    "-DEXPECT2=\\\"ok\\\":true"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stdout_contains.cmake
+)
+
+add_test(
   NAME sircc_run_mem_copy_fill
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>

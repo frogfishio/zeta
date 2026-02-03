@@ -43,3 +43,17 @@ Or run it directly:
 ```sh
 python3 src/sircc/tools/mnemonic_coverage.py --enforce-m3
 ```
+
+## Self-check (alpha user)
+
+If you’re using the `dist/` bundle, `sircc` can run a small suite over `dist/test/examples`:
+
+```sh
+./dist/bin/<os>/sircc --check
+```
+
+Use `--format json` to get a machine-readable summary:
+
+```sh
+./dist/bin/<os>/sircc --check --format json
+```

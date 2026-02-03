@@ -12,6 +12,8 @@ This TODO is organized as milestones. Each milestone should end with:
 - [ ] CI build matrix (macOS, Linux) with cached LLVM install/docs
 - [x] `sircc --version` and `sircc --help` (basic)
 - [x] `dist` bundle target: `dist/bin/<os>`, `dist/doc/sircc.md`, `dist/test/examples`
+- [x] Support reporting: `sircc --print-support [--format text|json]`
+- [x] Alpha smoke suite: `sircc --check` over `dist/test/examples`
 - [ ] Deterministic builds: pin target triple + data layout reporting
   - [x] `sircc --print-target` prints `triple`, `data_layout`, `endianness`, `ptrBits`
   - [x] Codegen always sets module `target triple` + `datalayout` (opt override > `meta.ext.target.triple` > host)
@@ -184,3 +186,4 @@ Each package must be fully skippable unless its `unit.features` gate is enabled.
   - [ ] No UB surprises: all traps/saturation explicit
   - [ ] Determinism: NaN canonicalization, stable switch ordering, stable layout reporting
   - [x] Diagnostics: include `src_ref/loc` in every error when available (and always prefix at least the input file for non-record errors)
+  - [x] Diagnostics: `--diagnostics json` includes `context` when `--diag-context N` is set

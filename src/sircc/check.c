@@ -48,6 +48,16 @@ static int run_exe(const char* exe_path) {
   pid_t pid = fork();
   if (pid < 0) return -1;
   if (pid == 0) {
+    // Keep check output concise by default (examples may print to stdout).
+    FILE* devnull = fopen("/dev/null", "wb");
+    if (devnull) {
+      int fd = fileno(devnull);
+      if (fd >= 0) {
+        dup2(fd, STDOUT_FILENO);
+        dup2(fd, STDERR_FILENO);
+      }
+      fclose(devnull);
+    }
     char* const argv[] = {(char*)exe_path, NULL};
     execv(exe_path, argv);
     _exit(127);
@@ -56,6 +66,18 @@ static int run_exe(const char* exe_path) {
   if (waitpid(pid, &st, 0) < 0) return -1;
   if (WIFEXITED(st)) return WEXITSTATUS(st);
   return 128 + (WIFSIGNALED(st) ? WTERMSIG(st) : 0);
+}
+
+static bool infer_dist_root_from_argv0(const char* argv0, char* out, size_t out_cap) {
+  if (!argv0 || !out || !out_cap) return false;
+  const char* p = strstr(argv0, "/bin/");
+  if (!p) return false;
+  size_t prefix = (size_t)(p - argv0);
+  if (prefix >= out_cap) return false;
+  memcpy(out, argv0, prefix);
+  out[prefix] = 0;
+  if (out[0] == 0) snprintf(out, out_cap, "%s", ".");
+  return true;
 }
 
 static bool resolve_examples_dir(const SirccCheckOptions* chk, char* out, size_t out_cap) {
@@ -72,6 +94,32 @@ static bool resolve_examples_dir(const SirccCheckOptions* chk, char* out, size_t
     if (!path_join(tmp, sizeof(tmp), chk->dist_root, "test/examples")) return false;
     if (!is_dir(tmp)) return false;
     snprintf(out, out_cap, "%s", tmp);
+    return true;
+  }
+
+  // If run from within a dist/ folder: ./bin/<os>/sircc
+  if (chk->argv0) {
+    char dist_root[PATH_MAX];
+    if (infer_dist_root_from_argv0(chk->argv0, dist_root, sizeof(dist_root))) {
+      char tmp[PATH_MAX];
+      if (path_join(tmp, sizeof(tmp), dist_root, "test/examples") && is_dir(tmp)) {
+        snprintf(out, out_cap, "%s", tmp);
+        return true;
+      }
+    }
+  }
+
+  // If invoked from inside dist/bin/<os>, these common relative paths work:
+  if (is_dir("../../test/examples")) {
+    snprintf(out, out_cap, "%s", "../../test/examples");
+    return true;
+  }
+  if (is_dir("../test/examples")) {
+    snprintf(out, out_cap, "%s", "../test/examples");
+    return true;
+  }
+  if (is_dir("test/examples")) {
+    snprintf(out, out_cap, "%s", "test/examples");
     return true;
   }
 
