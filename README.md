@@ -183,4 +183,10 @@ PRs welcome. If you’re building a producer/consumer, please:
 
 ## License
 
-See `LICENSE`.
+The repo is intentionally split so the **tooling is copyleft**, while the **format/spec is permissive**:
+
+- **GPL-3.0-or-later**: compiler tooling (`sircc`, `sirc`) and the rest of the program code (see `LICENSE` and per-file SPDX headers).
+- **MIT**: the SIR specification/schema and example IR programs used for testing/interoperability (see `LICENSE-LIB` and per-file SPDX headers, e.g. `schema/sir/**`).
+- Third-party code, if present, is licensed as marked by its own headers.
+
+Note: the GPL in this repository applies to the **compiler programs we ship**. It does not, by itself, place the GPL on the binaries you compile with `sircc` (unless you intentionally incorporate GPL-covered code/components into your output).

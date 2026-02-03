@@ -1,5 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "SPDX-License-Identifier: MIT",
   "$id": "https://frogfish.io/grit/schema/sir/v1.0/record.schema.json",
   "title": "SIR v1.0 JSONL record",
   "description": "SIR (Semantic IR) v1.0 is a streaming, line-delimited JSON (JSONL) interchange format for declarative compilers. One JSON object per line. Each line MUST validate against one of the record variants below. SIR is designed to be: (1) language-agnostic at the semantic layer, (2) tooling-friendly (meta/src/diag), and (3) extensible via explicit extension records rather than schema loosening. Additive extensions should prefer `ext` or `node` records; meaning-changing extensions require a new SIR version.",

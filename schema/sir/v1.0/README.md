@@ -1,5 +1,5 @@
 <!-- SPDX-FileCopyrightText: 2025 Frogfish -->
-<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: MIT -->
 
 # SIR 1.0 (Semantic IR, JSONL)
 
