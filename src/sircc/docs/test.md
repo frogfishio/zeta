@@ -57,3 +57,11 @@ Use `--format json` to get a machine-readable summary:
 ```sh
 ./dist/bin/<os>/sircc --check --format json
 ```
+
+## zABI (optional runtime)
+
+If your `dist/` bundle includes `dist/rt/zabi25/macos-arm64`, you can build a zABI-linked executable by exporting `zir_main` and linking via the host shim:
+
+```sh
+./dist/bin/<os>/sircc --runtime zabi25 ./dist/test/examples/hello_zabi25_write.sir.jsonl -o /tmp/hello_zabi && /tmp/hello_zabi
+```

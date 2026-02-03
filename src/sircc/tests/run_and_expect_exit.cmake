@@ -12,8 +12,12 @@ if(NOT DEFINED EXPECT)
   message(FATAL_ERROR "run_and_expect_exit.cmake: missing -DEXPECT=... (expected exit code)")
 endif()
 
+if(NOT DEFINED ARGS_EXTRA)
+  set(ARGS_EXTRA)
+endif()
+
 execute_process(
-  COMMAND "${SIRCC}" "${INPUT}" -o "${EXE}"
+  COMMAND "${SIRCC}" ${ARGS_EXTRA} "${INPUT}" -o "${EXE}"
   RESULT_VARIABLE compile_rc
   OUTPUT_VARIABLE compile_out
   ERROR_VARIABLE compile_err

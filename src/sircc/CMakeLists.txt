@@ -148,6 +148,19 @@ add_test(
   COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/hello_world_puts.sir.jsonl
 )
 
+if(APPLE AND EXISTS ${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/lib/libzingcore25.a)
+  add_test(
+    NAME sircc_run_hello_zabi25_write
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/hello_zabi25_write.sir.jsonl
+      -DEXE=${CMAKE_CURRENT_BINARY_DIR}/hello_zabi25_write.exe
+      -DEXPECT=0
+      "-DARGS_EXTRA=--runtime;zabi25;--zabi25-root;${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/run_and_expect_exit.cmake
+  )
+endif()
+
 add_test(
   NAME sircc_require_pinned_triple_missing_fails
   COMMAND ${CMAKE_COMMAND}

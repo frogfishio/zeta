@@ -41,6 +41,7 @@ sircc --dump-records --verify-only <input.sir.jsonl>
 sircc --print-target [--target-triple <triple>]
 sircc --print-support [--format text|json] [--full]
 sircc --check [--dist-root <path>|--examples-dir <path>] [--format text|json]
+sircc [--runtime libc|zabi25] [--zabi25-root <path>] ...
 sircc [--diagnostics text|json] [--color auto|always|never] [--diag-context N] [--verbose] [--strip] ...
 sircc --version
 ```
@@ -56,3 +57,4 @@ Notes:
 - `--diag-context N` prints the offending JSONL record plus `N` surrounding lines (also included as `context` in JSON diagnostics)
 - `--print-support` prints which SIR mnemonics are implemented vs missing (from the normative `mnemonics.html` table)
 - `--check` runs a small “try immediately” suite over `dist/test/examples` (or a custom `--examples-dir`)
+- `--runtime zabi25` links against the zABI 2.5 host runtime (default root is autodetected; override via `--zabi25-root` or `SIRCC_ZABI25_ROOT`)

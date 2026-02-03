@@ -219,6 +219,10 @@ int sircc_run_check(FILE* out, const SirccOptions* base_opt, const SirccCheckOpt
     SirccOptions opt = *base_opt;
     opt.input_path = input;
     opt.dump_records = false;
+    // Self-check suite is currently libc-based (dist/test/examples). Don't
+    // inherit a caller's custom runtime/link configuration.
+    opt.runtime = SIRCC_RUNTIME_LIBC;
+    opt.zabi25_root = NULL;
 
     char exe[PATH_MAX];
     if (tc->kind == CHECK_VERIFY) {

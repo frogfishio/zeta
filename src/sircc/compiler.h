@@ -30,12 +30,20 @@ typedef enum SirccColorMode {
   SIRCC_COLOR_NEVER = 2,
 } SirccColorMode;
 
+typedef enum SirccRuntimeKind {
+  SIRCC_RUNTIME_LIBC = 0,
+  SIRCC_RUNTIME_ZABI25 = 1,
+} SirccRuntimeKind;
+
 typedef struct SirccOptions {
+  const char* argv0; // optional; used for best-effort path inference
   const char* input_path;
   const char* output_path;
   SirccEmitKind emit;
   const char* clang_path;
   const char* target_triple;
+  SirccRuntimeKind runtime;
+  const char* zabi25_root; // optional; default probes repo and dist paths
   bool verify_only;
   bool dump_records;
   bool print_target;
@@ -44,7 +52,7 @@ typedef struct SirccOptions {
   bool require_pinned_triple;
   SirccDiagnosticsFormat diagnostics;
   SirccColorMode color;
-  int diag_context; // number of surrounding JSONL lines to print on error (text diagnostics only)
+  int diag_context; // number of surrounding JSONL lines to print on error (also embedded in JSON diagnostics)
 } SirccOptions;
 
 int sircc_compile(const SirccOptions* opt);

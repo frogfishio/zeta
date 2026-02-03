@@ -1,0 +1,23 @@
+{"ir":"sir-v1.0","k":"meta","producer":"sircc-example","unit":"hello_zabi25_write"}
+
+{"ir":"sir-v1.0","k":"type","id":1,"kind":"prim","prim":"i32"}
+{"ir":"sir-v1.0","k":"type","id":2,"kind":"prim","prim":"i64"}
+{"ir":"sir-v1.0","k":"type","id":3,"kind":"prim","prim":"ptr"}
+{"ir":"sir-v1.0","k":"type","id":10,"kind":"fn","params":[1,2,1],"ret":1}
+{"ir":"sir-v1.0","k":"type","id":11,"kind":"fn","params":[],"ret":2}
+
+{"ir":"sir-v1.0","k":"node","id":100,"tag":"decl.fn","type_ref":10,"fields":{"name":"zi_write"}}
+
+{"ir":"sir-v1.0","k":"node","id":110,"tag":"const.i32","type_ref":1,"fields":{"value":1}}
+{"ir":"sir-v1.0","k":"node","id":111,"tag":"const.i32","type_ref":1,"fields":{"value":18}}
+{"ir":"sir-v1.0","k":"node","id":112,"tag":"cstr","type_ref":3,"fields":{"value":"hello from zABI25\n"}}
+{"ir":"sir-v1.0","k":"node","id":113,"tag":"ptr.to_i64","type_ref":2,"fields":{"args":[{"t":"ref","id":112}]}}
+
+{"ir":"sir-v1.0","k":"node","id":120,"tag":"call.indirect","type_ref":1,"fields":{"sig":{"t":"ref","id":10},"args":[{"t":"ref","id":100},{"t":"ref","id":110},{"t":"ref","id":113},{"t":"ref","id":111}]}}
+{"ir":"sir-v1.0","k":"node","id":121,"tag":"let","fields":{"name":"_","value":{"t":"ref","id":120}}}
+
+{"ir":"sir-v1.0","k":"node","id":130,"tag":"const.i64","type_ref":2,"fields":{"value":0}}
+{"ir":"sir-v1.0","k":"node","id":131,"tag":"term.ret","fields":{"value":{"t":"ref","id":130}}}
+{"ir":"sir-v1.0","k":"node","id":140,"tag":"block","fields":{"stmts":[{"t":"ref","id":121},{"t":"ref","id":131}]}}
+
+{"ir":"sir-v1.0","k":"node","id":150,"tag":"fn","type_ref":11,"fields":{"name":"zir_main","params":[],"body":{"t":"ref","id":140}}}

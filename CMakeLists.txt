@@ -23,6 +23,7 @@ set(SIR_DIST_BIN ${SIR_DIST_ROOT}/bin)
 set(SIR_DIST_DOC ${SIR_DIST_ROOT}/doc)
 set(SIR_DIST_TEST ${SIR_DIST_ROOT}/test)
 set(SIR_DIST_TEST_EXAMPLES ${SIR_DIST_TEST}/examples)
+set(SIR_DIST_RT ${SIR_DIST_ROOT}/rt)
 
 set(SIR_DIST_OS "${CMAKE_SYSTEM_NAME}")
 if(SIR_DIST_OS STREQUAL "Darwin")
@@ -39,6 +40,7 @@ add_custom_target(dist_sircc
   COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_BIN_OS}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_DOC}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_TEST_EXAMPLES}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_RT}
 
   # binaries
   COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:sircc> ${SIR_DIST_BIN_OS}/sircc
@@ -58,7 +60,24 @@ add_custom_target(dist_sircc
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/call_indirect_ptrsym.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/call_indirect_ptrsym.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/misaligned_load_traps.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/misaligned_load_traps.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/ptr_layout.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/ptr_layout.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_write.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/hello_zabi25_write.sir.jsonl
 )
+
+# Optional: bundle zABI 2.5 integration-pack runtime for macOS/arm64 in dist/
+set(SIR_ZABI25_PACK_ROOT ${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64)
+set(SIR_DIST_ZABI25_ROOT ${SIR_DIST_RT}/zabi25/macos-arm64)
+if(EXISTS ${SIR_ZABI25_PACK_ROOT}/include AND EXISTS ${SIR_ZABI25_PACK_ROOT}/lib/libzingcore25.a)
+  add_custom_command(
+    TARGET dist_sircc
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_ZABI25_ROOT}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_ZABI25_ROOT}/lib
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_ZABI25_ROOT}/examples/host_shim
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${SIR_ZABI25_PACK_ROOT}/include ${SIR_DIST_ZABI25_ROOT}/include
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SIR_ZABI25_PACK_ROOT}/lib/libzingcore25.a ${SIR_DIST_ZABI25_ROOT}/lib/libzingcore25.a
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SIR_ZABI25_PACK_ROOT}/examples/host_shim/runner.c ${SIR_DIST_ZABI25_ROOT}/examples/host_shim/runner.c
+  )
+endif()
 
 if(TARGET sirc)
   add_custom_target(dist_sirc

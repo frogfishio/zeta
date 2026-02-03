@@ -22,6 +22,7 @@ static void usage(FILE* out) {
           "  sircc --print-target [--target-triple <triple>]\n"
           "  sircc --print-support [--format text|json] [--full]\n"
           "  sircc --check [--dist-root <path>|--examples-dir <path>] [--format text|json]\n"
+          "  sircc [--runtime libc|zabi25] [--zabi25-root <path>] ...\n"
           "  sircc [--diagnostics text|json] [--color auto|always|never] [--diag-context N] [--verbose] [--strip]\n"
           "  sircc --require-pinned-triple ...\n"
           "  sircc --version\n");
@@ -40,13 +41,18 @@ int main(int argc, char** argv) {
   const char* dist_root = NULL;
   const char* examples_dir = NULL;
   const char* format = "text";
+  const char* runtime = "libc";
+  const char* zabi25_root = NULL;
 
   SirccOptions opt = {
+      .argv0 = (argc > 0) ? argv[0] : NULL,
       .input_path = NULL,
       .output_path = NULL,
       .emit = SIRCC_EMIT_EXE,
       .clang_path = NULL,
       .target_triple = NULL,
+      .runtime = SIRCC_RUNTIME_LIBC,
+      .zabi25_root = NULL,
       .verify_only = false,
       .dump_records = false,
       .print_target = false,
@@ -87,6 +93,27 @@ int main(int argc, char** argv) {
     }
     if (strcmp(a, "--check") == 0) {
       check = true;
+      continue;
+    }
+    if (strcmp(a, "--runtime") == 0) {
+      if (i + 1 >= argc) {
+        usage(stderr);
+        return SIRCC_EXIT_USAGE;
+      }
+      const char* v = argv[++i];
+      if (!parse_enum_value(v, "libc", "zabi25", NULL)) {
+        fprintf(stderr, "sircc: invalid --runtime value: %s\n", v);
+        return SIRCC_EXIT_USAGE;
+      }
+      runtime = v;
+      continue;
+    }
+    if (strcmp(a, "--zabi25-root") == 0) {
+      if (i + 1 >= argc) {
+        usage(stderr);
+        return SIRCC_EXIT_USAGE;
+      }
+      zabi25_root = argv[++i];
       continue;
     }
     if (strcmp(a, "--dist-root") == 0) {
@@ -238,6 +265,13 @@ int main(int argc, char** argv) {
     return sircc_print_target(opt.target_triple) ? 0 : 1;
   }
 
+  if (streq(runtime, "zabi25")) {
+    opt.runtime = SIRCC_RUNTIME_ZABI25;
+    opt.zabi25_root = zabi25_root;
+  } else {
+    opt.runtime = SIRCC_RUNTIME_LIBC;
+  }
+
   if (print_support) {
     SirccSupportFormat sf = streq(format, "json") ? SIRCC_SUPPORT_JSON : SIRCC_SUPPORT_TEXT;
     return sircc_print_support(stdout, sf, support_full) ? 0 : SIRCC_EXIT_INTERNAL;
@@ -245,7 +279,7 @@ int main(int argc, char** argv) {
 
   if (check) {
     SirccCheckOptions chk = {
-        .argv0 = (argc > 0) ? argv[0] : NULL,
+        .argv0 = opt.argv0,
         .dist_root = dist_root,
         .examples_dir = examples_dir,
         .format = streq(format, "json") ? SIRCC_CHECK_JSON : SIRCC_CHECK_TEXT,
