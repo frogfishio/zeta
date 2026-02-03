@@ -176,7 +176,7 @@ Each package must be fully skippable unless its `unit.features` gate is enabled.
 
 ## Milestone 5 — Completeness: docs + conformance + examples
 
-- [ ] Generate a machine-readable “mnemonic support table” from `mnemonics.html` and compare against implemented handlers
+- [x] Generate a machine-readable “mnemonic support table” and enforce Milestone 3 coverage (`src/sircc/tools/mnemonic_coverage.py`, `sircc_mnemonic_coverage_m3` test)
 - [ ] Provide one example `.sir.jsonl` per mnemonic family (small, focused)
 - [ ] Conformance runner: compile + execute (where possible) and compare outputs
   - [x] Minimal CTest conformance set: compile+run core examples and assert exit codes (mem/cfg smoke)

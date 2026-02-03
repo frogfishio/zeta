@@ -10,6 +10,7 @@ add_executable(sircc
 target_include_directories(sircc PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 
 find_package(LLVM REQUIRED CONFIG)
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 target_include_directories(sircc PRIVATE ${LLVM_INCLUDE_DIRS})
 separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND "${LLVM_DEFINITIONS}")
@@ -133,6 +134,14 @@ add_test(
     "-DARGS=--require-pinned-triple;${CMAKE_CURRENT_LIST_DIR}/examples/add.sir.jsonl;-o;${CMAKE_CURRENT_BINARY_DIR}/should_not_exist.exe"
     "-DEXPECT=missing pinned target triple"
     -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
+)
+
+add_test(
+  NAME sircc_mnemonic_coverage_m3
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/tools/mnemonic_coverage.py
+    --enforce-m3
+    --spec ${CMAKE_CURRENT_LIST_DIR}/../../schema/sir/v1.0/mnemonics.html
+    --compiler ${CMAKE_CURRENT_LIST_DIR}/compiler.c
 )
 
 add_test(
