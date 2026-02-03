@@ -92,6 +92,119 @@ static bool emit_store_reg_to_slot(FILE* out, const char* slot_sym, int64_t size
   return true;
 }
 
+static const char* reg_for_width(int64_t width_bytes) {
+  if (width_bytes == 1) return "A";
+  // For now, keep 16/32/64-bit values in HL.
+  if (width_bytes == 2 || width_bytes == 4 || width_bytes == 8) return "HL";
+  return NULL;
+}
+
+static bool emit_load_slot_to_reg(FILE* out, const char* slot_sym, int64_t width_bytes, const char* dst_reg, int64_t line_no) {
+  if (!out || !slot_sym || !dst_reg) return false;
+  ZasmOp base = {.k = ZOP_SYM, .s = slot_sym};
+
+  const char* m = NULL;
+  int64_t hint = 0;
+  if (width_bytes == 1) {
+    m = "LD8U";
+    hint = 1;
+  } else if (width_bytes == 2) {
+    m = "LD16U";
+    hint = 2;
+  } else if (width_bytes == 4) {
+    m = "LD32U64";
+    hint = 4;
+  } else if (width_bytes == 8) {
+    m = "LD64";
+    hint = 8;
+  } else {
+    return false;
+  }
+
+  zasm_write_ir_k(out, "instr");
+  fprintf(out, ",\"m\":");
+  json_write_escaped(out, m);
+  fprintf(out, ",\"ops\":[");
+  zasm_write_op_reg(out, dst_reg);
+  fprintf(out, ",");
+  zasm_write_op_mem(out, &base, 0, hint);
+  fprintf(out, "]");
+  zasm_write_loc(out, line_no);
+  fprintf(out, "}\n");
+  return true;
+}
+
+static bool emit_ld_reg_or_imm(FILE* out, const char* dst_reg, const ZasmOp* op, int64_t line_no) {
+  if (!out || !dst_reg || !op) return false;
+  zasm_write_ir_k(out, "instr");
+  fprintf(out, ",\"m\":\"LD\",\"ops\":[");
+  zasm_write_op_reg(out, dst_reg);
+  fprintf(out, ",");
+  if (!zasm_write_op(out, op)) return false;
+  fprintf(out, "]");
+  zasm_write_loc(out, line_no);
+  fprintf(out, "}\n");
+  return true;
+}
+
+static bool emit_binop_into_hl(
+    FILE* out,
+    SirProgram* p,
+    ZasmStr* strs,
+    size_t strs_len,
+    ZasmAlloca* allocas,
+    size_t allocas_len,
+    ZasmNameBinding* names,
+    size_t names_len,
+    NodeRec* vn,
+    const char* m32,
+    const char* m64,
+    int64_t width_bytes,
+    int64_t* io_line) {
+  if (!out || !p || !vn || !vn->fields || !io_line) return false;
+  JsonValue* args = json_obj_get(vn->fields, "args");
+  if (!args || args->type != JSON_ARRAY || args->v.arr.len != 2) {
+    errf(p, "sircc: zasm: %s node %lld requires args:[a,b]", vn->tag, (long long)vn->id);
+    return false;
+  }
+
+  int64_t a_id = 0, b_id = 0;
+  if (!parse_node_ref_id(args->v.arr.items[0], &a_id) || !parse_node_ref_id(args->v.arr.items[1], &b_id)) {
+    errf(p, "sircc: zasm: %s node %lld args must be node refs", vn->tag, (long long)vn->id);
+    return false;
+  }
+
+  ZasmOp a = {0};
+  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, a_id, &a)) return false;
+  if (a.k == ZOP_SLOT) {
+    if (!emit_load_slot_to_reg(out, a.s, a.n, reg_for_width(width_bytes), (*io_line)++)) return false;
+  } else {
+    if (!emit_ld_reg_or_imm(out, reg_for_width(width_bytes), &a, (*io_line)++)) return false;
+  }
+
+  ZasmOp b = {0};
+  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, b_id, &b)) return false;
+  ZasmOp rhs = b;
+  if (b.k == ZOP_SLOT) {
+    // Materialize RHS into DE for binary ops.
+    if (!emit_load_slot_to_reg(out, b.s, b.n, "DE", (*io_line)++)) return false;
+    rhs.k = ZOP_REG;
+    rhs.s = "DE";
+  }
+
+  zasm_write_ir_k(out, "instr");
+  fprintf(out, ",\"m\":");
+  json_write_escaped(out, (width_bytes == 8) ? m64 : m32);
+  fprintf(out, ",\"ops\":[");
+  zasm_write_op_reg(out, "HL");
+  fprintf(out, ",");
+  if (!zasm_write_op(out, &rhs)) return false;
+  fprintf(out, "]");
+  zasm_write_loc(out, (*io_line)++);
+  fprintf(out, "}\n");
+  return true;
+}
+
 bool emit_zasm_v11(SirProgram* p, const char* out_path) {
   if (!p || !out_path) return false;
 
@@ -246,7 +359,7 @@ bool emit_zasm_v11(SirProgram* p, const char* out_path) {
         return false;
       }
       if (strcmp(vn->tag, "call") == 0 || strcmp(vn->tag, "call.indirect") == 0) {
-        if (!zasm_emit_call_stmt(out, p, strs, strs_len, allocas, allocas_len, names, name_len, vid, line++)) {
+        if (!zasm_emit_call_stmt(out, p, strs, strs_len, allocas, allocas_len, names, name_len, vid, &line)) {
           fclose(out);
           free(strs);
           free(allocas);
@@ -421,6 +534,142 @@ bool emit_zasm_v11(SirProgram* p, const char* out_path) {
           };
         }
 
+        continue;
+      }
+
+      if (strcmp(vn->tag, "i32.add") == 0 || strcmp(vn->tag, "i32.sub") == 0) {
+        if (!bind_name || strcmp(bind_name, "_") == 0) {
+          fclose(out);
+          free(strs);
+          free(allocas);
+          free(decls);
+          free(names);
+          free(tmps);
+          errf(p, "sircc: zasm: %s must be bound via let name", vn->tag);
+          return false;
+        }
+
+        const char* m32 = (strcmp(vn->tag, "i32.add") == 0) ? "ADD" : "SUB";
+        if (!emit_binop_into_hl(out, p, strs, strs_len, allocas, allocas_len, names, name_len, vn, m32, NULL, 4, &line)) {
+          fclose(out);
+          free(strs);
+          free(allocas);
+          free(decls);
+          free(names);
+          free(tmps);
+          return false;
+        }
+
+        const char* slot_sym = NULL;
+        if (!add_temp_slot(p, &tmps, &tmp_len, &tmp_cap, sid, 4, &slot_sym)) {
+          fclose(out);
+          free(strs);
+          free(allocas);
+          free(decls);
+          free(names);
+          free(tmps);
+          errf(p, "sircc: zasm: out of memory");
+          return false;
+        }
+        if (!emit_store_reg_to_slot(out, slot_sym, 4, "HL", line++)) {
+          fclose(out);
+          free(strs);
+          free(allocas);
+          free(decls);
+          free(names);
+          free(tmps);
+          return false;
+        }
+        if (name_len == name_cap) {
+          size_t next = name_cap ? name_cap * 2 : 16;
+          ZasmNameBinding* bigger = (ZasmNameBinding*)realloc(names, next * sizeof(ZasmNameBinding));
+          if (!bigger) {
+            fclose(out);
+            free(strs);
+            free(allocas);
+            free(decls);
+            free(names);
+            free(tmps);
+            errf(p, "sircc: zasm: out of memory");
+            return false;
+          }
+          names = bigger;
+          name_cap = next;
+        }
+        names[name_len++] = (ZasmNameBinding){
+            .name = bind_name,
+            .is_slot = true,
+            .op = {.k = ZOP_SYM, .s = slot_sym},
+            .slot_size_bytes = 4,
+        };
+        continue;
+      }
+
+      if (strcmp(vn->tag, "i64.add") == 0 || strcmp(vn->tag, "i64.sub") == 0) {
+        if (!bind_name || strcmp(bind_name, "_") == 0) {
+          fclose(out);
+          free(strs);
+          free(allocas);
+          free(decls);
+          free(names);
+          free(tmps);
+          errf(p, "sircc: zasm: %s must be bound via let name", vn->tag);
+          return false;
+        }
+
+        const char* m64 = (strcmp(vn->tag, "i64.add") == 0) ? "ADD64" : "SUB64";
+        if (!emit_binop_into_hl(out, p, strs, strs_len, allocas, allocas_len, names, name_len, vn, NULL, m64, 8, &line)) {
+          fclose(out);
+          free(strs);
+          free(allocas);
+          free(decls);
+          free(names);
+          free(tmps);
+          return false;
+        }
+
+        const char* slot_sym = NULL;
+        if (!add_temp_slot(p, &tmps, &tmp_len, &tmp_cap, sid, 8, &slot_sym)) {
+          fclose(out);
+          free(strs);
+          free(allocas);
+          free(decls);
+          free(names);
+          free(tmps);
+          errf(p, "sircc: zasm: out of memory");
+          return false;
+        }
+        if (!emit_store_reg_to_slot(out, slot_sym, 8, "HL", line++)) {
+          fclose(out);
+          free(strs);
+          free(allocas);
+          free(decls);
+          free(names);
+          free(tmps);
+          return false;
+        }
+        if (name_len == name_cap) {
+          size_t next = name_cap ? name_cap * 2 : 16;
+          ZasmNameBinding* bigger = (ZasmNameBinding*)realloc(names, next * sizeof(ZasmNameBinding));
+          if (!bigger) {
+            fclose(out);
+            free(strs);
+            free(allocas);
+            free(decls);
+            free(names);
+            free(tmps);
+            errf(p, "sircc: zasm: out of memory");
+            return false;
+          }
+          names = bigger;
+          name_cap = next;
+        }
+        names[name_len++] = (ZasmNameBinding){
+            .name = bind_name,
+            .is_slot = true,
+            .op = {.k = ZOP_SYM, .s = slot_sym},
+            .slot_size_bytes = 8,
+        };
         continue;
       }
 

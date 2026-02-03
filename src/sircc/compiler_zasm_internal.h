@@ -88,7 +88,7 @@ bool zasm_emit_call_stmt(
     ZasmNameBinding* names,
     size_t names_len,
     int64_t call_id,
-    int64_t line_no);
+    int64_t* io_line);
 bool zasm_emit_store_stmt(
     FILE* out,
     SirProgram* p,

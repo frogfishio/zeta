@@ -5,6 +5,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 static bool zasm_op_is_value(const ZasmOp* op) {
@@ -104,7 +105,8 @@ bool zasm_emit_call_stmt(
     ZasmNameBinding* names,
     size_t names_len,
     int64_t call_id,
-    int64_t line_no) {
+    int64_t* io_line) {
+  if (!io_line) return false;
   NodeRec* n = get_node(p, call_id);
   if (!n || !n->fields) return false;
 
@@ -125,39 +127,63 @@ bool zasm_emit_call_stmt(
     return false;
   }
 
-  zasm_write_ir_k(out, "instr");
-  fprintf(out, ",\"m\":\"CALL\",\"ops\":[");
-  zasm_write_op_sym(out, callee.s);
+  size_t op_count = args->v.arr.len;
+  ZasmOp* lowered = (ZasmOp*)calloc(op_count, sizeof(ZasmOp));
+  if (!lowered) {
+    errf(p, "sircc: zasm: out of memory");
+    return false;
+  }
+  lowered[0] = callee;
 
   for (size_t i = 1; i < args->v.arr.len; i++) {
     int64_t aid = 0;
     if (!parse_node_ref_id(args->v.arr.items[i], &aid)) {
+      free(lowered);
       errf(p, "sircc: zasm: %s node %lld arg[%zu] must be node ref", n->tag, (long long)call_id, i);
       return false;
     }
     ZasmOp op = {0};
-    if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, aid, &op)) return false;
+    if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, aid, &op)) {
+      free(lowered);
+      return false;
+    }
 
     if (!zasm_op_is_value(&op)) {
       if (op.k != ZOP_SLOT) {
+        free(lowered);
         errf(p, "sircc: zasm: %s node %lld arg[%zu] unsupported", n->tag, (long long)call_id, i);
         return false;
       }
       const char* reg = call_arg_reg(i);
       if (!reg) {
+        free(lowered);
         errf(p, "sircc: zasm: %s node %lld has too many args for current ABI model", n->tag, (long long)call_id);
         return false;
       }
-      if (!emit_load_slot_into_reg(out, reg, &op, line_no)) return false;
-      op.k = ZOP_REG;
-      op.s = reg;
+      if (!emit_load_slot_into_reg(out, reg, &op, (*io_line)++)) {
+        free(lowered);
+        return false;
+      }
+      op = (ZasmOp){.k = ZOP_REG, .s = reg};
     }
+    lowered[i] = op;
+  }
+
+  zasm_write_ir_k(out, "instr");
+  fprintf(out, ",\"m\":\"CALL\",\"ops\":[");
+  zasm_write_op_sym(out, lowered[0].s);
+  for (size_t i = 1; i < op_count; i++) {
     fprintf(out, ",");
-    if (!zasm_write_op(out, &op)) return false;
+    if (!zasm_write_op(out, &lowered[i])) {
+      free(lowered);
+      return false;
+    }
   }
   fprintf(out, "]");
-  zasm_write_loc(out, line_no);
+  zasm_write_loc(out, (*io_line)++);
   fprintf(out, "}\n");
+
+  free(lowered);
   return true;
 }
 
