@@ -58,6 +58,8 @@ bool zasm_lower_addr_to_mem(
     size_t allocas_len,
     ZasmNameBinding* names,
     size_t names_len,
+    ZasmBParamSlot* bps,
+    size_t bps_len,
     int64_t addr_id,
     ZasmOp* out_base,
     int64_t* out_disp) {
@@ -97,7 +99,7 @@ bool zasm_lower_addr_to_mem(
 
   if (strcmp(n->tag, "name") == 0) {
     ZasmOp op = {0};
-    if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, addr_id, &op)) return false;
+    if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, addr_id, &op)) return false;
     if (op.k == ZOP_SYM) {
       *out_base = op;
       *out_disp = 0;
@@ -126,7 +128,7 @@ bool zasm_lower_addr_to_mem(
 
     ZasmOp base = {0};
     int64_t disp = 0;
-    if (!zasm_lower_addr_to_mem(p, strs, strs_len, allocas, allocas_len, names, names_len, base_id, &base, &disp)) return false;
+    if (!zasm_lower_addr_to_mem(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, base_id, &base, &disp)) return false;
     if (!add_checked_i64(p, disp, off, &disp)) return false;
     *out_base = base;
     *out_disp = disp;
@@ -163,7 +165,7 @@ bool zasm_lower_addr_to_mem(
 
     ZasmOp base = {0};
     int64_t disp = 0;
-    if (!zasm_lower_addr_to_mem(p, strs, strs_len, allocas, allocas_len, names, names_len, base_id, &base, &disp)) return false;
+    if (!zasm_lower_addr_to_mem(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, base_id, &base, &disp)) return false;
     if (!add_checked_i64(p, disp, scaled, &disp)) return false;
     *out_base = base;
     *out_disp = disp;
@@ -173,4 +175,3 @@ bool zasm_lower_addr_to_mem(
   errf(p, "sircc: zasm: unsupported address node '%s' (node %lld)", n->tag, (long long)addr_id);
   return false;
 }
-

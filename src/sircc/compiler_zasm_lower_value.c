@@ -15,6 +15,8 @@ bool zasm_lower_value_to_op(
     size_t allocas_len,
     ZasmNameBinding* names,
     size_t names_len,
+    ZasmBParamSlot* bps,
+    size_t bps_len,
     int64_t node_id,
     ZasmOp* out) {
   if (!p || !out) return false;
@@ -47,6 +49,19 @@ bool zasm_lower_value_to_op(
     out->k = ZOP_SYM;
     out->s = sym;
     return true;
+  }
+
+  if (strcmp(n->tag, "bparam") == 0) {
+    for (size_t i = 0; i < bps_len; i++) {
+      if (bps[i].node_id == node_id) {
+        out->k = ZOP_SLOT;
+        out->s = bps[i].sym;
+        out->n = bps[i].size_bytes;
+        return true;
+      }
+    }
+    errf(p, "sircc: zasm: missing bparam slot mapping for node %lld", (long long)node_id);
+    return false;
   }
 
   if (strcmp(n->tag, "cstr") == 0) {
@@ -94,7 +109,7 @@ bool zasm_lower_value_to_op(
       errf(p, "sircc: zasm: ptr.to_i64 node %lld arg must be node ref", (long long)node_id);
       return false;
     }
-    return zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, x_id, out);
+    return zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, x_id, out);
   }
 
   if (strcmp(n->tag, "name") == 0) {

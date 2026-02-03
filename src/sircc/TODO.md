@@ -197,4 +197,10 @@ This is a separate emission path (`sircc --emit-zasm`) targeting `zasm-v1.1` JSO
 - [x] Emits `STR` for `cstr` nodes
 - [x] Lowers simple memory statements in `zir_main`: `mem.fill`, `mem.copy`, `store.i8` (via `FILL`, `LDIR`, `ST8`)
 - [x] Supports return-time `load.i8` and `i32.zext.i8` (via `LD8U`)
-- [ ] Add name binding + basic register allocation (support `name` nodes in expressions)
+- [x] Name binding: `let` + `name` (including call-result spill to temp slots)
+- [x] Load/store widths: `load.{i8,i16,i32,i64,ptr}` and `store.{i8,i16,i32,i64}` (slot-backed values supported)
+- [x] Addressing: `alloca.*`, `ptr.sym`, `ptr.add` (const disp), `ptr.offset` (const idx*size) via `mem` disp
+- [x] CFG form `zir_main`: `fields.entry` + `fields.blocks`, `term.{br,condbr,ret}`, block params (`bparam`) + `term.br args`
+- [x] CFG blocks support core non-terminators: `let`, `store.*`, `mem.copy`, `mem.fill`, and simple arithmetic lets
+- [ ] Expand CFG conditions: comparisons beyond `i32.cmp.eq` (and support slot operands)
+- [ ] Dynamic pointer arithmetic (non-const `ptr.add` / `ptr.offset`)
