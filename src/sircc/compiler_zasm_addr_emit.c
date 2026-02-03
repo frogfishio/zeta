@@ -343,3 +343,45 @@ bool zasm_emit_addr_to_mem(
   *out_disp = 0;
   return true;
 }
+
+bool zasm_emit_addr_to_reg(
+    FILE* out,
+    SirProgram* p,
+    ZasmStr* strs,
+    size_t strs_len,
+    ZasmAlloca* allocas,
+    size_t allocas_len,
+    ZasmNameBinding* names,
+    size_t names_len,
+    ZasmBParamSlot* bps,
+    size_t bps_len,
+    int64_t addr_id,
+    const char* dst_reg,
+    int64_t* io_line) {
+  if (!out || !p || !dst_reg || !io_line) return false;
+
+  ZasmOp base = {0};
+  int64_t disp = 0;
+  if (try_lower_addr_const(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, addr_id, &base, &disp)) {
+    if (!emit_ld(out, dst_reg, &base, (*io_line)++)) return false;
+    if (disp) {
+      // ADD64 only targets HL, so use HL as a scratch if dst != HL.
+      if (strcmp(dst_reg, "HL") != 0) {
+        if (!emit_ld(out, "HL", &base, (*io_line)++)) return false;
+        ZasmOp imm = {.k = ZOP_NUM, .n = disp};
+        if (!emit_hl_binop(out, "ADD64", &imm, (*io_line)++)) return false;
+        ZasmOp hl = {.k = ZOP_REG, .s = "HL"};
+        if (!emit_ld(out, dst_reg, &hl, (*io_line)++)) return false;
+        return true;
+      }
+      ZasmOp imm = {.k = ZOP_NUM, .n = disp};
+      if (!emit_hl_binop(out, "ADD64", &imm, (*io_line)++)) return false;
+    }
+    return true;
+  }
+
+  if (!materialize_addr_into_hl(out, p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, addr_id, io_line)) return false;
+  if (strcmp(dst_reg, "HL") == 0) return true;
+  ZasmOp hl = {.k = ZOP_REG, .s = "HL"};
+  return emit_ld(out, dst_reg, &hl, (*io_line)++);
+}

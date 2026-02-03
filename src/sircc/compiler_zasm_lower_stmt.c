@@ -306,26 +306,32 @@ bool zasm_emit_mem_fill_stmt(
     return false;
   }
 
-  ZasmOp dst = {0};
-  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, dst_id, &dst) || dst.k != ZOP_SYM) {
-    errf(p, "sircc: zasm: mem.fill dst must be an alloca symbol (node %lld)", (long long)dst_id);
-    return false;
-  }
+  if (!zasm_emit_addr_to_reg(out, p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, dst_id, "HL", io_line)) return false;
+
   ZasmOp byte = {0};
-  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, byte_id, &byte) || byte.k != ZOP_NUM) {
-    errf(p, "sircc: zasm: mem.fill byte must be an immediate const (node %lld)", (long long)byte_id);
-    return false;
-  }
-  ZasmOp len = {0};
-  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, len_id, &len) || len.k != ZOP_NUM) {
-    errf(p, "sircc: zasm: mem.fill len must be an immediate const (node %lld)", (long long)len_id);
+  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, byte_id, &byte)) return false;
+  if (byte.k == ZOP_SLOT) {
+    if (!emit_load_slot_into_reg(out, "A", &byte, (*io_line)++)) return false;
+  } else if (byte.k == ZOP_NUM) {
+    ZasmOp b8 = {.k = ZOP_NUM, .n = (uint8_t)byte.n};
+    if (!emit_ld(out, "A", &b8, (*io_line)++)) return false;
+  } else if (byte.k == ZOP_SYM || byte.k == ZOP_REG) {
+    if (!emit_ld(out, "A", &byte, (*io_line)++)) return false;
+  } else {
+    errf(p, "sircc: zasm: mem.fill byte unsupported");
     return false;
   }
 
-  if (!emit_ld(out, "HL", &dst, (*io_line)++)) return false;
-  ZasmOp b8 = {.k = ZOP_NUM, .n = (uint8_t)byte.n};
-  if (!emit_ld(out, "A", &b8, (*io_line)++)) return false;
-  if (!emit_ld(out, "BC", &len, (*io_line)++)) return false;
+  ZasmOp len = {0};
+  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, len_id, &len)) return false;
+  if (len.k == ZOP_SLOT) {
+    if (!emit_load_slot_into_reg(out, "BC", &len, (*io_line)++)) return false;
+  } else if (len.k == ZOP_NUM || len.k == ZOP_SYM || len.k == ZOP_REG) {
+    if (!emit_ld(out, "BC", &len, (*io_line)++)) return false;
+  } else {
+    errf(p, "sircc: zasm: mem.fill len unsupported");
+    return false;
+  }
 
   zasm_write_ir_k(out, "instr");
   fprintf(out, ",\"m\":\"FILL\",\"ops\":[]");
@@ -361,25 +367,27 @@ bool zasm_emit_mem_copy_stmt(
     return false;
   }
 
-  ZasmOp dst = {0};
-  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, dst_id, &dst) || dst.k != ZOP_SYM) {
-    errf(p, "sircc: zasm: mem.copy dst must be an alloca symbol (node %lld)", (long long)dst_id);
-    return false;
-  }
-  ZasmOp src = {0};
-  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, src_id, &src) || src.k != ZOP_SYM) {
-    errf(p, "sircc: zasm: mem.copy src must be an alloca symbol (node %lld)", (long long)src_id);
-    return false;
-  }
-  ZasmOp len = {0};
-  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, len_id, &len) || len.k != ZOP_NUM) {
-    errf(p, "sircc: zasm: mem.copy len must be an immediate const (node %lld)", (long long)len_id);
-    return false;
-  }
+  // Preserve src while computing dst; address materialization uses DE as scratch.
+  if (!zasm_emit_addr_to_reg(out, p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, src_id, "HL", io_line)) return false;
+  ZasmOp hl = {.k = ZOP_REG, .s = "HL"};
+  if (!emit_ld(out, "IX", &hl, (*io_line)++)) return false;
 
-  if (!emit_ld(out, "DE", &dst, (*io_line)++)) return false;
-  if (!emit_ld(out, "HL", &src, (*io_line)++)) return false;
-  if (!emit_ld(out, "BC", &len, (*io_line)++)) return false;
+  if (!zasm_emit_addr_to_reg(out, p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, dst_id, "HL", io_line)) return false;
+  if (!emit_ld(out, "DE", &hl, (*io_line)++)) return false;
+
+  ZasmOp ix = {.k = ZOP_REG, .s = "IX"};
+  if (!emit_ld(out, "HL", &ix, (*io_line)++)) return false;
+
+  ZasmOp len = {0};
+  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, bps, bps_len, len_id, &len)) return false;
+  if (len.k == ZOP_SLOT) {
+    if (!emit_load_slot_into_reg(out, "BC", &len, (*io_line)++)) return false;
+  } else if (len.k == ZOP_NUM || len.k == ZOP_SYM || len.k == ZOP_REG) {
+    if (!emit_ld(out, "BC", &len, (*io_line)++)) return false;
+  } else {
+    errf(p, "sircc: zasm: mem.copy len unsupported");
+    return false;
+  }
 
   zasm_write_ir_k(out, "instr");
   fprintf(out, ",\"m\":\"LDIR\",\"ops\":[]");

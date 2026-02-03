@@ -269,6 +269,38 @@ static bool emit_binop_into_hl(
   return true;
 }
 
+static const char* zasm_mnemonic_for_binop(const char* tag) {
+  if (!tag) return NULL;
+
+  // 32-bit ops.
+  if (strcmp(tag, "i32.add") == 0) return "ADD";
+  if (strcmp(tag, "i32.sub") == 0) return "SUB";
+  if (strcmp(tag, "i32.mul") == 0) return "MUL";
+  if (strcmp(tag, "i32.and") == 0) return "AND";
+  if (strcmp(tag, "i32.or") == 0) return "OR";
+  if (strcmp(tag, "i32.xor") == 0) return "XOR";
+  if (strcmp(tag, "i32.shl") == 0) return "SLA";
+  if (strcmp(tag, "i32.shr.s") == 0) return "SRA";
+  if (strcmp(tag, "i32.shr.u") == 0) return "SRL";
+  if (strcmp(tag, "i32.rotl") == 0) return "ROL";
+  if (strcmp(tag, "i32.rotr") == 0) return "ROR";
+
+  // 64-bit ops.
+  if (strcmp(tag, "i64.add") == 0) return "ADD64";
+  if (strcmp(tag, "i64.sub") == 0) return "SUB64";
+  if (strcmp(tag, "i64.mul") == 0) return "MUL64";
+  if (strcmp(tag, "i64.and") == 0) return "AND64";
+  if (strcmp(tag, "i64.or") == 0) return "OR64";
+  if (strcmp(tag, "i64.xor") == 0) return "XOR64";
+  if (strcmp(tag, "i64.shl") == 0) return "SLA64";
+  if (strcmp(tag, "i64.shr.s") == 0) return "SRA64";
+  if (strcmp(tag, "i64.shr.u") == 0) return "SRL64";
+  if (strcmp(tag, "i64.rotl") == 0) return "ROL64";
+  if (strcmp(tag, "i64.rotr") == 0) return "ROR64";
+
+  return NULL;
+}
+
 static bool emit_jr(FILE* out, const char* lbl, int64_t line_no) {
   if (!out || !lbl) return false;
   zasm_write_ir_k(out, "instr");
@@ -436,39 +468,32 @@ static bool emit_zir_nonterm_stmt(
       return true;
     }
 
-    if (strcmp(vn->tag, "i32.add") == 0 || strcmp(vn->tag, "i32.sub") == 0) {
+    const char* m = zasm_mnemonic_for_binop(vn->tag);
+    if (m) {
+      int64_t width = 0;
+      if (strncmp(vn->tag, "i32.", 4) == 0) width = 4;
+      if (strncmp(vn->tag, "i64.", 4) == 0) width = 8;
+      if (!width) {
+        errf(p, "sircc: zasm: %s width unsupported", vn->tag);
+        return false;
+      }
       if (!bind_name || strcmp(bind_name, "_") == 0) {
         errf(p, "sircc: zasm: %s must be bound via let name", vn->tag);
         return false;
       }
-      const char* m32 = (strcmp(vn->tag, "i32.add") == 0) ? "ADD" : "SUB";
-      if (!emit_binop_into_hl(out, p, strs, strs_len, allocas, allocas_len, *names, *name_len, bps, bps_len, vn, m32, NULL, 4, io_line))
-        return false;
-      const char* slot_sym = NULL;
-      if (!add_temp_slot(p, tmps, tmp_len, tmp_cap, s->id, 4, &slot_sym)) {
-        errf(p, "sircc: zasm: out of memory");
-        return false;
-      }
-      if (!emit_store_reg_to_slot(out, slot_sym, 4, "HL", (*io_line)++)) return false;
-      if (!emit_bind_slot(p, names, name_len, name_cap, bind_name, slot_sym, 4)) return false;
-      return true;
-    }
 
-    if (strcmp(vn->tag, "i64.add") == 0 || strcmp(vn->tag, "i64.sub") == 0) {
-      if (!bind_name || strcmp(bind_name, "_") == 0) {
-        errf(p, "sircc: zasm: %s must be bound via let name", vn->tag);
+      const char* m32 = (width == 4) ? m : NULL;
+      const char* m64 = (width == 8) ? m : NULL;
+      if (!emit_binop_into_hl(out, p, strs, strs_len, allocas, allocas_len, *names, *name_len, bps, bps_len, vn, m32, m64, width, io_line))
         return false;
-      }
-      const char* m64 = (strcmp(vn->tag, "i64.add") == 0) ? "ADD64" : "SUB64";
-      if (!emit_binop_into_hl(out, p, strs, strs_len, allocas, allocas_len, *names, *name_len, bps, bps_len, vn, NULL, m64, 8, io_line))
-        return false;
+
       const char* slot_sym = NULL;
-      if (!add_temp_slot(p, tmps, tmp_len, tmp_cap, s->id, 8, &slot_sym)) {
+      if (!add_temp_slot(p, tmps, tmp_len, tmp_cap, s->id, width, &slot_sym)) {
         errf(p, "sircc: zasm: out of memory");
         return false;
       }
-      if (!emit_store_reg_to_slot(out, slot_sym, 8, "HL", (*io_line)++)) return false;
-      if (!emit_bind_slot(p, names, name_len, name_cap, bind_name, slot_sym, 8)) return false;
+      if (!emit_store_reg_to_slot(out, slot_sym, width, "HL", (*io_line)++)) return false;
+      if (!emit_bind_slot(p, names, name_len, name_cap, bind_name, slot_sym, width)) return false;
       return true;
     }
 

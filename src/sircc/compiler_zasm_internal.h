@@ -184,4 +184,20 @@ bool zasm_emit_addr_to_mem(
     int64_t* out_disp,
     int64_t* io_line);
 
+// address lowering (may emit instructions to materialize address into a reg)
+bool zasm_emit_addr_to_reg(
+    FILE* out,
+    SirProgram* p,
+    ZasmStr* strs,
+    size_t strs_len,
+    ZasmAlloca* allocas,
+    size_t allocas_len,
+    ZasmNameBinding* names,
+    size_t names_len,
+    ZasmBParamSlot* bps,
+    size_t bps_len,
+    int64_t addr_id,
+    const char* dst_reg,
+    int64_t* io_line);
+
 #endif

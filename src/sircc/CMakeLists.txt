@@ -526,6 +526,54 @@ if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ze
       "-DEXPECT_STDOUT=D"
       -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
   )
+
+  add_test(
+    NAME sircc_emit_zasm_run_zem_mem_fill_copy_ptrs_prints_G
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DZEM=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_mem_fill_copy_ptrs_print_G.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_mem_fill_copy_ptrs_print_G.zem.zasm.jsonl
+      "-DEXPECT_STDOUT=G"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
+  )
+
+  add_test(
+    NAME sircc_emit_zasm_run_zem_i32_mul_len_prints_MM
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DZEM=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_i32_mul_len_print_MM.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_i32_mul_len_print_MM.zem.zasm.jsonl
+      "-DEXPECT_STDOUT=MM"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
+  )
+
+  add_test(
+    NAME sircc_emit_zasm_run_zem_i32_and_len_prints_AA
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DZEM=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_i32_and_len_print_AA.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_i32_and_len_print_AA.zem.zasm.jsonl
+      "-DEXPECT_STDOUT=AA"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
+  )
+
+  add_test(
+    NAME sircc_emit_zasm_run_zem_i32_shl_len_prints_SS
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRCC=$<TARGET_FILE:sircc>
+      -DZEM=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/zem
+      -DIRCHECK=${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/bin/ircheck
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/zasm_i32_shl_len_print_SS.sir.jsonl
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/zasm_i32_shl_len_print_SS.zem.zasm.jsonl
+      "-DEXPECT_STDOUT=SS"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/emit_zasm_and_run_zem.cmake
+  )
 endif()
 
 add_test(

@@ -204,3 +204,5 @@ This is a separate emission path (`sircc --emit-zasm`) targeting `zasm-v1.1` JSO
 - [x] CFG blocks support core non-terminators: `let`, `store.*`, `mem.copy`, `mem.fill`, and simple arithmetic lets
 - [x] Expand CFG conditions: `i32.cmp.{eq,ne,slt,sle,sgt,sge,ult,ule,ugt,uge}` and `i64.cmp.*` (slot operands supported)
 - [x] Dynamic pointer arithmetic (non-const `ptr.add` / `ptr.offset`)
+- [x] `mem.fill` / `mem.copy` accept pointer expressions (not just allocas)
+- [x] More ZASM integer ops: `i32/i64.{mul,and,or,xor,shl,shr.s,shr.u,rotl,rotr}`
