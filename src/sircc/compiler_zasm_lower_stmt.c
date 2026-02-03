@@ -1,0 +1,333 @@
+// SPDX-FileCopyrightText: 2026 Frogfish
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#include "compiler_zasm_internal.h"
+
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+
+static bool zasm_op_is_value(const ZasmOp* op) {
+  if (!op) return false;
+  return op->k == ZOP_REG || op->k == ZOP_SYM || op->k == ZOP_NUM;
+}
+
+static bool emit_ld(FILE* out, const char* dst_reg, const ZasmOp* src, int64_t line_no) {
+  if (!out || !dst_reg || !src) return false;
+  zasm_write_ir_k(out, "instr");
+  fprintf(out, ",\"m\":\"LD\",\"ops\":[");
+  zasm_write_op_reg(out, dst_reg);
+  fprintf(out, ",");
+  if (!zasm_write_op(out, src)) return false;
+  fprintf(out, "]");
+  zasm_write_loc(out, line_no);
+  fprintf(out, "}\n");
+  return true;
+}
+
+bool zasm_emit_call_stmt(
+    FILE* out,
+    SirProgram* p,
+    ZasmStr* strs,
+    size_t strs_len,
+    ZasmAlloca* allocas,
+    size_t allocas_len,
+    int64_t call_id,
+    int64_t line_no) {
+  NodeRec* n = get_node(p, call_id);
+  if (!n || !n->fields) return false;
+
+  JsonValue* args = json_obj_get(n->fields, "args");
+  if (!args || args->type != JSON_ARRAY || args->v.arr.len < 1) {
+    errf(p, "sircc: zasm: %s node %lld missing args array", n->tag, (long long)call_id);
+    return false;
+  }
+
+  int64_t callee_id = 0;
+  if (!parse_node_ref_id(args->v.arr.items[0], &callee_id)) {
+    errf(p, "sircc: zasm: %s node %lld args[0] must be node ref", n->tag, (long long)call_id);
+    return false;
+  }
+  ZasmOp callee = {0};
+  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, callee_id, &callee) || callee.k != ZOP_SYM) {
+    errf(p, "sircc: zasm: %s node %lld callee must be a direct symbol (decl.fn/ptr.sym)", n->tag, (long long)call_id);
+    return false;
+  }
+
+  zasm_write_ir_k(out, "instr");
+  fprintf(out, ",\"m\":\"CALL\",\"ops\":[");
+  zasm_write_op_sym(out, callee.s);
+
+  for (size_t i = 1; i < args->v.arr.len; i++) {
+    int64_t aid = 0;
+    if (!parse_node_ref_id(args->v.arr.items[i], &aid)) {
+      errf(p, "sircc: zasm: %s node %lld arg[%zu] must be node ref", n->tag, (long long)call_id, i);
+      return false;
+    }
+    ZasmOp op = {0};
+    if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, aid, &op) || !zasm_op_is_value(&op)) {
+      errf(p, "sircc: zasm: %s node %lld arg[%zu] unsupported", n->tag, (long long)call_id, i);
+      return false;
+    }
+    fprintf(out, ",");
+    if (!zasm_write_op(out, &op)) return false;
+  }
+  fprintf(out, "]");
+  zasm_write_loc(out, line_no);
+  fprintf(out, "}\n");
+  return true;
+}
+
+bool zasm_emit_store_stmt(
+    FILE* out,
+    SirProgram* p,
+    ZasmStr* strs,
+    size_t strs_len,
+    ZasmAlloca* allocas,
+    size_t allocas_len,
+    NodeRec* s,
+    int64_t line_no) {
+  if (!out || !p || !s || !s->fields) return false;
+  if (strcmp(s->tag, "store.i8") != 0) {
+    errf(p, "sircc: zasm: unsupported store width '%s'", s->tag);
+    return false;
+  }
+
+  int64_t addr_id = 0;
+  int64_t value_id = 0;
+  JsonValue* av = json_obj_get(s->fields, "addr");
+  JsonValue* vv = json_obj_get(s->fields, "value");
+  if (!parse_node_ref_id(av, &addr_id) || !parse_node_ref_id(vv, &value_id)) {
+    errf(p, "sircc: zasm: %s node %lld requires fields.addr/value node refs", s->tag, (long long)s->id);
+    return false;
+  }
+
+  ZasmOp addr = {0};
+  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, addr_id, &addr) || addr.k != ZOP_SYM) {
+    errf(p, "sircc: zasm: %s addr must be an alloca symbol (node %lld)", s->tag, (long long)addr_id);
+    return false;
+  }
+  ZasmOp val = {0};
+  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, value_id, &val) || val.k != ZOP_NUM) {
+    errf(p, "sircc: zasm: %s value must be an immediate const (node %lld)", s->tag, (long long)value_id);
+    return false;
+  }
+
+  ZasmOp byte = {.k = ZOP_NUM, .n = (uint8_t)val.n};
+  if (!emit_ld(out, "A", &byte, line_no)) return false;
+
+  zasm_write_ir_k(out, "instr");
+  fprintf(out, ",\"m\":\"ST8\",\"ops\":[");
+  zasm_write_op_mem(out, &addr, 0, 1);
+  fprintf(out, ",");
+  zasm_write_op_reg(out, "A");
+  fprintf(out, "]");
+  zasm_write_loc(out, line_no + 1);
+  fprintf(out, "}\n");
+  return true;
+}
+
+bool zasm_emit_mem_fill_stmt(
+    FILE* out,
+    SirProgram* p,
+    ZasmStr* strs,
+    size_t strs_len,
+    ZasmAlloca* allocas,
+    size_t allocas_len,
+    NodeRec* s,
+    int64_t line_no) {
+  if (!out || !p || !s || !s->fields) return false;
+  JsonValue* args = json_obj_get(s->fields, "args");
+  if (!args || args->type != JSON_ARRAY || args->v.arr.len != 3) {
+    errf(p, "sircc: zasm: mem.fill node %lld requires args:[dst, byte, len]", (long long)s->id);
+    return false;
+  }
+
+  int64_t dst_id = 0, byte_id = 0, len_id = 0;
+  if (!parse_node_ref_id(args->v.arr.items[0], &dst_id) || !parse_node_ref_id(args->v.arr.items[1], &byte_id) ||
+      !parse_node_ref_id(args->v.arr.items[2], &len_id)) {
+    errf(p, "sircc: zasm: mem.fill node %lld args must be node refs", (long long)s->id);
+    return false;
+  }
+
+  ZasmOp dst = {0};
+  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, dst_id, &dst) || dst.k != ZOP_SYM) {
+    errf(p, "sircc: zasm: mem.fill dst must be an alloca symbol (node %lld)", (long long)dst_id);
+    return false;
+  }
+  ZasmOp byte = {0};
+  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, byte_id, &byte) || byte.k != ZOP_NUM) {
+    errf(p, "sircc: zasm: mem.fill byte must be an immediate const (node %lld)", (long long)byte_id);
+    return false;
+  }
+  ZasmOp len = {0};
+  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, len_id, &len) || len.k != ZOP_NUM) {
+    errf(p, "sircc: zasm: mem.fill len must be an immediate const (node %lld)", (long long)len_id);
+    return false;
+  }
+
+  if (!emit_ld(out, "HL", &dst, line_no)) return false;
+  ZasmOp b8 = {.k = ZOP_NUM, .n = (uint8_t)byte.n};
+  if (!emit_ld(out, "A", &b8, line_no + 1)) return false;
+  if (!emit_ld(out, "BC", &len, line_no + 2)) return false;
+
+  zasm_write_ir_k(out, "instr");
+  fprintf(out, ",\"m\":\"FILL\",\"ops\":[]");
+  zasm_write_loc(out, line_no + 3);
+  fprintf(out, "}\n");
+  return true;
+}
+
+bool zasm_emit_mem_copy_stmt(
+    FILE* out,
+    SirProgram* p,
+    ZasmStr* strs,
+    size_t strs_len,
+    ZasmAlloca* allocas,
+    size_t allocas_len,
+    NodeRec* s,
+    int64_t line_no) {
+  if (!out || !p || !s || !s->fields) return false;
+  JsonValue* args = json_obj_get(s->fields, "args");
+  if (!args || args->type != JSON_ARRAY || args->v.arr.len != 3) {
+    errf(p, "sircc: zasm: mem.copy node %lld requires args:[dst, src, len]", (long long)s->id);
+    return false;
+  }
+
+  int64_t dst_id = 0, src_id = 0, len_id = 0;
+  if (!parse_node_ref_id(args->v.arr.items[0], &dst_id) || !parse_node_ref_id(args->v.arr.items[1], &src_id) ||
+      !parse_node_ref_id(args->v.arr.items[2], &len_id)) {
+    errf(p, "sircc: zasm: mem.copy node %lld args must be node refs", (long long)s->id);
+    return false;
+  }
+
+  ZasmOp dst = {0};
+  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, dst_id, &dst) || dst.k != ZOP_SYM) {
+    errf(p, "sircc: zasm: mem.copy dst must be an alloca symbol (node %lld)", (long long)dst_id);
+    return false;
+  }
+  ZasmOp src = {0};
+  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, src_id, &src) || src.k != ZOP_SYM) {
+    errf(p, "sircc: zasm: mem.copy src must be an alloca symbol (node %lld)", (long long)src_id);
+    return false;
+  }
+  ZasmOp len = {0};
+  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, len_id, &len) || len.k != ZOP_NUM) {
+    errf(p, "sircc: zasm: mem.copy len must be an immediate const (node %lld)", (long long)len_id);
+    return false;
+  }
+
+  if (!emit_ld(out, "DE", &dst, line_no)) return false;
+  if (!emit_ld(out, "HL", &src, line_no + 1)) return false;
+  if (!emit_ld(out, "BC", &len, line_no + 2)) return false;
+
+  zasm_write_ir_k(out, "instr");
+  fprintf(out, ",\"m\":\"LDIR\",\"ops\":[]");
+  zasm_write_loc(out, line_no + 3);
+  fprintf(out, "}\n");
+  return true;
+}
+
+bool zasm_emit_ret_value_to_hl(
+    FILE* out,
+    SirProgram* p,
+    ZasmStr* strs,
+    size_t strs_len,
+    ZasmAlloca* allocas,
+    size_t allocas_len,
+    int64_t value_id,
+    int64_t line_no) {
+  if (!out || !p) return false;
+
+  NodeRec* v = get_node(p, value_id);
+  if (!v) {
+    errf(p, "sircc: zasm: return references unknown node %lld", (long long)value_id);
+    return false;
+  }
+
+  if (strcmp(v->tag, "i32.zext.i8") == 0) {
+    JsonValue* args = v->fields ? json_obj_get(v->fields, "args") : NULL;
+    if (!args || args->type != JSON_ARRAY || args->v.arr.len != 1) {
+      errf(p, "sircc: zasm: i32.zext.i8 node %lld requires args:[x]", (long long)value_id);
+      return false;
+    }
+    int64_t x_id = 0;
+    if (!parse_node_ref_id(args->v.arr.items[0], &x_id)) {
+      errf(p, "sircc: zasm: i32.zext.i8 node %lld arg must be node ref", (long long)value_id);
+      return false;
+    }
+    NodeRec* x = get_node(p, x_id);
+    if (!x) {
+      errf(p, "sircc: zasm: i32.zext.i8 references unknown node %lld", (long long)x_id);
+      return false;
+    }
+
+    if (strcmp(x->tag, "load.i8") == 0) {
+      int64_t addr_id = 0;
+      JsonValue* av = x->fields ? json_obj_get(x->fields, "addr") : NULL;
+      if (!parse_node_ref_id(av, &addr_id)) {
+        errf(p, "sircc: zasm: load.i8 node %lld requires fields.addr node ref", (long long)x_id);
+        return false;
+      }
+      ZasmOp base = {0};
+      if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, addr_id, &base) || base.k != ZOP_SYM) {
+        errf(p, "sircc: zasm: load.i8 addr must be an alloca symbol (node %lld)", (long long)addr_id);
+        return false;
+      }
+
+      zasm_write_ir_k(out, "instr");
+      fprintf(out, ",\"m\":\"LD8U\",\"ops\":[");
+      zasm_write_op_reg(out, "HL");
+      fprintf(out, ",");
+      zasm_write_op_mem(out, &base, 0, 1);
+      fprintf(out, "]");
+      zasm_write_loc(out, line_no);
+      fprintf(out, "}\n");
+      return true;
+    }
+
+    ZasmOp op = {0};
+    if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, x_id, &op) || op.k != ZOP_NUM) {
+      errf(p, "sircc: zasm: i32.zext.i8 arg must be load.i8 or const.i8 (node %lld)", (long long)x_id);
+      return false;
+    }
+    ZasmOp z = {.k = ZOP_NUM, .n = (uint8_t)op.n};
+    return emit_ld(out, "HL", &z, line_no);
+  }
+
+  if (strcmp(v->tag, "load.i8") == 0) {
+    int64_t addr_id = 0;
+    JsonValue* av = v->fields ? json_obj_get(v->fields, "addr") : NULL;
+    if (!parse_node_ref_id(av, &addr_id)) {
+      errf(p, "sircc: zasm: load.i8 node %lld requires fields.addr node ref", (long long)value_id);
+      return false;
+    }
+    ZasmOp base = {0};
+    if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, addr_id, &base) || base.k != ZOP_SYM) {
+      errf(p, "sircc: zasm: load.i8 addr must be an alloca symbol (node %lld)", (long long)addr_id);
+      return false;
+    }
+
+    zasm_write_ir_k(out, "instr");
+    fprintf(out, ",\"m\":\"LD8U\",\"ops\":[");
+    zasm_write_op_reg(out, "HL");
+    fprintf(out, ",");
+    zasm_write_op_mem(out, &base, 0, 1);
+    fprintf(out, "]");
+    zasm_write_loc(out, line_no);
+    fprintf(out, "}\n");
+    return true;
+  }
+
+  ZasmOp rop = {0};
+  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, value_id, &rop)) return false;
+  if (rop.k == ZOP_NUM || rop.k == ZOP_SYM) return emit_ld(out, "HL", &rop, line_no);
+  if (rop.k == ZOP_REG) {
+    if (!rop.s || strcmp(rop.s, "HL") == 0) return true;
+    return emit_ld(out, "HL", &rop, line_no);
+  }
+
+  errf(p, "sircc: zasm: unsupported return value shape");
+  return false;
+}
+

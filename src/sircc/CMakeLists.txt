@@ -14,7 +14,11 @@ add_executable(sircc
   compiler_tables.c
   compiler_types.c
   compiler_validate.c
-  compiler_zasm.c
+  compiler_zasm_backend.c
+  compiler_zasm_collect.c
+  compiler_zasm_emit.c
+  compiler_zasm_lower_stmt.c
+  compiler_zasm_lower_value.c
   support.c
   check.c
   sircc.c
