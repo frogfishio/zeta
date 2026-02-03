@@ -57,6 +57,32 @@ static bool emit_load_slot_into_reg(FILE* out, const char* dst_reg, const ZasmOp
     return true;
   }
 
+  if (slot->n == 2) {
+    zasm_write_ir_k(out, "instr");
+    fprintf(out, ",\"m\":\"LD16U\",\"ops\":[");
+    zasm_write_op_reg(out, dst_reg);
+    fprintf(out, ",");
+    zasm_write_op_mem(out, &base, 0, 2);
+    fprintf(out, "]");
+    zasm_write_loc(out, line_no);
+    fprintf(out, "}\n");
+    return true;
+  }
+
+  if (slot->n == 4) {
+    zasm_write_ir_k(out, "instr");
+    fprintf(out, ",\"m\":\"LD32U64\",\"ops\":[");
+    zasm_write_op_reg(out, dst_reg);
+    fprintf(out, ",");
+    zasm_write_op_mem(out, &base, 0, 4);
+    fprintf(out, "]");
+    zasm_write_loc(out, line_no);
+    fprintf(out, "}\n");
+    return true;
+  }
+
+  if (slot->n != 8) return false;
+
   zasm_write_ir_k(out, "instr");
   fprintf(out, ",\"m\":\"LD64\",\"ops\":[");
   zasm_write_op_reg(out, dst_reg);
@@ -147,7 +173,26 @@ bool zasm_emit_store_stmt(
     NodeRec* s,
     int64_t line_no) {
   if (!out || !p || !s || !s->fields) return false;
-  if (strcmp(s->tag, "store.i8") != 0) {
+  int64_t width = 0;
+  const char* mnemonic = NULL;
+  const char* value_reg = NULL;
+  if (strcmp(s->tag, "store.i8") == 0) {
+    width = 1;
+    mnemonic = "ST8";
+    value_reg = "A";
+  } else if (strcmp(s->tag, "store.i16") == 0) {
+    width = 2;
+    mnemonic = "ST16";
+    value_reg = "HL";
+  } else if (strcmp(s->tag, "store.i32") == 0) {
+    width = 4;
+    mnemonic = "ST32";
+    value_reg = "HL";
+  } else if (strcmp(s->tag, "store.i64") == 0) {
+    width = 8;
+    mnemonic = "ST64";
+    value_reg = "HL";
+  } else {
     errf(p, "sircc: zasm: unsupported store width '%s'", s->tag);
     return false;
   }
@@ -167,19 +212,38 @@ bool zasm_emit_store_stmt(
     return false;
   }
   ZasmOp val = {0};
-  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, value_id, &val) || val.k != ZOP_NUM) {
-    errf(p, "sircc: zasm: %s value must be an immediate const (node %lld)", s->tag, (long long)value_id);
-    return false;
+  if (!zasm_lower_value_to_op(p, strs, strs_len, allocas, allocas_len, names, names_len, value_id, &val)) return false;
+
+  if (val.k == ZOP_SLOT) {
+    if (!emit_load_slot_into_reg(out, value_reg, &val, line_no)) return false;
+  } else {
+    if (width == 1) {
+      if (val.k == ZOP_NUM) {
+        ZasmOp byte = {.k = ZOP_NUM, .n = (uint8_t)val.n};
+        if (!emit_ld(out, value_reg, &byte, line_no)) return false;
+      } else if (val.k == ZOP_SYM || val.k == ZOP_REG) {
+        if (!emit_ld(out, value_reg, &val, line_no)) return false;
+      } else {
+        errf(p, "sircc: zasm: %s value unsupported", s->tag);
+        return false;
+      }
+    } else {
+      if (val.k == ZOP_NUM || val.k == ZOP_SYM || val.k == ZOP_REG) {
+        if (!emit_ld(out, value_reg, &val, line_no)) return false;
+      } else {
+        errf(p, "sircc: zasm: %s value unsupported", s->tag);
+        return false;
+      }
+    }
   }
 
-  ZasmOp byte = {.k = ZOP_NUM, .n = (uint8_t)val.n};
-  if (!emit_ld(out, "A", &byte, line_no)) return false;
-
   zasm_write_ir_k(out, "instr");
-  fprintf(out, ",\"m\":\"ST8\",\"ops\":[");
-  zasm_write_op_mem(out, &addr, 0, 1);
+  fprintf(out, ",\"m\":");
+  json_write_escaped(out, mnemonic);
+  fprintf(out, ",\"ops\":[");
+  zasm_write_op_mem(out, &addr, 0, width);
   fprintf(out, ",");
-  zasm_write_op_reg(out, "A");
+  zasm_write_op_reg(out, value_reg);
   fprintf(out, "]");
   zasm_write_loc(out, line_no + 1);
   fprintf(out, "}\n");
