@@ -1089,6 +1089,15 @@ LLVMValueRef lower_expr(FunctionCtx* f, int64_t node_id) {
       errf(f->p, "sircc: call.indirect node %lld args[0] must be callee ptr ref", (long long)node_id);
       goto done;
     }
+    NodeRec* callee_n = get_node(f->p, callee_id);
+    if (callee_n && callee_n->type_ref) {
+      TypeRec* t = get_type(f->p, callee_n->type_ref);
+      if (t && (t->kind == TYPE_FUN || t->kind == TYPE_CLOSURE)) {
+        errf(f->p, "sircc: call.indirect callee is an opaque %s value (use call.%s)", (t->kind == TYPE_CLOSURE) ? "closure" : "fun",
+             (t->kind == TYPE_CLOSURE) ? "closure" : "fun");
+        goto done;
+      }
+    }
     LLVMValueRef callee = lower_expr(f, callee_id);
     if (!callee) goto done;
     if (LLVMGetTypeKind(LLVMTypeOf(callee)) != LLVMPointerTypeKind) {

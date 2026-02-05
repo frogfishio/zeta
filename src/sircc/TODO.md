@@ -72,6 +72,38 @@ These are the next “semantic widening” items to unlock real-language lowerin
 - [x] **Semantic algebra (sem:v1)**
   - [x] Implement deterministic desugaring for `sem.if`, `sem.and_sc`, `sem.or_sc`, `sem.match_sum` into base records/nodes, then validate + lower the desugared form (node-lowered to CFG + φ)
 
+## Productionizing (LLVM-first)
+
+Goal: make the LLVM backend + node frontend stable enough that an integrator can start generating/consuming these packs without “paper cuts”.
+
+- [ ] **Callable opacity hardening** (fun/closure are opaque; no pointer arithmetic / raw loads)
+  - [x] Reject `ptr.*` ops on `fun`/`closure` typed values (force `fun.*` / `closure.*`)
+  - [x] Reject `call.indirect` on `fun`/`closure` typed values (force `call.fun` / `call.closure`)
+  - [x] Add negative fixtures for each rejected misuse (ptr.add/ptr.to_i64/store)
+
+- [ ] **Type-rule validation upgrades (node frontend)**
+  - [ ] `fun.sym`: require the referenced symbol is a function and its signature matches `fun.sig`
+  - [ ] `closure.make`: require `code : fun(codeSig)` and `env : envTy` (reject mismatches)
+  - [ ] `closure.sym`: require symbol signature matches derived `codeSig` and `env` type matches
+  - [ ] `call.fun` / `call.closure`: improve errors (show expected vs actual arity/types)
+  - [ ] `sem.*`: validate branch operand shape (`{kind:"val"|"thunk", ...}`) and thunk arity (0-arg for `sem.if/and_sc/or_sc`, 0-arg or 1-arg for `sem.match_sum` cases)
+
+- [ ] **ADT layout + determinism hardening**
+  - [ ] Add explicit tests for padding/align edge cases (payload align > 4, mixed sizes)
+  - [ ] Add negative tests: out-of-range variant traps; `adt.get` wrong-variant trap; nullary get rejected
+
+- [ ] **Diagnostics hardening**
+  - [ ] Replace remaining `errf(...)` in new packs with `err_codef(...)` (stable codes)
+  - [ ] Ensure every error produced during lowering includes record context (`k/id/tag`) when available
+
+- [ ] **Conformance suite expansion**
+  - [ ] Add a “pack corpus” under `dist/test/examples` covering fun/closure/adt/sem (positive + negative)
+  - [ ] Add `sircc --check` coverage for these new examples
+
+- [ ] **Integrator-facing docs**
+  - [ ] Document the exact supported node tags/shapes for fun/closure/adt/sem (including current limitations like closure env equality)
+  - [ ] Add “producer rules” checklist: required features, type defs, and ordering expectations
+
 ## Milestone 2 — Core backend architecture (so “all mnemonics” is tractable)
 
 ### 2.1 Two frontends, one backend

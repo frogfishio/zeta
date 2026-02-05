@@ -11,6 +11,24 @@
 #include <string.h>
 #include <llvm-c/Core.h>
 
+static bool is_opaque_callable_type(SirProgram* p, int64_t type_ref) {
+  if (!p || type_ref == 0) return false;
+  TypeRec* t = get_type(p, type_ref);
+  if (!t) return false;
+  return t->kind == TYPE_FUN || t->kind == TYPE_CLOSURE;
+}
+
+static bool reject_opaque_callable_operand(FunctionCtx* f, int64_t operand_node_id, const char* ctx_tag) {
+  if (!f || !ctx_tag) return false;
+  NodeRec* n = get_node(f->p, operand_node_id);
+  if (!n) return false;
+  if (!is_opaque_callable_type(f->p, n->type_ref)) return true;
+  TypeRec* t = get_type(f->p, n->type_ref);
+  const char* tk = (t && t->kind == TYPE_CLOSURE) ? "closure" : "fun";
+  errf(f->p, "sircc: %s cannot operate on opaque %s values (use %s.* / call.%s)", ctx_tag, tk, tk, tk);
+  return false;
+}
+
 bool lower_expr_part_b(FunctionCtx* f, int64_t node_id, NodeRec* n, LLVMValueRef* outp) {
   (void)node_id;
   if (!f || !n || !outp) return false;
@@ -302,6 +320,7 @@ bool lower_expr_part_b(FunctionCtx* f, int64_t node_id, NodeRec* n, LLVMValueRef
         errf(f->p, "sircc: %s node %lld args must be node refs", n->tag, (long long)node_id);
         goto done;
       }
+      if (!reject_opaque_callable_operand(f, a_id, n->tag) || !reject_opaque_callable_operand(f, b_id, n->tag)) goto done;
       LLVMValueRef a = lower_expr(f, a_id);
       LLVMValueRef b = lower_expr(f, b_id);
       if (!a || !b) goto done;
@@ -326,6 +345,7 @@ bool lower_expr_part_b(FunctionCtx* f, int64_t node_id, NodeRec* n, LLVMValueRef
         errf(f->p, "sircc: %s node %lld args must be node refs", n->tag, (long long)node_id);
         goto done;
       }
+      if (!reject_opaque_callable_operand(f, p_id, n->tag)) goto done;
       LLVMValueRef pval = lower_expr(f, p_id);
       LLVMValueRef oval = lower_expr(f, off_id);
       if (!pval || !oval) goto done;
@@ -363,6 +383,9 @@ bool lower_expr_part_b(FunctionCtx* f, int64_t node_id, NodeRec* n, LLVMValueRef
       if (!parse_node_ref_id(f->p, args->v.arr.items[0], &x_id)) {
         errf(f->p, "sircc: %s node %lld arg must be node ref", n->tag, (long long)node_id);
         goto done;
+      }
+      if (strcmp(op, "to_i64") == 0) {
+        if (!reject_opaque_callable_operand(f, x_id, n->tag)) goto done;
       }
       LLVMValueRef x = lower_expr(f, x_id);
       if (!x) goto done;

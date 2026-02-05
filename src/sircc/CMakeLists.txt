@@ -184,6 +184,33 @@ add_test(
 )
 
 add_test(
+  NAME sircc_diag_bad_ptr_add_fun
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DARGS=${CMAKE_CURRENT_LIST_DIR}/examples/bad_ptr_add_fun.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/bad_ptr_add_fun.ll\\;--emit-llvm
+    "-DEXPECT=cannot operate on opaque fun values"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
+)
+
+add_test(
+  NAME sircc_diag_bad_ptr_to_i64_closure
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DARGS=${CMAKE_CURRENT_LIST_DIR}/examples/bad_ptr_to_i64_closure.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/bad_ptr_to_i64_closure.ll\\;--emit-llvm
+    "-DEXPECT=cannot operate on opaque closure values"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
+)
+
+add_test(
+  NAME sircc_diag_bad_store_ptr_fun
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DARGS=${CMAKE_CURRENT_LIST_DIR}/examples/bad_store_ptr_fun.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/bad_store_ptr_fun.ll\\;--emit-llvm
+    "-DEXPECT=cannot store opaque fun values"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
+)
+
+add_test(
   NAME sircc_cinterop_export_add2
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>

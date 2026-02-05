@@ -48,6 +48,14 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
       errf(f->p, "sircc: %s node %lld requires fields.addr and fields.value refs", n->tag, (long long)node_id);
       return false;
     }
+    NodeRec* vn = get_node(f->p, vid);
+    if (vn && vn->type_ref) {
+      TypeRec* vt = get_type(f->p, vn->type_ref);
+      if (vt && (vt->kind == TYPE_FUN || vt->kind == TYPE_CLOSURE)) {
+        errf(f->p, "sircc: %s cannot store opaque %s values", n->tag, (vt->kind == TYPE_CLOSURE) ? "closure" : "fun");
+        return false;
+      }
+    }
     LLVMValueRef pval = lower_expr(f, aid);
     LLVMValueRef vval = lower_expr(f, vid);
     if (!pval || !vval) return false;
