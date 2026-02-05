@@ -76,22 +76,22 @@ These are the next “semantic widening” items to unlock real-language lowerin
 
 Goal: make the LLVM backend + node frontend stable enough that an integrator can start generating/consuming these packs without “paper cuts”.
 
-- [ ] **Callable opacity hardening** (fun/closure are opaque; no pointer arithmetic / raw loads)
+- [x] **Callable opacity hardening** (fun/closure are opaque; no pointer arithmetic / raw loads)
   - [x] Reject `ptr.*` ops on `fun`/`closure` typed values (force `fun.*` / `closure.*`)
   - [x] Reject `call.indirect` on `fun`/`closure` typed values (force `call.fun` / `call.closure`)
   - [x] Add negative fixtures for each rejected misuse (ptr.add/ptr.to_i64/store)
 
-- [ ] **Type-rule validation upgrades (node frontend)**
-  - [ ] `fun.sym`: require the referenced symbol is a function and its signature matches `fun.sig`
+- [x] **Type-rule validation upgrades (node frontend)**
+  - [x] `fun.sym`: require the referenced symbol is a function and its signature matches `fun.sig`
   - [x] `closure.make`: require `code : fun(codeSig)` and `env : envTy` (reject mismatches)
   - [x] `closure.sym`: require symbol signature matches derived `codeSig` and `env` type matches (env type enforced)
-  - [ ] `call.fun` / `call.closure`: improve errors (show expected vs actual arity/types)
+  - [x] `call.fun` / `call.closure`: improve errors (show expected vs actual arity/types)
   - [x] `sem.*`: validate branch operand shape (`{kind:"val"|"thunk", ...}`) and thunk arity (0-arg for `sem.if/and_sc/or_sc`, 0-arg or 1-arg for `sem.match_sum` cases)
     - [x] `sem.match_sum`: when thunk arity is 1, require param type matches payload type
 
 - [ ] **ADT layout + determinism hardening**
-  - [ ] Add explicit tests for padding/align edge cases (payload align > 4, mixed sizes)
-  - [ ] Add negative tests: out-of-range variant traps; `adt.get` wrong-variant trap; nullary get rejected
+  - [x] Add explicit tests for padding/align edge cases (payload align > 4, mixed sizes)
+  - [x] Add negative tests: out-of-range variant traps; `adt.get` wrong-variant trap; nullary get rejected
 
 - [ ] **Diagnostics hardening**
   - [ ] Replace remaining `errf(...)` in new packs with `err_codef(...)` (stable codes)

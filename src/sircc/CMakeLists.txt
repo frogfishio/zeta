@@ -175,6 +175,15 @@ add_test(
 )
 
 add_test(
+  NAME sircc_diag_bad_adt_get_nullary
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DARGS=${CMAKE_CURRENT_LIST_DIR}/examples/bad_adt_get_nullary.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/bad_adt_get_nullary.ll\\;--emit-llvm
+    "-DEXPECT=variant 0 is nullary (no payload)"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
+)
+
+add_test(
   NAME sircc_diag_bad_sem_missing_feature
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>
@@ -578,6 +587,36 @@ add_test(
 add_test(
   NAME sircc_emit_llvm_mem_copy_overlap_trap
   COMMAND sircc ${CMAKE_CURRENT_LIST_DIR}/examples/mem_copy_overlap_trap.sir.jsonl -o ${CMAKE_CURRENT_BINARY_DIR}/mem_copy_overlap_trap.ll --emit-llvm
+)
+
+add_test(
+  NAME sircc_emit_llvm_adt_layout_i64_payload_has_pad
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DARGS=${CMAKE_CURRENT_LIST_DIR}/examples/adt_layout_i64_payload.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/adt_layout_i64_payload.ll\\;--emit-llvm
+    -DOUT=${CMAKE_CURRENT_BINARY_DIR}/adt_layout_i64_payload.ll
+    "-DEXPECT={ i32, [4 x i8], [8 x i8] }"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_output_file_contains.cmake
+)
+
+add_test(
+  NAME sircc_emit_llvm_adt_wrong_variant_traps_has_trap
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DARGS=${CMAKE_CURRENT_LIST_DIR}/examples/adt_wrong_variant_traps.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/adt_wrong_variant_traps.ll\\;--emit-llvm
+    -DOUT=${CMAKE_CURRENT_BINARY_DIR}/adt_wrong_variant_traps.ll
+    "-DEXPECT=llvm.trap"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_output_file_contains.cmake
+)
+
+add_test(
+  NAME sircc_emit_llvm_adt_make_variant_oob_traps_has_trap
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DARGS=${CMAKE_CURRENT_LIST_DIR}/examples/adt_make_variant_oob_traps.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/adt_make_variant_oob_traps.ll\\;--emit-llvm
+    -DOUT=${CMAKE_CURRENT_BINARY_DIR}/adt_make_variant_oob_traps.ll
+    "-DEXPECT=llvm.trap"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_output_file_contains.cmake
 )
 
 add_test(
