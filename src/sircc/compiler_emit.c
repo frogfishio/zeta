@@ -35,7 +35,7 @@ static void llvm_init_targets_once(void) {
 bool emit_module_ir(SirProgram* p, LLVMModuleRef mod, const char* out_path) {
   char* err = NULL;
   if (LLVMPrintModuleToFile(mod, out_path, &err) != 0) {
-    errf(p, "sircc: failed to write LLVM IR: %s", err ? err : "(unknown)");
+    err_codef(p, "sircc.llvm.emit_ir_failed", "sircc: failed to write LLVM IR: %s", err ? err : "(unknown)");
     LLVMDisposeMessage(err);
     return false;
   }
@@ -50,7 +50,7 @@ bool init_target_for_module(SirProgram* p, LLVMModuleRef mod, const char* triple
   char* err = NULL;
   LLVMTargetRef target = NULL;
   if (LLVMGetTargetFromTriple(triple, &target, &err) != 0) {
-    errf(p, "sircc: target triple '%s' unsupported: %s", triple, err ? err : "(unknown)");
+    err_codef(p, "sircc.llvm.triple.unsupported", "sircc: target triple '%s' unsupported: %s", triple, err ? err : "(unknown)");
     LLVMDisposeMessage(err);
     return false;
   }
@@ -58,7 +58,7 @@ bool init_target_for_module(SirProgram* p, LLVMModuleRef mod, const char* triple
   LLVMTargetMachineRef tm =
       LLVMCreateTargetMachine(target, triple, "generic", "", LLVMCodeGenLevelDefault, LLVMRelocDefault, LLVMCodeModelDefault);
   if (!tm) {
-    errf(p, "sircc: failed to create target machine");
+    err_codef(p, "sircc.llvm.target_machine.create_failed", "sircc: failed to create target machine");
     return false;
   }
 
@@ -83,7 +83,7 @@ bool emit_module_obj(SirProgram* p, LLVMModuleRef mod, const char* triple, const
   const char* use_triple = triple ? triple : LLVMGetDefaultTargetTriple();
   LLVMTargetRef target = NULL;
   if (LLVMGetTargetFromTriple(use_triple, &target, &err) != 0) {
-    errf(p, "sircc: target triple '%s' unsupported: %s", use_triple, err ? err : "(unknown)");
+    err_codef(p, "sircc.llvm.triple.unsupported", "sircc: target triple '%s' unsupported: %s", use_triple, err ? err : "(unknown)");
     LLVMDisposeMessage(err);
     if (!triple) LLVMDisposeMessage((char*)use_triple);
     return false;
@@ -93,7 +93,7 @@ bool emit_module_obj(SirProgram* p, LLVMModuleRef mod, const char* triple, const
       LLVMCreateTargetMachine(target, use_triple, "generic", "", LLVMCodeGenLevelDefault, LLVMRelocDefault,
                               LLVMCodeModelDefault);
   if (!tm) {
-    errf(p, "sircc: failed to create target machine");
+    err_codef(p, "sircc.llvm.target_machine.create_failed", "sircc: failed to create target machine");
     if (!triple) LLVMDisposeMessage((char*)use_triple);
     return false;
   }
@@ -106,7 +106,7 @@ bool emit_module_obj(SirProgram* p, LLVMModuleRef mod, const char* triple, const
   LLVMDisposeTargetData(td);
 
   if (LLVMTargetMachineEmitToFile(tm, mod, (char*)out_path, LLVMObjectFile, &err) != 0) {
-    errf(p, "sircc: failed to emit object: %s", err ? err : "(unknown)");
+    err_codef(p, "sircc.llvm.emit_obj_failed", "sircc: failed to emit object: %s", err ? err : "(unknown)");
     LLVMDisposeMessage(err);
     LLVMDisposeTargetMachine(tm);
     if (!triple) LLVMDisposeMessage((char*)use_triple);

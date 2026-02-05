@@ -27,7 +27,7 @@ bool run_clang_link(SirProgram* p, const char* clang_path, const char* obj_path,
   pid_t pid = fork();
   if (pid < 0) {
     bump_exit_code(p, SIRCC_EXIT_INTERNAL);
-    errf(p, "sircc: fork failed: %s", strerror(errno));
+    err_codef(p, "sircc.proc.fork_failed", "sircc: fork failed: %s", strerror(errno));
     return false;
   }
   if (pid == 0) {
@@ -38,13 +38,13 @@ bool run_clang_link(SirProgram* p, const char* clang_path, const char* obj_path,
   int st = 0;
   if (waitpid(pid, &st, 0) < 0) {
     bump_exit_code(p, SIRCC_EXIT_INTERNAL);
-    errf(p, "sircc: waitpid failed: %s", strerror(errno));
+    err_codef(p, "sircc.proc.waitpid_failed", "sircc: waitpid failed: %s", strerror(errno));
     return false;
   }
   if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) {
     int code = WIFEXITED(st) ? WEXITSTATUS(st) : 1;
     if (code == 127) bump_exit_code(p, SIRCC_EXIT_TOOLCHAIN);
-    errf(p, "sircc: clang failed (exit=%d)", code);
+    err_codef(p, "sircc.tool.clang.failed", "sircc: clang failed (exit=%d)", code);
     return false;
   }
   return true;
@@ -160,7 +160,7 @@ static bool run_clang_compile_c(SirProgram* p, const char* clang_path, const cha
   pid_t pid = fork();
   if (pid < 0) {
     bump_exit_code(p, SIRCC_EXIT_INTERNAL);
-    errf(p, "sircc: fork failed: %s", strerror(errno));
+    err_codef(p, "sircc.proc.fork_failed", "sircc: fork failed: %s", strerror(errno));
     return false;
   }
   if (pid == 0) {
@@ -171,13 +171,13 @@ static bool run_clang_compile_c(SirProgram* p, const char* clang_path, const cha
   int st = 0;
   if (waitpid(pid, &st, 0) < 0) {
     bump_exit_code(p, SIRCC_EXIT_INTERNAL);
-    errf(p, "sircc: waitpid failed: %s", strerror(errno));
+    err_codef(p, "sircc.proc.waitpid_failed", "sircc: waitpid failed: %s", strerror(errno));
     return false;
   }
   if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) {
     int code = WIFEXITED(st) ? WEXITSTATUS(st) : 1;
     if (code == 127) bump_exit_code(p, SIRCC_EXIT_TOOLCHAIN);
-    errf(p, "sircc: clang failed (exit=%d)", code);
+    err_codef(p, "sircc.tool.clang.failed", "sircc: clang failed (exit=%d)", code);
     return false;
   }
   return true;
@@ -188,7 +188,8 @@ bool run_clang_link_zabi25(SirProgram* p, const char* clang_path, const char* gu
   char root[PATH_MAX];
   if (!resolve_zabi25_root(opt, root, sizeof(root))) {
     bump_exit_code(p, SIRCC_EXIT_TOOLCHAIN);
-    errf(p, "sircc: zabi25 runtime not found (set --zabi25-root or env SIRCC_ZABI25_ROOT)");
+    err_codef(p, "sircc.runtime.zabi25.not_found",
+              "sircc: zabi25 runtime not found (set --zabi25-root or env SIRCC_ZABI25_ROOT)");
     return false;
   }
 
@@ -202,7 +203,7 @@ bool run_clang_link_zabi25(SirProgram* p, const char* clang_path, const char* gu
   char runner_obj[PATH_MAX];
   if (!make_tmp_obj(runner_obj, sizeof(runner_obj))) {
     bump_exit_code(p, SIRCC_EXIT_INTERNAL);
-    errf(p, "sircc: failed to create temp obj for zabi runner");
+    err_codef(p, "sircc.io.tmp_obj_failed", "sircc: failed to create temp obj for zabi runner");
     return false;
   }
 
@@ -222,7 +223,7 @@ bool run_clang_link_zabi25(SirProgram* p, const char* clang_path, const char* gu
   if (pid < 0) {
     unlink(runner_obj);
     bump_exit_code(p, SIRCC_EXIT_INTERNAL);
-    errf(p, "sircc: fork failed: %s", strerror(errno));
+    err_codef(p, "sircc.proc.fork_failed", "sircc: fork failed: %s", strerror(errno));
     return false;
   }
   if (pid == 0) {
@@ -234,7 +235,7 @@ bool run_clang_link_zabi25(SirProgram* p, const char* clang_path, const char* gu
   if (waitpid(pid, &st, 0) < 0) {
     unlink(runner_obj);
     bump_exit_code(p, SIRCC_EXIT_INTERNAL);
-    errf(p, "sircc: waitpid failed: %s", strerror(errno));
+    err_codef(p, "sircc.proc.waitpid_failed", "sircc: waitpid failed: %s", strerror(errno));
     return false;
   }
 
@@ -243,7 +244,7 @@ bool run_clang_link_zabi25(SirProgram* p, const char* clang_path, const char* gu
   if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) {
     int code = WIFEXITED(st) ? WEXITSTATUS(st) : 1;
     if (code == 127) bump_exit_code(p, SIRCC_EXIT_TOOLCHAIN);
-    errf(p, "sircc: clang failed (exit=%d)", code);
+    err_codef(p, "sircc.tool.clang.failed", "sircc: clang failed (exit=%d)", code);
     return false;
   }
   return true;
@@ -261,7 +262,7 @@ bool run_strip(SirProgram* p, const char* exe_path) {
   pid_t pid = fork();
   if (pid < 0) {
     bump_exit_code(p, SIRCC_EXIT_INTERNAL);
-    errf(p, "sircc: fork failed: %s", strerror(errno));
+    err_codef(p, "sircc.proc.fork_failed", "sircc: fork failed: %s", strerror(errno));
     return false;
   }
   if (pid == 0) {
@@ -273,13 +274,13 @@ bool run_strip(SirProgram* p, const char* exe_path) {
   int st = 0;
   if (waitpid(pid, &st, 0) < 0) {
     bump_exit_code(p, SIRCC_EXIT_INTERNAL);
-    errf(p, "sircc: waitpid failed: %s", strerror(errno));
+    err_codef(p, "sircc.proc.waitpid_failed", "sircc: waitpid failed: %s", strerror(errno));
     return false;
   }
   if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) {
     int code = WIFEXITED(st) ? WEXITSTATUS(st) : 1;
     if (code == 127) bump_exit_code(p, SIRCC_EXIT_TOOLCHAIN);
-    errf(p, "sircc: strip failed (exit=%d)", code);
+    err_codef(p, "sircc.tool.strip.failed", "sircc: strip failed (exit=%d)", code);
     return false;
   }
   return true;
@@ -294,4 +295,3 @@ bool make_tmp_obj(char* out, size_t out_cap) {
   close(fd);
   return true;
 }
-

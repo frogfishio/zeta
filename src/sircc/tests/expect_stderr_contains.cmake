@@ -5,6 +5,8 @@
 # Optional:
 #   -DEXPECT2=<substring>
 #   -DEXPECT3=<substring>
+#   -DEXPECT4=<substring>
+#   -DEXPECT5=<substring>
 #   -DEXPECT_EXIT_NONZERO=ON (default ON)
 
 if(NOT DEFINED SIRCC)
@@ -37,7 +39,7 @@ else()
   endif()
 endif()
 
-foreach(k EXPECT EXPECT2 EXPECT3)
+foreach(k EXPECT EXPECT2 EXPECT3 EXPECT4 EXPECT5)
   if(DEFINED ${k})
     set(exp "${${k}}")
     # allow callers to pass escaped quotes (e.g. \\\"k\\\":\\\"diag\\\")

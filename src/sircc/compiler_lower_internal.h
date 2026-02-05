@@ -7,6 +7,8 @@
 
 #include <llvm-c/Core.h>
 
+#define LOWER_ERR_NODE(f, n, code, ...) SIRCC_ERR_NODE((f)->p, (n), (code), __VA_ARGS__)
+
 typedef struct Binding {
   const char* name;
   LLVMValueRef value;

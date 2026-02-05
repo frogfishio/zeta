@@ -780,7 +780,8 @@ add_test(
     -DARGS=--diagnostics\\;json\\;${CMAKE_CURRENT_LIST_DIR}/examples/zasm_bad_unsupported_value_node_diag.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/zasm_bad_unsupported_value_node_diag.zasm.jsonl\\;--emit-zasm
     -DEXPECT=\\\"k\\\":\\\"diag\\\"
     -DEXPECT2=\\\"about\\\":{\\\"k\\\":\\\"node\\\"
-    -DEXPECT3=\\\"tag\\\":\\\"i32.add\\\"
+    -DEXPECT3=\\\"code\\\":\\\"sircc.zasm.value.unsupported\\\"
+    -DEXPECT4=\\\"tag\\\":\\\"i32.add\\\"
     -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
 )
 
@@ -915,6 +916,15 @@ add_test(
     -DARGS=--diagnostics\\;json\\;--verify-only\\;${CMAKE_CURRENT_LIST_DIR}/examples/bad_unknown_field.sir.jsonl
     -DEXPECT=\\\"k\\\":\\\"diag\\\"
     -DEXPECT2=\\\"level\\\":\\\"error\\\"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
+)
+
+add_test(
+  NAME sircc_diag_json_bad_operand_has_code
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DARGS=--diagnostics\\;json\\;--verify-only\\;${CMAKE_CURRENT_LIST_DIR}/examples/bad_instr_operand.sir.jsonl
+    -DEXPECT=\\\"code\\\":\\\"sircc.schema.value.num.bad\\\"
     -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
 )
 

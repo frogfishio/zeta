@@ -137,6 +137,21 @@ SirDiagSaved sir_diag_push(SirProgram* p, const char* kind, int64_t rec_id, cons
 SirDiagSaved sir_diag_push_node(SirProgram* p, const NodeRec* n);
 void sir_diag_pop(SirProgram* p, SirDiagSaved saved);
 
+#define SIRCC_ERR(p, code, ...) err_codef((p), (code), __VA_ARGS__)
+#define SIRCC_ERR_NODE(p, n, code, ...)                \
+  do {                                                 \
+    SirDiagSaved _saved = sir_diag_push_node((p), (n)); \
+    err_codef((p), (code), __VA_ARGS__);               \
+    sir_diag_pop((p), _saved);                         \
+  } while (0)
+
+#define SIRCC_ERR_NODE_ID(p, node_id, node_tag, code, ...)               \
+  do {                                                                   \
+    SirDiagSaved _saved = sir_diag_push((p), "node", (node_id), (node_tag)); \
+    err_codef((p), (code), __VA_ARGS__);                                 \
+    sir_diag_pop((p), _saved);                                           \
+  } while (0)
+
 // Shared parsing helpers (used by lowering/validation).
 JsonValue* must_obj(SirProgram* p, JsonValue* v, const char* ctx);
 const char* must_string(SirProgram* p, JsonValue* v, const char* ctx);

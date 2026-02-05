@@ -206,5 +206,6 @@ bool zasm_emit_addr_to_reg(
 
 // diagnostics helpers (adds node context to errf)
 void zasm_err_nodef(SirProgram* p, int64_t node_id, const char* node_tag, const char* fmt, ...);
+void zasm_err_node_codef(SirProgram* p, int64_t node_id, const char* node_tag, const char* code, const char* fmt, ...);
 
 #endif

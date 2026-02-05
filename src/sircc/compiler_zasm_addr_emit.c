@@ -244,7 +244,7 @@ static bool materialize_addr_into_hl(
 
   NodeRec* n = get_node(p, addr_id);
   if (!n) {
-    zasm_err_nodef(p, addr_id, NULL, "sircc: zasm: unknown address node %lld", (long long)addr_id);
+    zasm_err_node_codef(p, addr_id, NULL, "sircc.zasm.addr.unknown", "sircc: zasm: unknown address node %lld", (long long)addr_id);
     return false;
   }
 
@@ -255,12 +255,14 @@ static bool materialize_addr_into_hl(
   if (strcmp(n->tag, "ptr.add") == 0) {
     JsonValue* args = n->fields ? json_obj_get(n->fields, "args") : NULL;
     if (!args || args->type != JSON_ARRAY || args->v.arr.len != 2) {
-      zasm_err_nodef(p, addr_id, n->tag, "sircc: zasm: ptr.add node %lld requires args:[base, off]", (long long)addr_id);
+      zasm_err_node_codef(p, addr_id, n->tag, "sircc.zasm.addr.ptr_add.bad_args",
+                          "sircc: zasm: ptr.add node %lld requires args:[base, off]", (long long)addr_id);
       return false;
     }
     int64_t base_id = 0, off_id = 0;
     if (!parse_node_ref_id(p, args->v.arr.items[0], &base_id) || !parse_node_ref_id(p, args->v.arr.items[1], &off_id)) {
-      zasm_err_nodef(p, addr_id, n->tag, "sircc: zasm: ptr.add node %lld args must be node refs", (long long)addr_id);
+      zasm_err_node_codef(p, addr_id, n->tag, "sircc.zasm.addr.ptr_add.bad_args", "sircc: zasm: ptr.add node %lld args must be node refs",
+                          (long long)addr_id);
       return false;
     }
 
@@ -275,17 +277,20 @@ static bool materialize_addr_into_hl(
   if (strcmp(n->tag, "ptr.offset") == 0) {
     int64_t ty_id = 0;
     if (!parse_type_ref_id(p, n->fields ? json_obj_get(n->fields, "ty") : NULL, &ty_id)) {
-      zasm_err_nodef(p, addr_id, n->tag, "sircc: zasm: ptr.offset node %lld missing fields.ty type ref", (long long)addr_id);
+      zasm_err_node_codef(p, addr_id, n->tag, "sircc.zasm.addr.ptr_offset.missing_ty",
+                          "sircc: zasm: ptr.offset node %lld missing fields.ty type ref", (long long)addr_id);
       return false;
     }
     JsonValue* args = n->fields ? json_obj_get(n->fields, "args") : NULL;
     if (!args || args->type != JSON_ARRAY || args->v.arr.len != 2) {
-      zasm_err_nodef(p, addr_id, n->tag, "sircc: zasm: ptr.offset node %lld requires args:[base, idx]", (long long)addr_id);
+      zasm_err_node_codef(p, addr_id, n->tag, "sircc.zasm.addr.ptr_offset.bad_args",
+                          "sircc: zasm: ptr.offset node %lld requires args:[base, idx]", (long long)addr_id);
       return false;
     }
     int64_t base_id = 0, idx_id = 0;
     if (!parse_node_ref_id(p, args->v.arr.items[0], &base_id) || !parse_node_ref_id(p, args->v.arr.items[1], &idx_id)) {
-      zasm_err_nodef(p, addr_id, n->tag, "sircc: zasm: ptr.offset node %lld args must be node refs", (long long)addr_id);
+      zasm_err_node_codef(p, addr_id, n->tag, "sircc.zasm.addr.ptr_offset.bad_args",
+                          "sircc: zasm: ptr.offset node %lld args must be node refs", (long long)addr_id);
       return false;
     }
 
@@ -310,7 +315,8 @@ static bool materialize_addr_into_hl(
     return true;
   }
 
-  zasm_err_nodef(p, addr_id, n->tag, "sircc: zasm: unsupported dynamic address node '%s' (node %lld)", n->tag, (long long)addr_id);
+  zasm_err_node_codef(p, addr_id, n->tag, "sircc.zasm.addr.unsupported",
+                      "sircc: zasm: unsupported dynamic address node '%s' (node %lld)", n->tag, (long long)addr_id);
   return false;
 }
 

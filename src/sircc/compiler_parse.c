@@ -120,7 +120,7 @@ static bool validate_value(SirProgram* p, const JsonValue* v, const char* what) 
   if (strcmp(t, "sym") == 0 || strcmp(t, "lbl") == 0 || strcmp(t, "reg") == 0) {
     const char* name = json_get_string(json_obj_get(v, "v"));
     if (!name || !is_ident(name)) {
-      errf(p, "sircc: %s %s.v must be an Ident", what, t);
+      err_codef(p, "sircc.schema.value.ident.bad", "sircc: %s %s.v must be an Ident", what, t);
       return false;
     }
     return true;
@@ -128,7 +128,7 @@ static bool validate_value(SirProgram* p, const JsonValue* v, const char* what) 
   if (strcmp(t, "num") == 0) {
     int64_t n = 0;
     if (!json_get_i64(json_obj_get(v, "v"), &n)) {
-      errf(p, "sircc: %s num.v must be an integer", what);
+      err_codef(p, "sircc.schema.value.num.bad", "sircc: %s num.v must be an integer", what);
       return false;
     }
     return true;
@@ -136,7 +136,7 @@ static bool validate_value(SirProgram* p, const JsonValue* v, const char* what) 
   if (strcmp(t, "str") == 0) {
     const char* s = json_get_string(json_obj_get(v, "v"));
     if (!s) {
-      errf(p, "sircc: %s str.v must be a string", what);
+      err_codef(p, "sircc.schema.value.str.bad", "sircc: %s str.v must be a string", what);
       return false;
     }
     return true;
@@ -144,12 +144,12 @@ static bool validate_value(SirProgram* p, const JsonValue* v, const char* what) 
   if (strcmp(t, "mem") == 0) {
     const JsonValue* base = json_obj_get(v, "base");
     if (!base || base->type != JSON_OBJECT) {
-      errf(p, "sircc: %s mem.base must be an object", what);
+      err_codef(p, "sircc.schema.value.mem.base.bad", "sircc: %s mem.base must be an object", what);
       return false;
     }
     const char* bt = json_get_string(json_obj_get(base, "t"));
     if (!bt || (strcmp(bt, "reg") != 0 && strcmp(bt, "sym") != 0)) {
-      errf(p, "sircc: %s mem.base must be reg or sym", what);
+      err_codef(p, "sircc.schema.value.mem.base.bad", "sircc: %s mem.base must be reg or sym", what);
       return false;
     }
     if (!validate_value(p, base, what)) return false;
@@ -158,7 +158,7 @@ static bool validate_value(SirProgram* p, const JsonValue* v, const char* what) 
     if (disp) {
       int64_t d = 0;
       if (!json_get_i64(disp, &d)) {
-        errf(p, "sircc: %s mem.disp must be an integer", what);
+        err_codef(p, "sircc.schema.value.mem.disp.bad", "sircc: %s mem.disp must be an integer", what);
         return false;
       }
     }
@@ -166,7 +166,7 @@ static bool validate_value(SirProgram* p, const JsonValue* v, const char* what) 
     if (size) {
       int64_t s = 0;
       if (!json_get_i64(size, &s) || !(s == 1 || s == 2 || s == 4 || s == 8 || s == 16)) {
-        errf(p, "sircc: %s mem.size must be one of 1,2,4,8,16", what);
+        err_codef(p, "sircc.schema.value.mem.size.bad", "sircc: %s mem.size must be one of 1,2,4,8,16", what);
         return false;
       }
     }
@@ -174,22 +174,24 @@ static bool validate_value(SirProgram* p, const JsonValue* v, const char* what) 
   }
   if (strcmp(t, "ref") == 0) {
     int64_t id = 0;
-    if (!json_get_i64(json_obj_get(v, "id"), &id)) {
-      errf(p, "sircc: %s ref.id must be an integer", what);
+    const JsonValue* idv = json_obj_get(v, "id");
+    const char* ids = json_get_string(idv);
+    if (!json_get_i64(idv, &id) && !(ids && *ids)) {
+      err_codef(p, "sircc.schema.value.ref.bad", "sircc: %s ref.id must be an integer or string", what);
       return false;
     }
     JsonValue* k = json_obj_get(v, "k");
     if (k) {
       const char* ks = json_get_string(k);
       if (!ks || (strcmp(ks, "sym") != 0 && strcmp(ks, "type") != 0 && strcmp(ks, "node") != 0)) {
-        errf(p, "sircc: %s ref.k must be one of sym/type/node", what);
+        err_codef(p, "sircc.schema.value.ref.k.bad", "sircc: %s ref.k must be one of sym/type/node", what);
         return false;
       }
     }
     return true;
   }
 
-  errf(p, "sircc: %s has unknown value tag t='%s'", what, t);
+  err_codef(p, "sircc.schema.value.t.unknown", "sircc: %s has unknown value tag t='%s'", what, t);
   return false;
 }
 
@@ -287,7 +289,7 @@ static bool require_only_keys(SirProgram* p, const JsonValue* obj, const char* c
   const char* bad = NULL;
   if (json_obj_has_only_keys(obj, keys, key_count, &bad)) return true;
   if (!bad) bad = "(unknown)";
-  errf(p, "sircc: invalid %s: unknown field '%s'", what, bad);
+  err_codef(p, "sircc.schema.unknown_field", "sircc: invalid %s: unknown field '%s'", what, bad);
   return false;
 }
 
@@ -313,7 +315,7 @@ static bool parse_meta_record(SirProgram* p, const SirccOptions* opt, JsonValue*
       for (size_t i = 0; i < features->v.arr.len; i++) {
         const char* f = json_get_string(features->v.arr.items[i]);
         if (!f) {
-          errf(p, "sircc: meta.ext.features[%zu] must be a string", i);
+          err_codef(p, "sircc.meta.features.bad", "sircc: meta.ext.features[%zu] must be a string", i);
           return false;
         }
         enable_feature(p, f);
@@ -332,7 +334,7 @@ static bool parse_src_record(SirProgram* p, JsonValue* obj) {
   if (!sir_intern_id(p, SIR_ID_SRC, json_obj_get(obj, "id"), &id, "src.id")) return false;
   if (!ensure_src_slot(p, id)) return false;
   if (p->srcs[id]) {
-    errf(p, "sircc: duplicate src id %lld", (long long)id);
+    err_codef(p, "sircc.schema.duplicate_id", "sircc: duplicate src id %lld", (long long)id);
     return false;
   }
 
@@ -357,7 +359,8 @@ static bool parse_src_record(SirProgram* p, JsonValue* obj) {
   if (end_col) (void)must_i64(p, end_col, &sr->end_col, "src.end_col");
 
   if ((sr->end_line && !sr->end_col) || (sr->end_col && !sr->end_line)) {
-    errf(p, "sircc: src record %lld must include both end_line and end_col (or neither)", (long long)id);
+    err_codef(p, "sircc.src.end_loc.partial", "sircc: src record %lld must include both end_line and end_col (or neither)",
+              (long long)id);
     return false;
   }
 
@@ -383,7 +386,7 @@ static bool parse_sym_record(SirProgram* p, JsonValue* obj) {
   if (!sir_intern_id(p, SIR_ID_SYM, json_obj_get(obj, "id"), &id, "sym.id")) return false;
   if (!ensure_sym_slot(p, id)) return false;
   if (p->syms[id]) {
-    errf(p, "sircc: duplicate sym id %lld", (long long)id);
+    err_codef(p, "sircc.schema.duplicate_id", "sircc: duplicate sym id %lld", (long long)id);
     return false;
   }
 
@@ -395,7 +398,7 @@ static bool parse_sym_record(SirProgram* p, JsonValue* obj) {
   s->linkage = json_get_string(json_obj_get(obj, "linkage"));
   if (!s->name || !s->kind) return false;
   if (!is_ident(s->name)) {
-    errf(p, "sircc: sym.name must be an Ident");
+    err_codef(p, "sircc.schema.ident.bad", "sircc: sym.name must be an Ident");
     return false;
   }
   p->syms[id] = s;
@@ -417,7 +420,7 @@ static bool parse_label_record(SirProgram* p, JsonValue* obj) {
   const char* name = must_string(p, json_obj_get(obj, "name"), "label.name");
   if (!name) return false;
   if (!is_ident(name)) {
-    errf(p, "sircc: label.name must be an Ident");
+    err_codef(p, "sircc.schema.ident.bad", "sircc: label.name must be an Ident");
     return false;
   }
   return true;
@@ -429,7 +432,7 @@ static bool parse_instr_record(SirProgram* p, const SirccOptions* opt, JsonValue
   if (!must_string(p, json_obj_get(obj, "m"), "instr.m")) return false;
   JsonValue* ops = json_obj_get(obj, "ops");
   if (!ops || ops->type != JSON_ARRAY) {
-    errf(p, "sircc: expected array for instr.ops");
+    err_codef(p, "sircc.schema.instr.ops.not_array", "sircc: expected array for instr.ops");
     return false;
   }
   for (size_t i = 0; i < ops->v.arr.len; i++) {
@@ -438,7 +441,7 @@ static bool parse_instr_record(SirProgram* p, const SirccOptions* opt, JsonValue
   const char* m = json_get_string(json_obj_get(obj, "m"));
   const char* need = required_feature_for_mnemonic(m);
   if (need && !has_feature(p, need)) {
-    errf(p, "sircc: mnemonic '%s' requires feature %s (enable via meta.ext.features)", m ? m : "(null)", need);
+    err_codef(p, "sircc.feature.gate", "sircc: mnemonic '%s' requires feature %s (enable via meta.ext.features)", m ? m : "(null)", need);
     return false;
   }
   if (opt && opt->dump_records) {
@@ -453,7 +456,7 @@ static bool parse_dir_record(SirProgram* p, JsonValue* obj) {
   if (!must_string(p, json_obj_get(obj, "d"), "dir.d")) return false;
   JsonValue* args = json_obj_get(obj, "args");
   if (!args || args->type != JSON_ARRAY) {
-    errf(p, "sircc: expected array for dir.args");
+    err_codef(p, "sircc.schema.dir.args.not_array", "sircc: expected array for dir.args");
     return false;
   }
   for (size_t i = 0; i < args->v.arr.len; i++) {
@@ -473,7 +476,7 @@ static bool parse_type_record(SirProgram* p, JsonValue* obj) {
   if (!kind) return false;
   if (!ensure_type_slot(p, id)) return false;
   if (p->types[id]) {
-    errf(p, "sircc: duplicate type id %lld", (long long)id);
+    err_codef(p, "sircc.schema.duplicate_id", "sircc: duplicate type id %lld", (long long)id);
     return false;
   }
 
@@ -500,14 +503,14 @@ static bool parse_type_record(SirProgram* p, JsonValue* obj) {
     if (!sir_intern_id(p, SIR_ID_TYPE, json_obj_get(obj, "of"), &tr->of, "type.of")) return false;
     if (!must_i64(p, json_obj_get(obj, "len"), &tr->len, "type.len")) return false;
     if (tr->len < 0) {
-      errf(p, "sircc: type.array len must be >= 0");
+      err_codef(p, "sircc.type.array.len.bad", "sircc: type.array len must be >= 0");
       return false;
     }
   } else if (strcmp(kind, "fn") == 0) {
     tr->kind = TYPE_FN;
     JsonValue* params = json_obj_get(obj, "params");
     if (!params || params->type != JSON_ARRAY) {
-      errf(p, "sircc: expected array for type.params");
+      err_codef(p, "sircc.type.fn.params.not_array", "sircc: expected array for type.params");
       return false;
     }
     tr->param_len = params->v.arr.len;
@@ -522,7 +525,7 @@ static bool parse_type_record(SirProgram* p, JsonValue* obj) {
     JsonValue* va = json_obj_get(obj, "varargs");
     if (va && va->type == JSON_BOOL) tr->varargs = va->v.b;
   } else {
-    errf(p, "sircc: unsupported type kind '%s' (v1 subset)", kind);
+    err_codef(p, "sircc.type.kind.unsupported", "sircc: unsupported type kind '%s' (v1 subset)", kind);
     return false;
   }
 
@@ -547,13 +550,13 @@ static bool parse_node_record(SirProgram* p, JsonValue* obj) {
 
   JsonValue* fields = json_obj_get(obj, "fields");
   if (fields && fields->type != JSON_OBJECT) {
-    errf(p, "sircc: expected object for node.fields");
+    err_codef(p, "sircc.schema.node.fields.not_object", "sircc: expected object for node.fields");
     return false;
   }
 
   if (!ensure_node_slot(p, id)) return false;
   if (p->nodes[id]) {
-    errf(p, "sircc: duplicate node id %lld", (long long)id);
+    err_codef(p, "sircc.schema.duplicate_id", "sircc: duplicate node id %lld", (long long)id);
     return false;
   }
 
@@ -575,7 +578,7 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
   p->cur_line = 0;
   FILE* f = fopen(input_path, "rb");
   if (!f) {
-    errf(p, "sircc: failed to open: %s", strerror(errno));
+    err_codef(p, "sircc.io.open_failed", "sircc: failed to open: %s", strerror(errno));
     return false;
   }
 
@@ -601,7 +604,7 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
     JsonError jerr = {0};
     JsonValue* root = NULL;
     if (!json_parse(&p->arena, line, &root, &jerr)) {
-      errf(p, "sircc: JSON parse error at column %zu: %s", jerr.offset + 1, jerr.msg ? jerr.msg : "unknown");
+      err_codef(p, "sircc.json.parse_error", "sircc: JSON parse error at column %zu: %s", jerr.offset + 1, jerr.msg ? jerr.msg : "unknown");
       free(line);
       fclose(f);
       return false;
@@ -652,7 +655,7 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
     }
 
     if (strcmp(ir, "sir-v1.0") != 0) {
-      errf(p, "sircc: unsupported ir '%s' (expected sir-v1.0)", ir);
+      err_codef(p, "sircc.schema.ir.unsupported", "sircc: unsupported ir '%s' (expected sir-v1.0)", ir);
       free(line);
       fclose(f);
       return false;
@@ -748,7 +751,7 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
       continue;
     }
 
-    errf(p, "sircc: unknown record kind '%s'", k);
+    err_codef(p, "sircc.schema.record_kind.unknown", "sircc: unknown record kind '%s'", k);
     free(line);
     fclose(f);
     return false;

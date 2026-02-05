@@ -64,6 +64,8 @@ static void err_vimpl(SirProgram* p, const char* diag_code, const char* fmt, va_
   const SirccOptions* opt = p ? p->opt : NULL;
   bool as_json = opt && opt->diagnostics == SIRCC_DIAG_JSON;
   bool color = want_color(opt);
+  const char* json_code = diag_code;
+  if (as_json && (!json_code || !*json_code)) json_code = "sircc.error";
 
   va_list ap;
   va_copy(ap, ap0);
@@ -110,9 +112,9 @@ static void err_vimpl(SirProgram* p, const char* diag_code, const char* fmt, va_
   if (as_json) {
     fprintf(stderr, "{\"ir\":\"sir-v1.0\",\"k\":\"diag\",\"level\":\"error\",\"msg\":");
     json_write_escaped(stderr, msg ? msg : "(unknown)");
-    if (diag_code && *diag_code) {
+    if (json_code && *json_code) {
       fprintf(stderr, ",\"code\":");
-      json_write_escaped(stderr, diag_code);
+      json_write_escaped(stderr, json_code);
     }
     if (p && p->cur_kind) {
       fprintf(stderr, ",\"about\":{");
