@@ -89,7 +89,7 @@ Goal: make the LLVM backend + node frontend stable enough that an integrator can
   - [x] `sem.*`: validate branch operand shape (`{kind:"val"|"thunk", ...}`) and thunk arity (0-arg for `sem.if/and_sc/or_sc`, 0-arg or 1-arg for `sem.match_sum` cases)
     - [x] `sem.match_sum`: when thunk arity is 1, require param type matches payload type
 
-- [ ] **ADT layout + determinism hardening**
+- [x] **ADT layout + determinism hardening**
   - [x] Add explicit tests for padding/align edge cases (payload align > 4, mixed sizes)
   - [x] Add negative tests: out-of-range variant traps; `adt.get` wrong-variant trap; nullary get rejected
 
@@ -97,8 +97,10 @@ Goal: make the LLVM backend + node frontend stable enough that an integrator can
   - [ ] Replace remaining `errf(...)` in new packs with `err_codef(...)` (stable codes)
     - [x] `fun:v1` / `closure:v1` / `adt:v1` / `sem:v1`: all pack-specific errors use `err_codef(...)`
     - [x] `agg:v1`-style `const.*` nodes and `sym(kind=var|const)` globals use `err_codef(...)` for validation/lowering failures
+    - [x] CFG/effects lowering (`let`/`store.*`/`mem.*`/`eff.*`/`term.*`/CFG `fn`) uses `err_codef(...)` for stable diagnostic codes
   - [ ] Ensure every error produced during lowering includes record context (`k/id/tag`) when available
     - [x] Expression lowering always sets node context (push/pop in `lower_expr`)
+    - [x] CFG/effects lowering errors use node context (`SIRCC_ERR_NODE`) where possible
 
 - [ ] **Conformance suite expansion**
   - [x] Add a “pack corpus” under `dist/test/examples` covering fun/closure/adt/sem (positive)

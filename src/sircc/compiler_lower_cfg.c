@@ -12,23 +12,23 @@
 bool lower_stmt(FunctionCtx* f, int64_t node_id) {
   NodeRec* n = get_node(f->p, node_id);
   if (!n) {
-    errf(f->p, "sircc: unknown stmt node %lld", (long long)node_id);
+    err_codef(f->p, "sircc.stmt.unknown", "sircc: unknown stmt node %lld", (long long)node_id);
     return false;
   }
 
   if (strcmp(n->tag, "let") == 0) {
     if (!n->fields) {
-      errf(f->p, "sircc: let node %lld missing fields", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.let.missing_fields", "sircc: let node %lld missing fields", (long long)node_id);
       return false;
     }
     const char* name = json_get_string(json_obj_get(n->fields, "name"));
     if (!name) {
-      errf(f->p, "sircc: let node %lld missing fields.name", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.let.name.missing", "sircc: let node %lld missing fields.name", (long long)node_id);
       return false;
     }
     int64_t vid = 0;
     if (!parse_node_ref_id(f->p, json_obj_get(n->fields, "value"), &vid)) {
-      errf(f->p, "sircc: let node %lld missing fields.value ref", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.let.value.ref_bad", "sircc: let node %lld missing fields.value ref", (long long)node_id);
       return false;
     }
     LLVMValueRef v = lower_expr(f, vid);
@@ -40,19 +40,20 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
   if (strncmp(n->tag, "store.", 6) == 0) {
     const char* tname = n->tag + 6;
     if (!n->fields) {
-      errf(f->p, "sircc: %s node %lld missing fields", n->tag, (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.store.missing_fields", "sircc: %s node %lld missing fields", n->tag, (long long)node_id);
       return false;
     }
     int64_t aid = 0, vid = 0;
     if (!parse_node_ref_id(f->p, json_obj_get(n->fields, "addr"), &aid) || !parse_node_ref_id(f->p, json_obj_get(n->fields, "value"), &vid)) {
-      errf(f->p, "sircc: %s node %lld requires fields.addr and fields.value refs", n->tag, (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.store.addr_value.ref_bad", "sircc: %s node %lld requires fields.addr and fields.value refs", n->tag, (long long)node_id);
       return false;
     }
     NodeRec* vn = get_node(f->p, vid);
     if (vn && vn->type_ref) {
       TypeRec* vt = get_type(f->p, vn->type_ref);
       if (vt && (vt->kind == TYPE_FUN || vt->kind == TYPE_CLOSURE)) {
-        errf(f->p, "sircc: %s cannot store opaque %s values", n->tag, (vt->kind == TYPE_CLOSURE) ? "closure" : "fun");
+        LOWER_ERR_NODE(f, n, "sircc.store.opaque.disallowed", "sircc: %s cannot store opaque %s values", n->tag,
+                       (vt->kind == TYPE_CLOSURE) ? "closure" : "fun");
         return false;
       }
     }
@@ -66,7 +67,7 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
       el = lower_type_prim(f->ctx, tname);
     }
     if (!el) {
-      errf(f->p, "sircc: unsupported store type '%s'", tname);
+      LOWER_ERR_NODE(f, n, "sircc.store.type_unsupported", "sircc: unsupported store type '%s'", tname);
       return false;
     }
     if (LLVMGetTypeKind(el) == LLVMFloatTypeKind || LLVMGetTypeKind(el) == LLVMDoubleTypeKind) {
@@ -75,7 +76,7 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
     LLVMTypeRef want_ptr = LLVMPointerType(el, 0);
     LLVMTypeRef pty = LLVMTypeOf(pval);
     if (LLVMGetTypeKind(pty) != LLVMPointerTypeKind) {
-      errf(f->p, "sircc: %s requires pointer addr", n->tag);
+      LOWER_ERR_NODE(f, n, "sircc.store.addr.not_ptr", "sircc: %s requires pointer addr", n->tag);
       return false;
     }
     if (want_ptr != pty) {
@@ -86,17 +87,17 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
     if (alignv) {
       int64_t a = 0;
       if (!json_get_i64(alignv, &a)) {
-        errf(f->p, "sircc: %s node %lld align must be an integer", n->tag, (long long)node_id);
+        LOWER_ERR_NODE(f, n, "sircc.store.align.not_int", "sircc: %s node %lld align must be an integer", n->tag, (long long)node_id);
         return false;
       }
       if (a <= 0 || a > (int64_t)UINT_MAX) {
-        errf(f->p, "sircc: %s node %lld align must be > 0", n->tag, (long long)node_id);
+        LOWER_ERR_NODE(f, n, "sircc.store.align.range", "sircc: %s node %lld align must be > 0", n->tag, (long long)node_id);
         return false;
       }
       align = (unsigned)a;
     }
     if ((align & (align - 1u)) != 0u) {
-      errf(f->p, "sircc: %s node %lld align must be a power of two", n->tag, (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.store.align.not_pow2", "sircc: %s node %lld align must be a power of two", n->tag, (long long)node_id);
       return false;
     }
     if (!emit_trap_if_misaligned(f, pval, align)) return false;
@@ -109,18 +110,18 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
 
   if (strcmp(n->tag, "mem.copy") == 0) {
     if (!n->fields) {
-      errf(f->p, "sircc: mem.copy node %lld missing fields", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.mem.copy.missing_fields", "sircc: mem.copy node %lld missing fields", (long long)node_id);
       return false;
     }
     JsonValue* args = json_obj_get(n->fields, "args");
     if (!args || args->type != JSON_ARRAY || args->v.arr.len != 3) {
-      errf(f->p, "sircc: mem.copy node %lld requires args:[dst, src, len]", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.mem.copy.args.bad", "sircc: mem.copy node %lld requires args:[dst, src, len]", (long long)node_id);
       return false;
     }
     int64_t did = 0, sid = 0, lid = 0;
     if (!parse_node_ref_id(f->p, args->v.arr.items[0], &did) || !parse_node_ref_id(f->p, args->v.arr.items[1], &sid) ||
         !parse_node_ref_id(f->p, args->v.arr.items[2], &lid)) {
-      errf(f->p, "sircc: mem.copy node %lld args must be node refs", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.mem.copy.args.ref_bad", "sircc: mem.copy node %lld args must be node refs", (long long)node_id);
       return false;
     }
     LLVMValueRef dst = lower_expr(f, did);
@@ -146,11 +147,11 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
       if (adv) {
         int64_t a = 0;
         if (!json_get_i64(adv, &a)) {
-          errf(f->p, "sircc: mem.copy node %lld flags.alignDst must be an integer", (long long)node_id);
+          LOWER_ERR_NODE(f, n, "sircc.mem.copy.align_dst.not_int", "sircc: mem.copy node %lld flags.alignDst must be an integer", (long long)node_id);
           return false;
         }
         if (a <= 0 || a > (int64_t)UINT_MAX) {
-          errf(f->p, "sircc: mem.copy node %lld flags.alignDst must be > 0", (long long)node_id);
+          LOWER_ERR_NODE(f, n, "sircc.mem.copy.align_dst.range", "sircc: mem.copy node %lld flags.alignDst must be > 0", (long long)node_id);
           return false;
         }
         align_dst = (unsigned)a;
@@ -159,11 +160,11 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
       if (asv) {
         int64_t a = 0;
         if (!json_get_i64(asv, &a)) {
-          errf(f->p, "sircc: mem.copy node %lld flags.alignSrc must be an integer", (long long)node_id);
+          LOWER_ERR_NODE(f, n, "sircc.mem.copy.align_src.not_int", "sircc: mem.copy node %lld flags.alignSrc must be an integer", (long long)node_id);
           return false;
         }
         if (a <= 0 || a > (int64_t)UINT_MAX) {
-          errf(f->p, "sircc: mem.copy node %lld flags.alignSrc must be > 0", (long long)node_id);
+          LOWER_ERR_NODE(f, n, "sircc.mem.copy.align_src.range", "sircc: mem.copy node %lld flags.alignSrc must be > 0", (long long)node_id);
           return false;
         }
         align_src = (unsigned)a;
@@ -173,7 +174,7 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
         if (strcmp(ov, "allow") == 0) use_memmove = true;
         else if (strcmp(ov, "disallow") == 0) use_memmove = false;
         else {
-          errf(f->p, "sircc: mem.copy node %lld flags.overlap must be 'allow' or 'disallow'", (long long)node_id);
+          LOWER_ERR_NODE(f, n, "sircc.mem.copy.overlap.bad", "sircc: mem.copy node %lld flags.overlap must be 'allow' or 'disallow'", (long long)node_id);
           return false;
         }
       }
@@ -181,11 +182,11 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
 
     if (use_memmove) {
       if ((align_dst & (align_dst - 1u)) != 0u) {
-        errf(f->p, "sircc: mem.copy node %lld flags.alignDst must be a power of two", (long long)node_id);
+        LOWER_ERR_NODE(f, n, "sircc.mem.copy.align_dst.not_pow2", "sircc: mem.copy node %lld flags.alignDst must be a power of two", (long long)node_id);
         return false;
       }
       if ((align_src & (align_src - 1u)) != 0u) {
-        errf(f->p, "sircc: mem.copy node %lld flags.alignSrc must be a power of two", (long long)node_id);
+        LOWER_ERR_NODE(f, n, "sircc.mem.copy.align_src.not_pow2", "sircc: mem.copy node %lld flags.alignSrc must be a power of two", (long long)node_id);
         return false;
       }
       if (!emit_trap_if_misaligned(f, dst, align_dst)) return false;
@@ -194,11 +195,11 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
     } else {
       // Deterministic trap on overlapping ranges: overlap = len!=0 && (dst < src+len) && (src < dst+len).
       if ((align_dst & (align_dst - 1u)) != 0u) {
-        errf(f->p, "sircc: mem.copy node %lld flags.alignDst must be a power of two", (long long)node_id);
+        LOWER_ERR_NODE(f, n, "sircc.mem.copy.align_dst.not_pow2", "sircc: mem.copy node %lld flags.alignDst must be a power of two", (long long)node_id);
         return false;
       }
       if ((align_src & (align_src - 1u)) != 0u) {
-        errf(f->p, "sircc: mem.copy node %lld flags.alignSrc must be a power of two", (long long)node_id);
+        LOWER_ERR_NODE(f, n, "sircc.mem.copy.align_src.not_pow2", "sircc: mem.copy node %lld flags.alignSrc must be a power of two", (long long)node_id);
         return false;
       }
       if (!emit_trap_if_misaligned(f, dst, align_dst)) return false;
@@ -224,18 +225,18 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
 
   if (strcmp(n->tag, "mem.fill") == 0) {
     if (!n->fields) {
-      errf(f->p, "sircc: mem.fill node %lld missing fields", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.mem.fill.missing_fields", "sircc: mem.fill node %lld missing fields", (long long)node_id);
       return false;
     }
     JsonValue* args = json_obj_get(n->fields, "args");
     if (!args || args->type != JSON_ARRAY || args->v.arr.len != 3) {
-      errf(f->p, "sircc: mem.fill node %lld requires args:[dst, byte, len]", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.mem.fill.args.bad", "sircc: mem.fill node %lld requires args:[dst, byte, len]", (long long)node_id);
       return false;
     }
     int64_t did = 0, bid = 0, lid = 0;
     if (!parse_node_ref_id(f->p, args->v.arr.items[0], &did) || !parse_node_ref_id(f->p, args->v.arr.items[1], &bid) ||
         !parse_node_ref_id(f->p, args->v.arr.items[2], &lid)) {
-      errf(f->p, "sircc: mem.fill node %lld args must be node refs", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.mem.fill.args.ref_bad", "sircc: mem.fill node %lld args must be node refs", (long long)node_id);
       return false;
     }
     LLVMValueRef dst = lower_expr(f, did);
@@ -263,11 +264,11 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
       if (adv) {
         int64_t a = 0;
         if (!json_get_i64(adv, &a)) {
-          errf(f->p, "sircc: mem.fill node %lld flags.alignDst must be an integer", (long long)node_id);
+          LOWER_ERR_NODE(f, n, "sircc.mem.fill.align_dst.not_int", "sircc: mem.fill node %lld flags.alignDst must be an integer", (long long)node_id);
           return false;
         }
         if (a <= 0 || a > (int64_t)UINT_MAX) {
-          errf(f->p, "sircc: mem.fill node %lld flags.alignDst must be > 0", (long long)node_id);
+          LOWER_ERR_NODE(f, n, "sircc.mem.fill.align_dst.range", "sircc: mem.fill node %lld flags.alignDst must be > 0", (long long)node_id);
           return false;
         }
         align_dst = (unsigned)a;
@@ -275,7 +276,7 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
     }
 
     if ((align_dst & (align_dst - 1u)) != 0u) {
-      errf(f->p, "sircc: mem.fill node %lld flags.alignDst must be a power of two", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.mem.fill.align_dst.not_pow2", "sircc: mem.fill node %lld flags.alignDst must be a power of two", (long long)node_id);
       return false;
     }
     if (!emit_trap_if_misaligned(f, dst, align_dst)) return false;
@@ -285,7 +286,7 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
 
   if (strcmp(n->tag, "eff.fence") == 0) {
     if (!n->fields) {
-      errf(f->p, "sircc: eff.fence node %lld missing fields", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.eff.fence.missing_fields", "sircc: eff.fence node %lld missing fields", (long long)node_id);
       return false;
     }
     JsonValue* flags = json_obj_get(n->fields, "flags");
@@ -293,7 +294,7 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
     if (flags && flags->type == JSON_OBJECT) mode = json_get_string(json_obj_get(flags, "mode"));
     if (!mode) mode = json_get_string(json_obj_get(n->fields, "mode"));
     if (!mode) {
-      errf(f->p, "sircc: eff.fence node %lld missing flags.mode", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.eff.fence.mode.missing", "sircc: eff.fence node %lld missing flags.mode", (long long)node_id);
       return false;
     }
 
@@ -308,7 +309,7 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
     else if (strcmp(mode, "acqrel") == 0) ord = LLVMAtomicOrderingAcquireRelease;
     else if (strcmp(mode, "seqcst") == 0) ord = LLVMAtomicOrderingSequentiallyConsistent;
     else {
-      errf(f->p, "sircc: eff.fence node %lld invalid mode '%s'", (long long)node_id, mode);
+      LOWER_ERR_NODE(f, n, "sircc.eff.fence.mode.bad", "sircc: eff.fence node %lld invalid mode '%s'", (long long)node_id, mode);
       return false;
     }
 
@@ -320,7 +321,7 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
     JsonValue* v = n->fields ? json_obj_get(n->fields, "value") : NULL;
     int64_t vid = 0;
     if (!parse_node_ref_id(f->p, v, &vid)) {
-      errf(f->p, "sircc: return node %lld missing value ref", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.return.value.ref_bad", "sircc: return node %lld missing value ref", (long long)node_id);
       return false;
     }
     LLVMValueRef rv = lower_expr(f, vid);
@@ -337,7 +338,7 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
     }
     int64_t vid = 0;
     if (!parse_node_ref_id(f->p, v, &vid)) {
-      errf(f->p, "sircc: term.ret node %lld invalid value ref", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.term.ret.value.ref_bad", "sircc: term.ret node %lld invalid value ref", (long long)node_id);
       return false;
     }
     LLVMValueRef rv = lower_expr(f, vid);
@@ -367,13 +368,13 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
   if (strcmp(n->tag, "block") == 0) {
     JsonValue* stmts = n->fields ? json_obj_get(n->fields, "stmts") : NULL;
     if (!stmts || stmts->type != JSON_ARRAY) {
-      errf(f->p, "sircc: block node %lld missing stmts array", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.block.stmts.bad", "sircc: block node %lld missing stmts array", (long long)node_id);
       return false;
     }
     for (size_t i = 0; i < stmts->v.arr.len; i++) {
       int64_t sid = 0;
       if (!parse_node_ref_id(f->p, stmts->v.arr.items[i], &sid)) {
-        errf(f->p, "sircc: block node %lld has non-ref stmt", (long long)node_id);
+        LOWER_ERR_NODE(f, n, "sircc.block.stmt.ref_bad", "sircc: block node %lld has non-ref stmt", (long long)node_id);
         return false;
       }
       if (!lower_stmt(f, sid)) return false;
@@ -393,10 +394,10 @@ static LLVMBasicBlockRef bb_lookup(FunctionCtx* f, int64_t node_id) {
   return (i < f->p->nodes_cap) ? f->blocks_by_node[i] : NULL;
 }
 
-static bool add_block_args(FunctionCtx* f, LLVMBasicBlockRef from_bb, int64_t to_block_id, JsonValue* args) {
+static bool add_block_args(FunctionCtx* f, const NodeRec* origin, LLVMBasicBlockRef from_bb, int64_t to_block_id, JsonValue* args) {
   NodeRec* bn = get_node(f->p, to_block_id);
   if (!bn || strcmp(bn->tag, "block") != 0) {
-    errf(f->p, "sircc: branch targets non-block node %lld", (long long)to_block_id);
+    LOWER_ERR_NODE(f, origin, "sircc.branch.target.not_block", "sircc: branch targets non-block node %lld", (long long)to_block_id);
     return false;
   }
 
@@ -404,7 +405,7 @@ static bool add_block_args(FunctionCtx* f, LLVMBasicBlockRef from_bb, int64_t to
   size_t pcount = 0;
   if (params) {
     if (params->type != JSON_ARRAY) {
-      errf(f->p, "sircc: block %lld params must be an array", (long long)to_block_id);
+      LOWER_ERR_NODE(f, origin, "sircc.branch.params.not_array", "sircc: block %lld params must be an array", (long long)to_block_id);
       return false;
     }
     pcount = params->v.arr.len;
@@ -413,33 +414,34 @@ static bool add_block_args(FunctionCtx* f, LLVMBasicBlockRef from_bb, int64_t to
   size_t acount = 0;
   if (args) {
     if (args->type != JSON_ARRAY) {
-      errf(f->p, "sircc: branch args must be an array");
+      LOWER_ERR_NODE(f, origin, "sircc.branch.args.not_array", "sircc: branch args must be an array");
       return false;
     }
     acount = args->v.arr.len;
   }
 
   if (pcount != acount) {
-    errf(f->p, "sircc: block %lld param/arg count mismatch (params=%zu, args=%zu)", (long long)to_block_id, pcount,
-         acount);
+    LOWER_ERR_NODE(f, origin, "sircc.branch.param_arg.count_mismatch",
+                   "sircc: block %lld param/arg count mismatch (params=%zu, args=%zu)", (long long)to_block_id, pcount, acount);
     return false;
   }
 
   for (size_t i = 0; i < pcount; i++) {
     int64_t pid = 0;
     if (!parse_node_ref_id(f->p, params->v.arr.items[i], &pid)) {
-      errf(f->p, "sircc: block %lld params[%zu] must be node refs", (long long)to_block_id, i);
+      LOWER_ERR_NODE(f, origin, "sircc.branch.params.ref_bad", "sircc: block %lld params[%zu] must be node refs", (long long)to_block_id, i);
       return false;
     }
     NodeRec* pn = get_node(f->p, pid);
     if (!pn || strcmp(pn->tag, "bparam") != 0 || !pn->llvm_value) {
-      errf(f->p, "sircc: block %lld params[%zu] must reference a lowered bparam node", (long long)to_block_id, i);
+      LOWER_ERR_NODE(f, origin, "sircc.branch.params.not_lowered_bparam",
+                     "sircc: block %lld params[%zu] must reference a lowered bparam node", (long long)to_block_id, i);
       return false;
     }
 
     int64_t aid = 0;
     if (!parse_node_ref_id(f->p, args->v.arr.items[i], &aid)) {
-      errf(f->p, "sircc: block %lld args[%zu] must be node refs", (long long)to_block_id, i);
+      LOWER_ERR_NODE(f, origin, "sircc.branch.args.ref_bad", "sircc: block %lld args[%zu] must be node refs", (long long)to_block_id, i);
       return false;
     }
     LLVMValueRef av = lower_expr(f, aid);
@@ -454,73 +456,77 @@ static bool add_block_args(FunctionCtx* f, LLVMBasicBlockRef from_bb, int64_t to
 
 bool lower_term_cfg(FunctionCtx* f, int64_t node_id) {
   NodeRec* n = get_node(f->p, node_id);
-  if (!n) return false;
+  if (!n) {
+    err_codef(f->p, "sircc.term.unknown", "sircc: unknown term node %lld", (long long)node_id);
+    return false;
+  }
 
   if (strcmp(n->tag, "term.br") == 0) {
     if (!n->fields) {
-      errf(f->p, "sircc: term.br node %lld missing fields", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.term.br.missing_fields", "sircc: term.br node %lld missing fields", (long long)node_id);
       return false;
     }
     JsonValue* to = json_obj_get(n->fields, "to");
     int64_t bid = 0;
     if (!parse_node_ref_id(f->p, to, &bid)) {
-      errf(f->p, "sircc: term.br node %lld missing to ref", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.term.br.to.ref_bad", "sircc: term.br node %lld missing to ref", (long long)node_id);
       return false;
     }
     LLVMBasicBlockRef bb = bb_lookup(f, bid);
     if (!bb) {
-      errf(f->p, "sircc: term.br node %lld targets unknown block %lld", (long long)node_id, (long long)bid);
+      LOWER_ERR_NODE(f, n, "sircc.term.br.target.unknown", "sircc: term.br node %lld targets unknown block %lld", (long long)node_id,
+                     (long long)bid);
       return false;
     }
     JsonValue* args = json_obj_get(n->fields, "args");
-    if (!add_block_args(f, LLVMGetInsertBlock(f->builder), bid, args)) return false;
+    if (!add_block_args(f, n, LLVMGetInsertBlock(f->builder), bid, args)) return false;
     LLVMBuildBr(f->builder, bb);
     return true;
   }
 
   if (strcmp(n->tag, "term.cbr") == 0 || strcmp(n->tag, "term.condbr") == 0) {
     if (!n->fields) {
-      errf(f->p, "sircc: %s node %lld missing fields", n->tag, (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.term.condbr.missing_fields", "sircc: %s node %lld missing fields", n->tag, (long long)node_id);
       return false;
     }
 
     int64_t cond_id = 0;
     if (!parse_node_ref_id(f->p, json_obj_get(n->fields, "cond"), &cond_id)) {
-      errf(f->p, "sircc: %s node %lld missing cond ref", n->tag, (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.term.condbr.cond.ref_bad", "sircc: %s node %lld missing cond ref", n->tag, (long long)node_id);
       return false;
     }
     LLVMValueRef cond = lower_expr(f, cond_id);
     if (!cond) return false;
     if (LLVMGetTypeKind(LLVMTypeOf(cond)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(cond)) != 1) {
-      errf(f->p, "sircc: %s cond must be bool/i1", n->tag);
+      LOWER_ERR_NODE(f, n, "sircc.term.condbr.cond.type_bad", "sircc: %s cond must be bool/i1", n->tag);
       return false;
     }
 
     JsonValue* thenb = json_obj_get(n->fields, "then");
     JsonValue* elseb = json_obj_get(n->fields, "else");
     if (!thenb || thenb->type != JSON_OBJECT || !elseb || elseb->type != JSON_OBJECT) {
-      errf(f->p, "sircc: %s node %lld requires then/else objects", n->tag, (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.term.condbr.branches.bad", "sircc: %s node %lld requires then/else objects", n->tag, (long long)node_id);
       return false;
     }
 
     int64_t then_id = 0;
     int64_t else_id = 0;
     if (!parse_node_ref_id(f->p, json_obj_get(thenb, "to"), &then_id) || !parse_node_ref_id(f->p, json_obj_get(elseb, "to"), &else_id)) {
-      errf(f->p, "sircc: %s node %lld then/else missing to ref", n->tag, (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.term.condbr.to.ref_bad", "sircc: %s node %lld then/else missing to ref", n->tag, (long long)node_id);
       return false;
     }
     LLVMBasicBlockRef then_bb = bb_lookup(f, then_id);
     LLVMBasicBlockRef else_bb = bb_lookup(f, else_id);
     if (!then_bb || !else_bb) {
-      errf(f->p, "sircc: %s node %lld targets unknown blocks", n->tag, (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.term.condbr.target.unknown", "sircc: %s node %lld targets unknown blocks", n->tag, (long long)node_id);
       return false;
     }
 
     JsonValue* then_args = json_obj_get(thenb, "args");
     JsonValue* else_args = json_obj_get(elseb, "args");
     LLVMBasicBlockRef from_bb = LLVMGetInsertBlock(f->builder);
-    if (!add_block_args(f, from_bb, then_id, then_args)) return false;
-    if (!add_block_args(f, from_bb, else_id, else_args)) return false;
+    if (!add_block_args(f, n, from_bb, then_id, then_args)) return false;
+    if (!add_block_args(f, n, from_bb, else_id, else_args)) return false;
 
     LLVMBuildCondBr(f->builder, cond, then_bb, else_bb);
     return true;
@@ -528,12 +534,12 @@ bool lower_term_cfg(FunctionCtx* f, int64_t node_id) {
 
   if (strcmp(n->tag, "term.switch") == 0) {
     if (!n->fields) {
-      errf(f->p, "sircc: term.switch node %lld missing fields", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.term.switch.missing_fields", "sircc: term.switch node %lld missing fields", (long long)node_id);
       return false;
     }
     int64_t scrut_id = 0;
     if (!parse_node_ref_id(f->p, json_obj_get(n->fields, "scrut"), &scrut_id)) {
-      errf(f->p, "sircc: term.switch node %lld missing scrut ref", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.term.switch.scrut.ref_bad", "sircc: term.switch node %lld missing scrut ref", (long long)node_id);
       return false;
     }
     LLVMValueRef scrut = lower_expr(f, scrut_id);
@@ -547,67 +553,71 @@ bool lower_term_cfg(FunctionCtx* f, int64_t node_id) {
       sty = LLVMTypeOf(scrut);
     }
     if (LLVMGetTypeKind(sty) != LLVMIntegerTypeKind) {
-      errf(f->p, "sircc: term.switch scrut must be iN or ptr");
+      LOWER_ERR_NODE(f, n, "sircc.term.switch.scrut.type_bad", "sircc: term.switch scrut must be iN or ptr");
       return false;
     }
 
     JsonValue* def = json_obj_get(n->fields, "default");
     if (!def || def->type != JSON_OBJECT) {
-      errf(f->p, "sircc: term.switch node %lld missing default branch", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.term.switch.default.missing", "sircc: term.switch node %lld missing default branch", (long long)node_id);
       return false;
     }
     int64_t def_id = 0;
     if (!parse_node_ref_id(f->p, json_obj_get(def, "to"), &def_id)) {
-      errf(f->p, "sircc: term.switch default missing to ref");
+      LOWER_ERR_NODE(f, n, "sircc.term.switch.default.to.ref_bad", "sircc: term.switch default missing to ref");
       return false;
     }
     LLVMBasicBlockRef def_bb = bb_lookup(f, def_id);
     if (!def_bb) {
-      errf(f->p, "sircc: term.switch default targets unknown block %lld", (long long)def_id);
+      LOWER_ERR_NODE(f, n, "sircc.term.switch.default.target.unknown", "sircc: term.switch default targets unknown block %lld", (long long)def_id);
       return false;
     }
     JsonValue* def_args = json_obj_get(def, "args");
-    if (!add_block_args(f, LLVMGetInsertBlock(f->builder), def_id, def_args)) return false;
+    if (!add_block_args(f, n, LLVMGetInsertBlock(f->builder), def_id, def_args)) return false;
 
     JsonValue* cases = json_obj_get(n->fields, "cases");
     if (!cases || cases->type != JSON_ARRAY) {
-      errf(f->p, "sircc: term.switch node %lld missing cases array", (long long)node_id);
+      LOWER_ERR_NODE(f, n, "sircc.term.switch.cases.bad", "sircc: term.switch node %lld missing cases array", (long long)node_id);
       return false;
     }
     LLVMValueRef sw = LLVMBuildSwitch(f->builder, scrut, def_bb, (unsigned)cases->v.arr.len);
     for (size_t i = 0; i < cases->v.arr.len; i++) {
       JsonValue* c = cases->v.arr.items[i];
       if (!c || c->type != JSON_OBJECT) {
-        errf(f->p, "sircc: term.switch case[%zu] must be object", i);
+        LOWER_ERR_NODE(f, n, "sircc.term.switch.case.obj_bad", "sircc: term.switch case[%zu] must be object", i);
         return false;
       }
       int64_t lit_id = 0;
       if (!parse_node_ref_id(f->p, json_obj_get(c, "lit"), &lit_id)) {
-        errf(f->p, "sircc: term.switch case[%zu] missing lit ref", i);
+        LOWER_ERR_NODE(f, n, "sircc.term.switch.case.lit.ref_bad", "sircc: term.switch case[%zu] missing lit ref", i);
         return false;
       }
       NodeRec* litn = get_node(f->p, lit_id);
       if (!litn || strncmp(litn->tag, "const.", 6) != 0 || !litn->fields) {
-        errf(f->p, "sircc: term.switch case[%zu] lit must be const.* node", i);
+        LOWER_ERR_NODE(f, n, "sircc.term.switch.case.lit.type_bad", "sircc: term.switch case[%zu] lit must be const.* node", i);
         return false;
       }
       int64_t litv = 0;
-      if (!must_i64(f->p, json_obj_get(litn->fields, "value"), &litv, "case lit")) return false;
+      if (!json_get_i64(json_obj_get(litn->fields, "value"), &litv)) {
+        LOWER_ERR_NODE(f, n, "sircc.term.switch.case.lit.value.bad", "sircc: term.switch case[%zu] lit value must be integer", i);
+        return false;
+      }
       LLVMValueRef lit = LLVMConstInt(sty, (unsigned long long)litv, 1);
 
       int64_t to_id = 0;
       if (!parse_node_ref_id(f->p, json_obj_get(c, "to"), &to_id)) {
-        errf(f->p, "sircc: term.switch case[%zu] missing to ref", i);
+        LOWER_ERR_NODE(f, n, "sircc.term.switch.case.to.ref_bad", "sircc: term.switch case[%zu] missing to ref", i);
         return false;
       }
       LLVMBasicBlockRef to_bb = bb_lookup(f, to_id);
       if (!to_bb) {
-        errf(f->p, "sircc: term.switch case[%zu] targets unknown block %lld", i, (long long)to_id);
+        LOWER_ERR_NODE(f, n, "sircc.term.switch.case.target.unknown", "sircc: term.switch case[%zu] targets unknown block %lld", i,
+                       (long long)to_id);
         return false;
       }
 
       JsonValue* args = json_obj_get(c, "args");
-      if (!add_block_args(f, LLVMGetInsertBlock(f->builder), to_id, args)) return false;
+      if (!add_block_args(f, n, LLVMGetInsertBlock(f->builder), to_id, args)) return false;
 
       LLVMAddCase(sw, lit, to_bb);
     }
@@ -615,7 +625,7 @@ bool lower_term_cfg(FunctionCtx* f, int64_t node_id) {
   }
 
   // fallthrough to existing term.* handled by lower_stmt
-  errf(f->p, "sircc: unsupported terminator '%s' (node %lld)", n->tag, (long long)node_id);
+  LOWER_ERR_NODE(f, n, "sircc.term.unsupported", "sircc: unsupported terminator '%s' (node %lld)", n->tag, (long long)node_id);
   return false;
 }
 
@@ -629,16 +639,17 @@ bool lower_functions(SirProgram* p, LLVMContextRef ctx, LLVMModuleRef mod) {
 
     const char* name = n->fields ? json_get_string(json_obj_get(n->fields, "name")) : NULL;
     if (!name) {
-      errf(p, "sircc: fn node %lld missing fields.name", (long long)n->id);
+      SIRCC_ERR_NODE(p, n, "sircc.fn.name.missing", "sircc: fn node %lld missing fields.name", (long long)n->id);
       return false;
     }
     if (n->type_ref == 0) {
-      errf(p, "sircc: fn node %lld missing type_ref", (long long)n->id);
+      SIRCC_ERR_NODE(p, n, "sircc.fn.type_ref.missing", "sircc: fn node %lld missing type_ref", (long long)n->id);
       return false;
     }
     LLVMTypeRef fnty = lower_type(p, ctx, n->type_ref);
     if (!fnty || LLVMGetTypeKind(fnty) != LLVMFunctionTypeKind) {
-      errf(p, "sircc: fn node %lld has invalid function type_ref %lld", (long long)n->id, (long long)n->type_ref);
+      SIRCC_ERR_NODE(p, n, "sircc.fn.type_ref.bad", "sircc: fn node %lld has invalid function type_ref %lld", (long long)n->id,
+                     (long long)n->type_ref);
       return false;
     }
     LLVMValueRef fn = LLVMAddFunction(mod, name, fnty);
@@ -648,7 +659,8 @@ bool lower_functions(SirProgram* p, LLVMContextRef ctx, LLVMModuleRef mod) {
     } else if (linkage && strcmp(linkage, "public") == 0) {
       LLVMSetLinkage(fn, LLVMExternalLinkage);
     } else if (linkage && *linkage) {
-      errf(p, "sircc: fn node %lld has unsupported linkage '%s' (use 'local' or 'public')", (long long)n->id, linkage);
+      SIRCC_ERR_NODE(p, n, "sircc.fn.linkage.bad",
+                     "sircc: fn node %lld has unsupported linkage '%s' (use 'local' or 'public')", (long long)n->id, linkage);
       return false;
     }
     n->llvm_value = fn;
@@ -675,7 +687,7 @@ bool lower_functions(SirProgram* p, LLVMContextRef ctx, LLVMModuleRef mod) {
 
     JsonValue* paramsv = n->fields ? json_obj_get(n->fields, "params") : NULL;
     if (!paramsv || paramsv->type != JSON_ARRAY) {
-      errf(p, "sircc: fn node %lld missing params array", (long long)n->id);
+      SIRCC_ERR_NODE(p, n, "sircc.fn.params.missing", "sircc: fn node %lld missing params array", (long long)n->id);
       return false;
     }
 
@@ -683,28 +695,30 @@ bool lower_functions(SirProgram* p, LLVMContextRef ctx, LLVMModuleRef mod) {
 
     unsigned param_count = LLVMCountParams(fn);
     if (paramsv->v.arr.len != (size_t)param_count) {
-      errf(p, "sircc: fn node %lld param count mismatch: node has %zu, type has %u", (long long)n->id, paramsv->v.arr.len,
-           param_count);
+      SIRCC_ERR_NODE(p, n, "sircc.fn.params.count_mismatch",
+                     "sircc: fn node %lld param count mismatch: node has %zu, type has %u", (long long)n->id, paramsv->v.arr.len,
+                     param_count);
       free(f.binds);
       return false;
     }
 
 	    for (unsigned pi = 0; pi < param_count; pi++) {
-	      int64_t pid = 0;
-	      if (!parse_node_ref_id(p, paramsv->v.arr.items[pi], &pid)) {
-	        errf(p, "sircc: fn node %lld has non-ref param", (long long)n->id);
-	        free(f.binds);
-	        return false;
-	      }
+		      int64_t pid = 0;
+		      if (!parse_node_ref_id(p, paramsv->v.arr.items[pi], &pid)) {
+		        SIRCC_ERR_NODE(p, n, "sircc.fn.param.ref_bad", "sircc: fn node %lld has non-ref param", (long long)n->id);
+		        free(f.binds);
+		        return false;
+		      }
       NodeRec* pn = get_node(p, pid);
       if (!pn || strcmp(pn->tag, "param") != 0) {
-        errf(p, "sircc: fn node %lld param ref %lld is not a param node", (long long)n->id, (long long)pid);
+        SIRCC_ERR_NODE(p, n, "sircc.fn.param.not_param", "sircc: fn node %lld param ref %lld is not a param node", (long long)n->id,
+                       (long long)pid);
         free(f.binds);
         return false;
       }
       const char* pname = pn->fields ? json_get_string(json_obj_get(pn->fields, "name")) : NULL;
       if (!pname) {
-        errf(p, "sircc: param node %lld missing fields.name", (long long)pid);
+        SIRCC_ERR_NODE(p, pn, "sircc.param.name.missing", "sircc: param node %lld missing fields.name", (long long)pid);
         free(f.binds);
         return false;
       }
@@ -712,7 +726,7 @@ bool lower_functions(SirProgram* p, LLVMContextRef ctx, LLVMModuleRef mod) {
       LLVMSetValueName2(pv, pname, strlen(pname));
       pn->llvm_value = pv;
       if (!bind_add(&f, pname, pv)) {
-        errf(p, "sircc: duplicate binding for '%s' in fn %lld", pname, (long long)n->id);
+        SIRCC_ERR_NODE(p, n, "sircc.fn.bind.duplicate", "sircc: duplicate binding for '%s' in fn %lld", pname, (long long)n->id);
         free(f.binds);
         return false;
       }
@@ -723,11 +737,11 @@ bool lower_functions(SirProgram* p, LLVMContextRef ctx, LLVMModuleRef mod) {
     if (blocks_v && blocks_v->type == JSON_ARRAY && entry_v) {
 	      // CFG form: explicit list of basic blocks + entry.
 	      int64_t entry_id = 0;
-	      if (!parse_node_ref_id(p, entry_v, &entry_id)) {
-	        errf(p, "sircc: fn node %lld entry must be a block ref", (long long)n->id);
-	        free(f.binds);
-	        return false;
-	      }
+		      if (!parse_node_ref_id(p, entry_v, &entry_id)) {
+		        SIRCC_ERR_NODE(p, n, "sircc.fn.entry.ref_bad", "sircc: fn node %lld entry must be a block ref", (long long)n->id);
+		        free(f.binds);
+		        return false;
+		      }
 
       f.blocks_by_node = (LLVMBasicBlockRef*)calloc(p->nodes_cap, sizeof(LLVMBasicBlockRef));
       if (!f.blocks_by_node) {
@@ -735,21 +749,22 @@ bool lower_functions(SirProgram* p, LLVMContextRef ctx, LLVMModuleRef mod) {
         return false;
       }
 
-	      for (size_t bi = 0; bi < blocks_v->v.arr.len; bi++) {
-	        int64_t bid = 0;
-	        if (!parse_node_ref_id(p, blocks_v->v.arr.items[bi], &bid)) {
-	          errf(p, "sircc: fn node %lld blocks[%zu] must be block refs", (long long)n->id, bi);
+		      for (size_t bi = 0; bi < blocks_v->v.arr.len; bi++) {
+		        int64_t bid = 0;
+		        if (!parse_node_ref_id(p, blocks_v->v.arr.items[bi], &bid)) {
+		          SIRCC_ERR_NODE(p, n, "sircc.fn.blocks.ref_bad", "sircc: fn node %lld blocks[%zu] must be block refs", (long long)n->id, bi);
+		          free(f.blocks_by_node);
+		          free(f.binds);
+		          return false;
+		        }
+	        NodeRec* bn = get_node(p, bid);
+	        if (!bn || strcmp(bn->tag, "block") != 0) {
+	          SIRCC_ERR_NODE(p, n, "sircc.fn.blocks.not_block",
+	                         "sircc: fn node %lld blocks[%zu] does not reference a block node", (long long)n->id, bi);
 	          free(f.blocks_by_node);
 	          free(f.binds);
 	          return false;
 	        }
-        NodeRec* bn = get_node(p, bid);
-        if (!bn || strcmp(bn->tag, "block") != 0) {
-          errf(p, "sircc: fn node %lld blocks[%zu] does not reference a block node", (long long)n->id, bi);
-          free(f.blocks_by_node);
-          free(f.binds);
-          return false;
-        }
         if (bid < 0 || (size_t)bid >= p->nodes_cap) continue;
         if (!f.blocks_by_node[bid]) {
           char namebuf[32];
@@ -760,7 +775,8 @@ bool lower_functions(SirProgram* p, LLVMContextRef ctx, LLVMModuleRef mod) {
 
       // Ensure entry exists.
       if (entry_id < 0 || (size_t)entry_id >= p->nodes_cap || !f.blocks_by_node[entry_id]) {
-        errf(p, "sircc: fn node %lld entry block %lld not in blocks list", (long long)n->id, (long long)entry_id);
+        SIRCC_ERR_NODE(p, n, "sircc.fn.entry.not_in_blocks",
+                       "sircc: fn node %lld entry block %lld not in blocks list", (long long)n->id, (long long)entry_id);
         free(f.blocks_by_node);
         free(f.binds);
         return false;
@@ -776,52 +792,53 @@ bool lower_functions(SirProgram* p, LLVMContextRef ctx, LLVMModuleRef mod) {
 	        if (!bn || !bb || !bn->fields) continue;
 
         JsonValue* params = json_obj_get(bn->fields, "params");
-        if (!params) continue;
-        if (params->type != JSON_ARRAY) {
-          errf(p, "sircc: block %lld params must be an array", (long long)bid);
-          free(f.blocks_by_node);
-          free(f.binds);
-          return false;
-        }
+	        if (!params) continue;
+	        if (params->type != JSON_ARRAY) {
+	          SIRCC_ERR_NODE(p, bn, "sircc.block.params.not_array", "sircc: block %lld params must be an array", (long long)bid);
+	          free(f.blocks_by_node);
+	          free(f.binds);
+	          return false;
+	        }
 
         LLVMBuilderRef b = LLVMCreateBuilderInContext(ctx);
         LLVMValueRef first = LLVMGetFirstInstruction(bb);
         if (first) LLVMPositionBuilderBefore(b, first);
         else LLVMPositionBuilderAtEnd(b, bb);
 
-	        for (size_t pi = 0; pi < params->v.arr.len; pi++) {
-	          int64_t pid = 0;
-	          if (!parse_node_ref_id(p, params->v.arr.items[pi], &pid)) {
-	            errf(p, "sircc: block %lld params[%zu] must be node refs", (long long)bid, pi);
+		        for (size_t pi = 0; pi < params->v.arr.len; pi++) {
+		          int64_t pid = 0;
+		          if (!parse_node_ref_id(p, params->v.arr.items[pi], &pid)) {
+		            SIRCC_ERR_NODE(p, bn, "sircc.block.params.ref_bad", "sircc: block %lld params[%zu] must be node refs", (long long)bid, pi);
+		            LLVMDisposeBuilder(b);
+		            free(f.blocks_by_node);
+		            free(f.binds);
+		            return false;
+		          }
+	          NodeRec* pn = get_node(p, pid);
+	          if (!pn || strcmp(pn->tag, "bparam") != 0) {
+	            SIRCC_ERR_NODE(p, bn, "sircc.block.params.not_bparam",
+	                           "sircc: block %lld params[%zu] must reference bparam nodes", (long long)bid, pi);
 	            LLVMDisposeBuilder(b);
 	            free(f.blocks_by_node);
 	            free(f.binds);
 	            return false;
 	          }
-          NodeRec* pn = get_node(p, pid);
-          if (!pn || strcmp(pn->tag, "bparam") != 0) {
-            errf(p, "sircc: block %lld params[%zu] must reference bparam nodes", (long long)bid, pi);
-            LLVMDisposeBuilder(b);
-            free(f.blocks_by_node);
-            free(f.binds);
-            return false;
-          }
-          if (!pn->llvm_value) {
-            if (pn->type_ref == 0) {
-              errf(p, "sircc: bparam node %lld missing type_ref", (long long)pid);
-              LLVMDisposeBuilder(b);
-              free(f.blocks_by_node);
-              free(f.binds);
-              return false;
-            }
-            LLVMTypeRef pty = lower_type(p, ctx, pn->type_ref);
-            if (!pty) {
-              errf(p, "sircc: bparam node %lld has invalid type_ref", (long long)pid);
-              LLVMDisposeBuilder(b);
-              free(f.blocks_by_node);
-              free(f.binds);
-              return false;
-            }
+	          if (!pn->llvm_value) {
+	            if (pn->type_ref == 0) {
+	              SIRCC_ERR_NODE(p, pn, "sircc.bparam.type_ref.missing", "sircc: bparam node %lld missing type_ref", (long long)pid);
+	              LLVMDisposeBuilder(b);
+	              free(f.blocks_by_node);
+	              free(f.binds);
+	              return false;
+	            }
+	            LLVMTypeRef pty = lower_type(p, ctx, pn->type_ref);
+	            if (!pty) {
+	              SIRCC_ERR_NODE(p, pn, "sircc.bparam.type_ref.bad", "sircc: bparam node %lld has invalid type_ref", (long long)pid);
+	              LLVMDisposeBuilder(b);
+	              free(f.blocks_by_node);
+	              free(f.binds);
+	              return false;
+	            }
             pn->llvm_value = LLVMBuildPhi(b, pty, "bparam");
           }
         }
@@ -845,69 +862,71 @@ bool lower_functions(SirProgram* p, LLVMContextRef ctx, LLVMModuleRef mod) {
 
         // Block params: lowered as PHIs (to be populated by predecessors via branch args).
         JsonValue* params = bn->fields ? json_obj_get(bn->fields, "params") : NULL;
-        if (params) {
-          if (params->type != JSON_ARRAY) {
-            errf(p, "sircc: block %lld params must be an array", (long long)bid);
-            LLVMDisposeBuilder(builder);
-            free(f.blocks_by_node);
-            free(f.binds);
-            return false;
-          }
-          for (size_t pi = 0; pi < params->v.arr.len; pi++) {
-            int64_t pid = 0;
-            if (!parse_node_ref_id(p, params->v.arr.items[pi], &pid)) {
-              errf(p, "sircc: block %lld params[%zu] must be node refs", (long long)bid, pi);
-              LLVMDisposeBuilder(builder);
-              free(f.blocks_by_node);
-              free(f.binds);
-              return false;
-            }
-            NodeRec* pn = get_node(p, pid);
-            if (!pn || strcmp(pn->tag, "bparam") != 0) {
-              errf(p, "sircc: block %lld params[%zu] must reference bparam nodes", (long long)bid, pi);
-              LLVMDisposeBuilder(builder);
-              free(f.blocks_by_node);
-              free(f.binds);
-              return false;
-            }
-            if (!pn->llvm_value) {
-              errf(p, "sircc: bparam node %lld missing lowered phi", (long long)pid);
-              LLVMDisposeBuilder(builder);
-              free(f.blocks_by_node);
-              free(f.binds);
-              return false;
-            }
+	        if (params) {
+	          if (params->type != JSON_ARRAY) {
+	            SIRCC_ERR_NODE(p, bn, "sircc.block.params.not_array", "sircc: block %lld params must be an array", (long long)bid);
+	            LLVMDisposeBuilder(builder);
+	            free(f.blocks_by_node);
+	            free(f.binds);
+	            return false;
+	          }
+	          for (size_t pi = 0; pi < params->v.arr.len; pi++) {
+	            int64_t pid = 0;
+	            if (!parse_node_ref_id(p, params->v.arr.items[pi], &pid)) {
+	              SIRCC_ERR_NODE(p, bn, "sircc.block.params.ref_bad", "sircc: block %lld params[%zu] must be node refs", (long long)bid, pi);
+	              LLVMDisposeBuilder(builder);
+	              free(f.blocks_by_node);
+	              free(f.binds);
+	              return false;
+	            }
+	            NodeRec* pn = get_node(p, pid);
+	            if (!pn || strcmp(pn->tag, "bparam") != 0) {
+	              SIRCC_ERR_NODE(p, bn, "sircc.block.params.not_bparam",
+	                             "sircc: block %lld params[%zu] must reference bparam nodes", (long long)bid, pi);
+	              LLVMDisposeBuilder(builder);
+	              free(f.blocks_by_node);
+	              free(f.binds);
+	              return false;
+	            }
+	            if (!pn->llvm_value) {
+	              SIRCC_ERR_NODE(p, pn, "sircc.bparam.phi.missing", "sircc: bparam node %lld missing lowered phi", (long long)pid);
+	              LLVMDisposeBuilder(builder);
+	              free(f.blocks_by_node);
+	              free(f.binds);
+	              return false;
+	            }
             const char* bname = pn->fields ? json_get_string(json_obj_get(pn->fields, "name")) : NULL;
             if (bname) {
-              LLVMSetValueName2(pn->llvm_value, bname, strlen(bname));
-              if (!bind_add(&f, bname, pn->llvm_value)) {
-                errf(p, "sircc: failed to bind block param '%s' in fn %lld", bname, (long long)n->id);
-                LLVMDisposeBuilder(builder);
-                free(f.blocks_by_node);
-                free(f.binds);
-                return false;
-              }
+	              LLVMSetValueName2(pn->llvm_value, bname, strlen(bname));
+	              if (!bind_add(&f, bname, pn->llvm_value)) {
+	                SIRCC_ERR_NODE(p, n, "sircc.fn.block_param.bind.failed", "sircc: failed to bind block param '%s' in fn %lld", bname,
+	                               (long long)n->id);
+	                LLVMDisposeBuilder(builder);
+	                free(f.blocks_by_node);
+	                free(f.binds);
+	                return false;
+	              }
             }
           }
         }
 
-        JsonValue* stmts = bn->fields ? json_obj_get(bn->fields, "stmts") : NULL;
-        if (!stmts || stmts->type != JSON_ARRAY) {
-          errf(p, "sircc: block node %lld missing stmts array", (long long)bid);
-          LLVMDisposeBuilder(builder);
-          free(f.blocks_by_node);
-          free(f.binds);
-          return false;
-        }
+	        JsonValue* stmts = bn->fields ? json_obj_get(bn->fields, "stmts") : NULL;
+	        if (!stmts || stmts->type != JSON_ARRAY) {
+	          SIRCC_ERR_NODE(p, bn, "sircc.block.stmts.bad", "sircc: block node %lld missing stmts array", (long long)bid);
+	          LLVMDisposeBuilder(builder);
+	          free(f.blocks_by_node);
+	          free(f.binds);
+	          return false;
+	        }
         for (size_t si = 0; si < stmts->v.arr.len; si++) {
           int64_t sid = 0;
-          if (!parse_node_ref_id(p, stmts->v.arr.items[si], &sid)) {
-            errf(p, "sircc: block node %lld has non-ref stmt", (long long)bid);
-            LLVMDisposeBuilder(builder);
-            free(f.blocks_by_node);
-            free(f.binds);
-            return false;
-          }
+	          if (!parse_node_ref_id(p, stmts->v.arr.items[si], &sid)) {
+	            SIRCC_ERR_NODE(p, bn, "sircc.block.stmt.ref_bad", "sircc: block node %lld has non-ref stmt", (long long)bid);
+	            LLVMDisposeBuilder(builder);
+	            free(f.blocks_by_node);
+	            free(f.binds);
+	            return false;
+	          }
           if (!lower_stmt(&f, sid)) {
             LLVMDisposeBuilder(builder);
             free(f.blocks_by_node);
@@ -917,14 +936,14 @@ bool lower_functions(SirProgram* p, LLVMContextRef ctx, LLVMModuleRef mod) {
           if (LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(builder))) break;
         }
 
-        if (!LLVMGetBasicBlockTerminator(bb)) {
-          errf(p, "sircc: block %lld missing terminator", (long long)bid);
-          LLVMDisposeBuilder(builder);
-          bind_restore(&f, mark);
-          free(f.blocks_by_node);
-          free(f.binds);
-          return false;
-        }
+	        if (!LLVMGetBasicBlockTerminator(bb)) {
+	          SIRCC_ERR_NODE(p, bn, "sircc.block.term.missing", "sircc: block %lld missing terminator", (long long)bid);
+	          LLVMDisposeBuilder(builder);
+	          bind_restore(&f, mark);
+	          free(f.blocks_by_node);
+	          free(f.binds);
+	          return false;
+	        }
 
         LLVMDisposeBuilder(builder);
         bind_restore(&f, mark);
@@ -950,7 +969,7 @@ bool lower_functions(SirProgram* p, LLVMContextRef ctx, LLVMModuleRef mod) {
     JsonValue* bodyv = n->fields ? json_obj_get(n->fields, "body") : NULL;
     int64_t body_id = 0;
     if (!parse_node_ref_id(p, bodyv, &body_id)) {
-      errf(p, "sircc: fn node %lld missing body ref", (long long)n->id);
+      SIRCC_ERR_NODE(p, n, "sircc.fn.body.ref_bad", "sircc: fn node %lld missing body ref", (long long)n->id);
       free(f.binds);
       return false;
     }
@@ -974,7 +993,8 @@ bool lower_functions(SirProgram* p, LLVMContextRef ctx, LLVMModuleRef mod) {
       } else if (LLVMGetTypeKind(rty) == LLVMIntegerTypeKind) {
         LLVMBuildRet(builder, LLVMConstInt(rty, 0, 0));
       } else {
-        errf(p, "sircc: fn %lld has implicit fallthrough with unsupported return type", (long long)n->id);
+        SIRCC_ERR_NODE(p, n, "sircc.fn.fallthrough.ret_unsupported",
+                       "sircc: fn %lld has implicit fallthrough with unsupported return type", (long long)n->id);
         LLVMDisposeBuilder(builder);
         free(f.binds);
         return false;
