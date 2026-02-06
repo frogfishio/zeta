@@ -16,6 +16,54 @@ static bool is_prim_named(SirProgram* p, int64_t type_id, const char* prim) {
   return t && t->kind == TYPE_PRIM && t->prim && strcmp(t->prim, prim) == 0;
 }
 
+static const char* ptr_sym_name_from_node(SirProgram* p, NodeRec* n) {
+  if (!p || !n) return NULL;
+  if (!n->fields || n->fields->type != JSON_OBJECT) return NULL;
+  const char* name = json_get_string(json_obj_get(n->fields, "name"));
+  if (name) return name;
+  JsonValue* args = json_obj_get(n->fields, "args");
+  if (!args || args->type != JSON_ARRAY || args->v.arr.len != 1) return NULL;
+  int64_t aid = 0;
+  if (!parse_node_ref_id(p, args->v.arr.items[0], &aid)) return NULL;
+  NodeRec* an = get_node(p, aid);
+  if (!an || !an->fields || strcmp(an->tag, "name") != 0) return NULL;
+  return json_get_string(json_obj_get(an->fields, "name"));
+}
+
+static bool validate_ptr_sym_node(SirProgram* p, NodeRec* n) {
+  if (!p || !n) return false;
+  if (strcmp(n->tag, "ptr.sym") != 0) return true;
+
+  SirDiagSaved saved = sir_diag_push_node(p, n);
+  const char* name = ptr_sym_name_from_node(p, n);
+  if (!name || !*name) {
+    err_codef(p, "sircc.ptr.sym.name.missing", "sircc: ptr.sym node %lld requires fields.name or args:[name]", (long long)n->id);
+    goto bad;
+  }
+
+  // Rule: ptr.sym must name a symbol declared in-module so the compiler can typecheck/codegen deterministically.
+  // Allowed:
+  // - fn node name (definition)
+  // - decl.fn node name (extern/prototype)
+  // - sym(kind=var|const) for globals/data
+  if (find_fn_node_by_name(p, name) || find_decl_fn_node_by_name(p, name)) goto ok;
+  SymRec* s = find_sym_by_name(p, name);
+  if (s && s->kind && (strcmp(s->kind, "var") == 0 || strcmp(s->kind, "const") == 0)) goto ok;
+
+  err_codef(p, "sircc.ptr.sym.unknown",
+            "sircc: ptr.sym references unknown function or global '%s' (to call an external C function, emit decl.fn with the signature; "
+            "ptr.sym requires an in-module declaration)",
+            name);
+  goto bad;
+
+bad:
+  sir_diag_pop(p, saved);
+  return false;
+ok:
+  sir_diag_pop(p, saved);
+  return true;
+}
+
 static bool is_ptr_type_id(SirProgram* p, int64_t type_id) {
   if (!p || type_id == 0) return false;
   TypeRec* t = get_type(p, type_id);
@@ -1314,6 +1362,13 @@ bool validate_program(SirProgram* p) {
       if (!n) continue;
       if (!validate_simd_node(p, n)) return false;
     }
+  }
+
+  // Base semantic checks.
+  for (size_t i = 0; i < p->nodes_cap; i++) {
+    NodeRec* n = p->nodes[i];
+    if (!n) continue;
+    if (!validate_ptr_sym_node(p, n)) return false;
   }
 
   // fun/closure/adt/sem semantic checks (close the "verify-only vs lowering" delta).

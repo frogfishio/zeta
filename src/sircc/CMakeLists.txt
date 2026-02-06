@@ -273,6 +273,24 @@ add_test(
 )
 
 add_test(
+  NAME sircc_diag_bad_ptr_sym_undefined_extern_fn
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    "-DARGS=--diagnostics;json;--verify-only;${CMAKE_CURRENT_LIST_DIR}/examples/bad_ptr_sym_undefined_extern_fn.sir.jsonl"
+    "-DEXPECT=\\\"code\\\":\\\"sircc.ptr.sym.unknown\\\""
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
+)
+
+add_test(
+  NAME sircc_diag_bad_ptr_sym_undefined_extern_fn_mentions_decl_fn
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    "-DARGS=--diagnostics;json;--verify-only;${CMAKE_CURRENT_LIST_DIR}/examples/bad_ptr_sym_undefined_extern_fn.sir.jsonl"
+    "-DEXPECT=decl.fn"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
+)
+
+add_test(
   NAME sircc_diag_bad_ptr_add_fun
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>

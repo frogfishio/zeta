@@ -74,6 +74,7 @@ add_custom_target(dist_sircc
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/bad_unknown_field.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/bad_unknown_field.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/bad_instr_operand.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/bad_instr_operand.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/bad_feature_gate_atomic.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/bad_feature_gate_atomic.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/bad_ptr_sym_undefined_extern_fn.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/bad_ptr_sym_undefined_extern_fn.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/cfg_bad_early_term.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/cfg_bad_early_term.sir.jsonl
 )
 

@@ -51,6 +51,8 @@ All keys live under the `k:"meta"` record’s `ext` object.
 
 Pattern: `decl.fn` + `call.indirect`.
 
+Do **not** call extern symbols via `ptr.sym` unless they are declared in-module: `sircc` treats `ptr.sym` as “address of a known symbol” and rejects unknown names during `--verify-only`.
+
 ```json
 {"ir":"sir-v1.0","k":"type","id":"t_i8","kind":"prim","prim":"i8"}
 {"ir":"sir-v1.0","k":"type","id":"t_pchar","kind":"ptr","of":"t_i8"}

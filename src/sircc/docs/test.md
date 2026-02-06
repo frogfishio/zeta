@@ -45,6 +45,7 @@ Negative fixtures (verify-only; expected to fail with stable diagnostic codes in
 - `bad_unknown_field.sir.jsonl` → `sircc.schema.unknown_field`
 - `bad_instr_operand.sir.jsonl` → `sircc.schema.value.num.bad`
 - `bad_feature_gate_atomic.sir.jsonl` → `sircc.feature.gate`
+- `bad_ptr_sym_undefined_extern_fn.sir.jsonl` → `sircc.ptr.sym.unknown` (use `decl.fn` for extern calls)
 - `cfg_bad_early_term.sir.jsonl` → `sircc.cfg.block.term.not_last`
 
 ## Mnemonic coverage (dev)

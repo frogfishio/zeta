@@ -229,7 +229,10 @@ bool lower_expr_part_b(FunctionCtx* f, int64_t node_id, NodeRec* n, LLVMValueRef
       if (!g) {
         SymRec* s = find_sym_by_name(f->p, name);
         if (!s || !s->kind || (strcmp(s->kind, "var") != 0 && strcmp(s->kind, "const") != 0)) {
-          err_codef(f->p, "sircc.ptr.sym.unknown", "sircc: ptr.sym references unknown function or global '%s'", name);
+          err_codef(f->p, "sircc.ptr.sym.unknown",
+                    "sircc: ptr.sym references unknown function or global '%s' (to call an external C function, emit decl.fn with the signature; "
+                    "ptr.sym requires an in-module declaration)",
+                    name);
           goto done;
         }
         if (s->type_ref == 0) {
