@@ -17,6 +17,7 @@ endif()
 set(SIR_VERSION "${SIR_VERSION}" CACHE STRING "Project version (from ./VERSION)")
 
 add_subdirectory(src/sircc)
+add_subdirectory(src/sem)
 
 option(SIR_ENABLE_SIRC "Build the experimental .sir text parser (flex/bison)" OFF)
 if(SIR_ENABLE_SIRC)
@@ -44,7 +45,7 @@ endif()
 set(SIR_DIST_BIN_OS ${SIR_DIST_BIN}/${SIR_DIST_OS})
 
 add_custom_target(dist_sircc
-  DEPENDS sircc
+  DEPENDS sircc sem
   COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_BIN_OS}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_DOC}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_TEST_EXAMPLES}
@@ -52,6 +53,7 @@ add_custom_target(dist_sircc
 
   # binaries
   COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:sircc> ${SIR_DIST_BIN_OS}/sircc
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:sem> ${SIR_DIST_BIN_OS}/sem
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/VERSION ${SIR_DIST_ROOT}/VERSION
 
   # docs
