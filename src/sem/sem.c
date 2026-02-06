@@ -16,6 +16,8 @@ typedef struct dyn_cap {
   char* kind;
   char* name;
   uint32_t flags;
+  uint8_t* meta;
+  uint32_t meta_len;
 } dyn_cap_t;
 
 static void sem_print_help(FILE* out) {
@@ -135,6 +137,7 @@ static void sem_free_caps(dyn_cap_t* caps, uint32_t n) {
   for (uint32_t i = 0; i < n; i++) {
     free(caps[i].kind);
     free(caps[i].name);
+    free(caps[i].meta);
   }
 }
 
@@ -170,11 +173,26 @@ static bool sem_parse_caps_list_payload(const uint8_t* payload, uint32_t payload
     const uint32_t flags = zcl1_read_u32le(payload + off);
     off += 4;
 
+    if (off + 4 > payload_len) return false;
+    const uint32_t meta_len = zcl1_read_u32le(payload + off);
+    off += 4;
+    if (off + meta_len > payload_len) return false;
+    const uint8_t* meta = payload + off;
+    off += meta_len;
+
     if (json) {
       if (i) printf(",");
-      printf("{\"kind\":\"%.*s\",\"name\":\"%.*s\",\"flags\":%u}", (int)kind_len, kind, (int)name_len, name, flags);
+      printf("{\"kind\":\"%.*s\",\"name\":\"%.*s\",\"flags\":%u", (int)kind_len, kind, (int)name_len, name, flags);
+      if (meta_len) {
+        printf(",\"meta_len\":%u", meta_len);
+      }
+      printf("}");
     } else {
       printf("  - %.*s:%.*s flags=0x%08x\n", (int)kind_len, kind, (int)name_len, name, flags);
+      if (meta_len) {
+        printf("    meta_len=%u\n", meta_len);
+        (void)meta;
+      }
     }
   }
 
@@ -349,6 +367,8 @@ int main(int argc, char** argv) {
     caps[i].kind = dyn_caps[i].kind;
     caps[i].name = dyn_caps[i].name;
     caps[i].flags = dyn_caps[i].flags;
+    caps[i].meta = dyn_caps[i].meta;
+    caps[i].meta_len = dyn_caps[i].meta_len;
   }
 
   sem_host_t host;
@@ -358,4 +378,3 @@ int main(int argc, char** argv) {
   sem_free_caps(dyn_caps, dyn_n);
   return rc;
 }
-

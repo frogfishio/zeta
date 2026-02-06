@@ -28,6 +28,8 @@ typedef struct sem_cap {
   const char* kind;  // UTF-8, no NUL on wire
   const char* name;  // UTF-8, no NUL on wire
   uint32_t flags;    // SEM_ZI_CAP_*
+  const uint8_t* meta;
+  uint32_t meta_len;
 } sem_cap_t;
 
 typedef struct sem_host_cfg {
