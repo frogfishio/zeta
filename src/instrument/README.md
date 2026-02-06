@@ -1,6 +1,15 @@
-# INSTRUMENT - Emulator toolchain for SIR
+# INSTRUMENT — SIR instrumentation toolchain (analysis + transforms)
 
-similar to SEM, but designed for debug, isturmantation, all sorts of magic. See this (zem) example for scope where appropirate:
+`instrument` is to `sem` what “advanced tooling mode” is to an emulator: it runs SIR via `sircore`, but focuses on **debug, instrumentation, profiling, fuzzing, and IR rewriting**.
+
+This folder’s scope is intentionally ambitious; use `zem` as the reference UX for what a “serious emulator toolchain” can do.
+
+Important boundary:
+
+- `sircore` is the deterministic engine and event source (library).
+- `instrument` is a consumer/producer of those events and provides higher-level tools.
+
+Host calls are still only performed via the pure message ABI (`zi_ctl`); `instrument` may wrap/record/replay/perturb those host responses.
 
 
 zem --help
@@ -148,4 +157,48 @@ Tools:
 ---
 
 
-TODO: write full spec
+## Conceptual spec (what lives here)
+
+### Event-driven tooling (no VM forks)
+
+All tooling should be built on a single execution engine (`sircore`) that emits structured events:
+
+- step events (node id/tag, basic-block/pc where applicable)
+- memory events (loads/stores, sizes, logical addresses)
+- host call events (`zi_ctl` selector + sizes + rc)
+- trap/diag events (code + about)
+
+Tooling features are implemented as consumers/producers of event streams, not as VM modifications.
+
+### High-ROI tools (initial target set)
+
+Mirror the `zem` set, adjusted for SIR:
+
+- **Trace**: text + JSONL; filters by mnemonic/tag, id ranges, src_ref, call target; sampling.
+- **Coverage**: node/term coverage, optionally per-src_ref; merge profiles; blackholes (“never executed” hotspots).
+- **Profiles**: histograms (branch outcomes, bulk-mem lengths, call targets, etc.).
+- **Strip**: rewrite SIR streams using a coverage profile (delete uncovered, or replace with deterministic return).
+- **Minimize**: delta-minimize failing inputs (keep failure signature stable).
+- **Triage**: run corpora, cluster failures by signature.
+- **Fuzz**: in-process fuzzing with coverage guidance; optional concolic-lite unlocker for stdin-driven programs.
+- **Shake**: deterministic perturbation runs (heap redzones/poison, short reads, env snapshots, etc.).
+- **Cert** (later): emit trace validity certificates for selected properties (SMT-LIB or similar).
+
+### Output contracts
+
+Tool outputs should be machine-readable and composable:
+
+- diagnostics as JSONL (stderr)
+- traces as JSONL (file/pipe)
+- coverage/profiles as JSONL sidecars
+- rewrite outputs as SIR JSONL (or later CBOR) emitted by the frontend
+
+## Relationship to KLEE-like workflows
+
+Once `sircore` provides a stepper + event stream + deterministic host ABI, `instrument` can grow symbolic/concolic tooling:
+
+- treat `zi_ctl` reads (stdin, env, file) as symbolic sources
+- explore path conditions using a solver
+- emit minimized reproducer inputs and path traces
+
+This is deliberately staged: first build robust concrete execution and tooling (like `zem`), then grow symbolic execution.
