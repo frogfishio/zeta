@@ -78,3 +78,10 @@ Run a small supported SIR subset from a `.sir.jsonl` file:
 ```
 sem --run src/sircc/examples/hello_zabi25_write.sir.jsonl
 ```
+
+The current `--run` MVP supports (growing over time):
+
+- `fn` with a single `block` body
+- statements: `let`, `term.ret` / `return`
+- expressions: `const.i32`, `const.i64`, `cstr`, `name`, `i32.add`, `binop.add`
+- calls: `call.indirect` where callee is `decl.fn` (extern) or `ptr.sym` (in-module function)

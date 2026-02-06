@@ -77,7 +77,11 @@ typedef enum sir_inst_kind {
   SIR_INST_CONST_I64,
   SIR_INST_CONST_PTR_NULL,
   SIR_INST_CONST_BYTES, // yields {ptr, i64 len}
+  SIR_INST_I32_ADD,
   SIR_INST_CALL_EXTERN, // currently supports zi_write/zi_end/zi_alloc/zi_free/zi_telemetry
+  SIR_INST_CALL_FUNC,
+  SIR_INST_RET,
+  SIR_INST_RET_VAL,
   SIR_INST_EXIT,
   SIR_INST_EXIT_VAL, // exits with i32 value in slot
 } sir_inst_kind_t;
@@ -106,10 +110,27 @@ typedef struct sir_inst {
       sir_val_id_t dst_len;
     } const_bytes;
     struct {
+      sir_val_id_t a;
+      sir_val_id_t b;
+      sir_val_id_t dst;
+    } i32_add;
+    struct {
       sir_sym_id_t callee;
       const sir_val_id_t* args; // module-owned
       uint32_t arg_count;
     } call_extern;
+    struct {
+      sir_func_id_t callee;
+      const sir_val_id_t* args; // module-owned
+      uint32_t arg_count;
+    } call_func;
+    struct {
+      // no payload
+      uint8_t _unused;
+    } ret_;
+    struct {
+      sir_val_id_t value;
+    } ret_val;
     struct {
       int32_t code;
     } exit_;
@@ -124,6 +145,7 @@ typedef struct sir_func {
   const sir_inst_t* insts;    // module-owned
   uint32_t inst_count;
   uint32_t value_count;       // number of value slots (0..N-1), for executor table sizing
+  sir_sig_t sig;              // points into module-owned arrays (0 or 1 result for MVP)
 } sir_func_t;
 
 typedef struct sir_module {
@@ -151,17 +173,23 @@ sir_sym_id_t sir_mb_sym_extern_fn(sir_module_builder_t* b, const char* name, sir
 sir_func_id_t sir_mb_func_begin(sir_module_builder_t* b, const char* name);
 bool sir_mb_func_set_entry(sir_module_builder_t* b, sir_func_id_t f);
 bool sir_mb_func_set_value_count(sir_module_builder_t* b, sir_func_id_t f, uint32_t value_count);
+bool sir_mb_func_set_sig(sir_module_builder_t* b, sir_func_id_t f, sir_sig_t sig);
 
 bool sir_mb_emit_const_i32(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst, int32_t v);
 bool sir_mb_emit_const_i64(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst, int64_t v);
 bool sir_mb_emit_const_null_ptr(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst);
 bool sir_mb_emit_const_bytes(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst_ptr, sir_val_id_t dst_len, const uint8_t* bytes,
                              uint32_t len);
+bool sir_mb_emit_i32_add(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst, sir_val_id_t a, sir_val_id_t b_);
 bool sir_mb_emit_call_extern(sir_module_builder_t* b, sir_func_id_t f, sir_sym_id_t callee, const sir_val_id_t* args, uint32_t arg_count);
 bool sir_mb_emit_call_extern_res(sir_module_builder_t* b, sir_func_id_t f, sir_sym_id_t callee, const sir_val_id_t* args, uint32_t arg_count,
                                  const sir_val_id_t* results, uint8_t result_count);
+bool sir_mb_emit_call_func_res(sir_module_builder_t* b, sir_func_id_t f, sir_func_id_t callee, const sir_val_id_t* args, uint32_t arg_count,
+                               const sir_val_id_t* results, uint8_t result_count);
 bool sir_mb_emit_exit(sir_module_builder_t* b, sir_func_id_t f, int32_t code);
 bool sir_mb_emit_exit_val(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t code);
+bool sir_mb_emit_ret(sir_module_builder_t* b, sir_func_id_t f);
+bool sir_mb_emit_ret_val(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t value);
 
 // Finalize: produces an immutable module. The module owns all memory.
 // Returns NULL on OOM or malformed builder state.
