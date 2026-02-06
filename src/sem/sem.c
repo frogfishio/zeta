@@ -1,4 +1,5 @@
 #include "sem_host.h"
+#include "semrt.h"
 #include "zi_tape.h"
 #include "zcl1.h"
 
@@ -29,12 +30,15 @@ static void sem_print_help(FILE* out) {
           "  sem --caps [--json]\n"
           "      [--cap KIND:NAME[:FLAGS]]...\n"
           "      [--cap-file-fs] [--cap-async-default] [--cap-sys-info]\n"
+          "      [--fs-root PATH]\n"
           "      [--tape-out PATH] [--tape-in PATH] [--tape-lax]\n"
+          "  sem --cat GUEST_PATH --fs-root PATH\n"
           "\n"
           "Options:\n"
           "  --help        Show this help message\n"
           "  --version     Show version information (from ./VERSION)\n"
           "  --caps        Issue zi_ctl CAPS_LIST and print capabilities\n"
+          "  --cat PATH    Read PATH via file/fs and write to stdout\n"
           "  --json        Emit --caps output as JSON (stdout)\n"
           "\n"
           "  --cap KIND:NAME[:FLAGS]\n"
@@ -44,6 +48,7 @@ static void sem_print_help(FILE* out) {
           "  --cap-file-fs       Sugar for --cap file:fs:open,block\n"
           "  --cap-async-default Sugar for --cap async:default:open,block\n"
           "  --cap-sys-info      Sugar for --cap sys:info:pure\n"
+          "  --fs-root PATH      Sandbox root for file/fs (enables open)\n"
           "\n"
           "  --tape-out PATH  Record all zi_ctl requests/responses to a tape file\n"
           "  --tape-in PATH   Replay zi_ctl from a tape file (no real host)\n"
@@ -121,6 +126,8 @@ static bool sem_add_cap(dyn_cap_t* caps, uint32_t* inout_n, uint32_t cap_max, co
   dc.kind = sem_strdup(kind_buf);
   dc.name = sem_strdup(name_buf);
   dc.flags = flags;
+  dc.meta = NULL;
+  dc.meta_len = 0;
   if (!dc.kind || !dc.name) {
     free(dc.kind);
     free(dc.name);
@@ -272,9 +279,166 @@ static int sem_do_caps(const sem_host_t* host, bool json, const char* tape_out, 
   return 0;
 }
 
+static bool sem_has_cap(const dyn_cap_t* caps, uint32_t n, const char* kind, const char* name) {
+  if (!caps || !kind || !name) return false;
+  for (uint32_t i = 0; i < n; i++) {
+    if (!caps[i].kind || !caps[i].name) continue;
+    if (strcmp(caps[i].kind, kind) != 0) continue;
+    if (strcmp(caps[i].name, name) != 0) continue;
+    return true;
+  }
+  return false;
+}
+
+static int sem_do_cat(const sem_cap_t* caps, uint32_t cap_n, const char* fs_root, const char* guest_path) {
+  if (!fs_root || fs_root[0] == '\0') {
+    fprintf(stderr, "sem: --cat requires --fs-root\n");
+    return 2;
+  }
+  if (!guest_path || guest_path[0] != '/') {
+    fprintf(stderr, "sem: --cat requires an absolute guest path like /a.txt\n");
+    return 2;
+  }
+
+  semrt_t rt;
+  if (!semrt_init(&rt, (semrt_cfg_t){.guest_mem_cap = 16u * 1024u * 1024u, .guest_mem_base = 0x10000ull, .caps = caps, .cap_count = cap_n, .fs_root = fs_root})) {
+    fprintf(stderr, "sem: failed to init runtime\n");
+    return 1;
+  }
+
+  // Allocate + write guest path.
+  const zi_size32_t guest_path_len = (zi_size32_t)strlen(guest_path);
+  const zi_ptr_t guest_path_ptr = semrt_zi_alloc(&rt, guest_path_len);
+  if (!guest_path_ptr) {
+    semrt_dispose(&rt);
+    fprintf(stderr, "sem: alloc failed\n");
+    return 1;
+  }
+  uint8_t* w = NULL;
+  if (!sem_guest_mem_map_rw(&rt.mem, guest_path_ptr, guest_path_len, &w) || !w) {
+    semrt_dispose(&rt);
+    fprintf(stderr, "sem: map failed\n");
+    return 1;
+  }
+  memcpy(w, guest_path, guest_path_len);
+
+  // Params: u64 path_ptr, u32 path_len, u32 oflags, u32 create_mode
+  uint8_t params[20];
+  zcl1_write_u32le(params + 0, (uint32_t)((uint64_t)guest_path_ptr & 0xFFFFFFFFu));
+  zcl1_write_u32le(params + 4, (uint32_t)(((uint64_t)guest_path_ptr >> 32) & 0xFFFFFFFFu));
+  zcl1_write_u32le(params + 8, guest_path_len);
+  zcl1_write_u32le(params + 12, 1u << 0); // ZI_FILE_O_READ
+  zcl1_write_u32le(params + 16, 0);
+
+  const zi_ptr_t params_ptr = semrt_zi_alloc(&rt, (zi_size32_t)sizeof(params));
+  if (!params_ptr) {
+    semrt_dispose(&rt);
+    fprintf(stderr, "sem: alloc failed\n");
+    return 1;
+  }
+  if (!sem_guest_mem_map_rw(&rt.mem, params_ptr, (zi_size32_t)sizeof(params), &w) || !w) {
+    semrt_dispose(&rt);
+    fprintf(stderr, "sem: map failed\n");
+    return 1;
+  }
+  memcpy(w, params, sizeof(params));
+
+  // kind/name bytes in guest memory.
+  const char* kind = "file";
+  const char* name = "fs";
+  const uint32_t kind_len = (uint32_t)strlen(kind);
+  const uint32_t name_len = (uint32_t)strlen(name);
+  const zi_ptr_t kind_ptr = semrt_zi_alloc(&rt, kind_len);
+  const zi_ptr_t name_ptr = semrt_zi_alloc(&rt, name_len);
+  if (!kind_ptr || !name_ptr) {
+    semrt_dispose(&rt);
+    fprintf(stderr, "sem: alloc failed\n");
+    return 1;
+  }
+  if (!sem_guest_mem_map_rw(&rt.mem, kind_ptr, kind_len, &w) || !w) {
+    semrt_dispose(&rt);
+    fprintf(stderr, "sem: map failed\n");
+    return 1;
+  }
+  memcpy(w, kind, kind_len);
+  if (!sem_guest_mem_map_rw(&rt.mem, name_ptr, name_len, &w) || !w) {
+    semrt_dispose(&rt);
+    fprintf(stderr, "sem: map failed\n");
+    return 1;
+  }
+  memcpy(w, name, name_len);
+
+  // zi_cap_open request: u64 kind_ptr, u32 kind_len, u64 name_ptr, u32 name_len, u32 mode, u64 params_ptr, u32 params_len
+  uint8_t open_req[40];
+  memset(open_req, 0, sizeof(open_req));
+  zcl1_write_u32le(open_req + 0, (uint32_t)((uint64_t)kind_ptr & 0xFFFFFFFFu));
+  zcl1_write_u32le(open_req + 4, (uint32_t)(((uint64_t)kind_ptr >> 32) & 0xFFFFFFFFu));
+  zcl1_write_u32le(open_req + 8, kind_len);
+  zcl1_write_u32le(open_req + 12, (uint32_t)((uint64_t)name_ptr & 0xFFFFFFFFu));
+  zcl1_write_u32le(open_req + 16, (uint32_t)(((uint64_t)name_ptr >> 32) & 0xFFFFFFFFu));
+  zcl1_write_u32le(open_req + 20, name_len);
+  zcl1_write_u32le(open_req + 24, 0);
+  zcl1_write_u32le(open_req + 28, (uint32_t)((uint64_t)params_ptr & 0xFFFFFFFFu));
+  zcl1_write_u32le(open_req + 32, (uint32_t)(((uint64_t)params_ptr >> 32) & 0xFFFFFFFFu));
+  zcl1_write_u32le(open_req + 36, (uint32_t)sizeof(params));
+
+  const zi_ptr_t open_req_ptr = semrt_zi_alloc(&rt, (zi_size32_t)sizeof(open_req));
+  if (!open_req_ptr) {
+    semrt_dispose(&rt);
+    fprintf(stderr, "sem: alloc failed\n");
+    return 1;
+  }
+  if (!sem_guest_mem_map_rw(&rt.mem, open_req_ptr, (zi_size32_t)sizeof(open_req), &w) || !w) {
+    semrt_dispose(&rt);
+    fprintf(stderr, "sem: map failed\n");
+    return 1;
+  }
+  memcpy(w, open_req, sizeof(open_req));
+
+  const zi_handle_t h = semrt_zi_cap_open(&rt, open_req_ptr);
+  if (h < 0) {
+    semrt_dispose(&rt);
+    fprintf(stderr, "sem: cap_open failed: %d\n", h);
+    return 1;
+  }
+
+  const zi_ptr_t buf_ptr = semrt_zi_alloc(&rt, 4096);
+  if (!buf_ptr) {
+    (void)semrt_zi_end(&rt, h);
+    semrt_dispose(&rt);
+    fprintf(stderr, "sem: alloc failed\n");
+    return 1;
+  }
+
+  for (;;) {
+    const int32_t n = semrt_zi_read(&rt, h, buf_ptr, 4096);
+    if (n < 0) {
+      (void)semrt_zi_end(&rt, h);
+      semrt_dispose(&rt);
+      fprintf(stderr, "sem: read failed: %d\n", n);
+      return 1;
+    }
+    if (n == 0) break;
+    const uint8_t* r = NULL;
+    if (!sem_guest_mem_map_ro(&rt.mem, buf_ptr, (zi_size32_t)n, &r) || !r) {
+      (void)semrt_zi_end(&rt, h);
+      semrt_dispose(&rt);
+      fprintf(stderr, "sem: map failed\n");
+      return 1;
+    }
+    (void)fwrite(r, 1, (size_t)n, stdout);
+  }
+
+  (void)semrt_zi_end(&rt, h);
+  semrt_dispose(&rt);
+  return 0;
+}
+
 int main(int argc, char** argv) {
   bool want_caps = false;
   bool json = false;
+  const char* fs_root = NULL;
+  const char* cat_path = NULL;
   const char* tape_out = NULL;
   const char* tape_in = NULL;
   bool tape_strict = true;
@@ -299,8 +463,16 @@ int main(int argc, char** argv) {
       want_caps = true;
       continue;
     }
+    if (strcmp(a, "--cat") == 0 && i + 1 < argc) {
+      cat_path = argv[++i];
+      continue;
+    }
     if (strcmp(a, "--json") == 0) {
       json = true;
+      continue;
+    }
+    if (strcmp(a, "--fs-root") == 0 && i + 1 < argc) {
+      fs_root = argv[++i];
       continue;
     }
     if (strcmp(a, "--tape-out") == 0 && i + 1 < argc) {
@@ -355,10 +527,19 @@ int main(int argc, char** argv) {
     return 2;
   }
 
-  if (!want_caps) {
+  if (!want_caps && !cat_path) {
     sem_print_help(stdout);
     sem_free_caps(dyn_caps, dyn_n);
     return 0;
+  }
+
+  // If user provided a file sandbox root, ensure file/fs is at least listed (openable depends on fs_root).
+  if (fs_root && fs_root[0] != '\0' && !sem_has_cap(dyn_caps, dyn_n, "file", "fs")) {
+    if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "file:fs:open,block")) {
+      fprintf(stderr, "sem: failed to add file/fs cap\n");
+      sem_free_caps(dyn_caps, dyn_n);
+      return 2;
+    }
   }
 
   sem_cap_t caps[64];
@@ -369,6 +550,12 @@ int main(int argc, char** argv) {
     caps[i].flags = dyn_caps[i].flags;
     caps[i].meta = dyn_caps[i].meta;
     caps[i].meta_len = dyn_caps[i].meta_len;
+  }
+
+  if (cat_path) {
+    const int rc = sem_do_cat(caps, cap_n, fs_root, cat_path);
+    sem_free_caps(dyn_caps, dyn_n);
+    return rc;
   }
 
   sem_host_t host;

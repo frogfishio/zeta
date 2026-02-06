@@ -44,3 +44,19 @@ It is a **thin CLI frontend** over `sircore`:
 - telemetry sink
 
 `zi_ctl` uses ZCL1 framing; the operation is carried in the ZCL1 `op` field. See `src/sircore/zi_ctl.md`.
+
+## Hosted zABI runtime (MVP)
+
+`sem` is growing a **hosted zABI runtime** so you can trial a program under the emulator before lowering to a native binary.
+
+The hosted runtime includes:
+
+- guest memory mapping (`zi_ptr_t` is a guest pointer; never a host pointer)
+- a handle table (`zi_read` / `zi_write` / `zi_end`)
+- a minimal caps model with `file/fs` sandboxing (`--fs-root`)
+
+Quick smoke test (read a file under a sandbox root):
+
+```
+sem --cat /a.txt --fs-root /path/to/sandbox
+```

@@ -8,6 +8,7 @@ add_executable(sem
   guest_mem.c
   handles.c
   semrt.c
+  semrt_file_fs.c
 )
 
 target_compile_definitions(sem PRIVATE SIR_VERSION="${SIR_VERSION}")
@@ -45,6 +46,7 @@ add_executable(sem_unit_semrt_write
   guest_mem.c
   handles.c
   semrt.c
+  semrt_file_fs.c
 )
 
 target_compile_definitions(sem_unit_semrt_write PRIVATE SIR_VERSION="${SIR_VERSION}")
@@ -58,3 +60,25 @@ target_compile_options(sem_unit_semrt_write PRIVATE
 )
 
 add_test(NAME sem_semrt_write COMMAND sem_unit_semrt_write)
+
+add_executable(sem_unit_semrt_file_fs
+  tests/test_semrt_file_fs.c
+  zcl1.c
+  sem_host.c
+  guest_mem.c
+  handles.c
+  semrt.c
+  semrt_file_fs.c
+)
+
+target_compile_definitions(sem_unit_semrt_file_fs PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_include_directories(sem_unit_semrt_file_fs PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+
+target_compile_options(sem_unit_semrt_file_fs PRIVATE
+  -Wall
+  -Wextra
+  -Wpedantic
+  -Werror
+)
+
+add_test(NAME sem_semrt_file_fs COMMAND sem_unit_semrt_file_fs)
