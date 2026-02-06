@@ -88,6 +88,6 @@ The current `--run` MVP supports (growing over time):
 - expressions: `const.i32`, `const.i64`, `cstr`, `name`, `i32.add`, `binop.add`
 - comparisons: `i32.cmp.eq`
 - calls: `call.indirect` where callee is `decl.fn` (extern) or `ptr.sym` (in-module function)
-- control flow: `term.br` (including `fields.args` passing block params), `term.cbr` / `term.condbr`
+- control flow: `term.br` (including `fields.args` passing block params), `term.cbr` / `term.condbr`, `term.switch` (i32 scrut)
 - block params: `block.fields.params` with `bparam` nodes
 - memory: `alloca.i8/i32/i64`, `store.i8/i32/i64`, `load.i8/i32/i64`

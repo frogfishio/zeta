@@ -85,6 +85,7 @@ typedef enum sir_inst_kind {
   SIR_INST_I32_CMP_EQ,
   SIR_INST_BR,
   SIR_INST_CBR,
+  SIR_INST_SWITCH,
   SIR_INST_ALLOCA,
   SIR_INST_STORE_I8,
   SIR_INST_STORE_I32,
@@ -148,6 +149,13 @@ typedef struct sir_inst {
       uint32_t then_ip;
       uint32_t else_ip;
     } cbr;
+    struct {
+      sir_val_id_t scrut;
+      const int32_t* case_lits;    // module-owned; len=case_count
+      const uint32_t* case_target; // module-owned; len=case_count
+      uint32_t case_count;
+      uint32_t default_ip;
+    } sw;
     struct {
       uint32_t size;
       uint32_t align;
@@ -236,6 +244,8 @@ bool sir_mb_emit_br_args(sir_module_builder_t* b, sir_func_id_t f, uint32_t targ
                          uint32_t arg_count, uint32_t* out_ip);
 bool sir_mb_emit_br(sir_module_builder_t* b, sir_func_id_t f, uint32_t target_ip, uint32_t* out_ip);
 bool sir_mb_emit_cbr(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t cond, uint32_t then_ip, uint32_t else_ip, uint32_t* out_ip);
+bool sir_mb_emit_switch(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t scrut, const int32_t* case_lits, const uint32_t* case_target,
+                        uint32_t case_count, uint32_t default_ip, uint32_t* out_ip);
 bool sir_mb_emit_alloca(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst, uint32_t size, uint32_t align);
 bool sir_mb_emit_store_i8(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t addr, sir_val_id_t value, uint32_t align);
 bool sir_mb_emit_store_i32(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t addr, sir_val_id_t value, uint32_t align);
@@ -257,6 +267,8 @@ bool sir_mb_emit_ret_val(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t 
 uint32_t sir_mb_func_ip(const sir_module_builder_t* b, sir_func_id_t f);
 bool sir_mb_patch_br(sir_module_builder_t* b, sir_func_id_t f, uint32_t ip, uint32_t target_ip);
 bool sir_mb_patch_cbr(sir_module_builder_t* b, sir_func_id_t f, uint32_t ip, uint32_t then_ip, uint32_t else_ip);
+bool sir_mb_patch_switch(sir_module_builder_t* b, sir_func_id_t f, uint32_t ip, const uint32_t* case_target, uint32_t case_count,
+                         uint32_t default_ip);
 
 // Finalize: produces an immutable module. The module owns all memory.
 // Returns NULL on OOM or malformed builder state.

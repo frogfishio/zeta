@@ -746,6 +746,7 @@ typedef enum term_kind {
   TERM_RETURN_SLOT,
   TERM_BR,
   TERM_CBR,
+  TERM_SWITCH,
 } term_kind_t;
 
 typedef struct term_info {
@@ -757,6 +758,11 @@ typedef struct term_info {
   sir_val_id_t cond_slot;  // for cbr
   uint32_t then_block;     // for cbr
   uint32_t else_block;     // for cbr
+  uint32_t switch_scrut;   // node id for scrut
+  uint32_t* switch_lits;   // arena-owned; node ids; len=switch_case_count
+  uint32_t* switch_tos;    // arena-owned; block ids; len=switch_case_count
+  uint32_t switch_case_count;
+  uint32_t switch_default_to;
 } term_info_t;
 
 static bool lower_term_node(sirj_ctx_t* c, uint32_t term_id, term_info_t* out) {
@@ -839,6 +845,50 @@ static bool lower_term_node(sirj_ctx_t* c, uint32_t term_id, term_info_t* out) {
     return true;
   }
 
+  if (strcmp(n->tag, "term.switch") == 0) {
+    if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+    uint32_t scrut_id = 0;
+    if (!parse_ref_id(json_obj_get(n->fields_obj, "scrut"), &scrut_id)) return false;
+
+    const JsonValue* casesv = json_obj_get(n->fields_obj, "cases");
+    if (!json_is_array(casesv)) return false;
+    const JsonArray* ca = &casesv->v.arr;
+    if (ca->len > 64) return false;
+
+    uint32_t* lit_ids = NULL;
+    uint32_t* to_ids = NULL;
+    if (ca->len) {
+      lit_ids = (uint32_t*)arena_alloc(&c->arena, ca->len * sizeof(uint32_t));
+      to_ids = (uint32_t*)arena_alloc(&c->arena, ca->len * sizeof(uint32_t));
+      if (!lit_ids || !to_ids) return false;
+    }
+
+    for (size_t i = 0; i < ca->len; i++) {
+      if (!json_is_object(ca->items[i])) return false;
+      const JsonValue* litv = json_obj_get(ca->items[i], "lit");
+      const JsonValue* tov = json_obj_get(ca->items[i], "to");
+      uint32_t lid = 0, bid = 0;
+      if (!parse_ref_id(litv, &lid)) return false;
+      if (!parse_ref_id(tov, &bid)) return false;
+      lit_ids[i] = lid;
+      to_ids[i] = bid;
+    }
+
+    const JsonValue* defv = json_obj_get(n->fields_obj, "default");
+    if (!json_is_object(defv)) return false;
+    const JsonValue* defto = json_obj_get(defv, "to");
+    uint32_t def_bid = 0;
+    if (!parse_ref_id(defto, &def_bid)) return false;
+
+    out->k = TERM_SWITCH;
+    out->switch_scrut = scrut_id;
+    out->switch_lits = lit_ids;
+    out->switch_tos = to_ids;
+    out->switch_case_count = (uint32_t)ca->len;
+    out->switch_default_to = def_bid;
+    return true;
+  }
+
   return false;
 }
 
@@ -847,7 +897,23 @@ typedef struct patch_rec {
   uint32_t ip;
   uint32_t a;
   uint32_t b;
+  uint32_t* v; // for switch: case targets blocks (len=n)
+  uint32_t n;  // for switch: case count
+  uint32_t def;
 } patch_rec_t;
+
+static bool parse_const_i32_value(const sirj_ctx_t* c, uint32_t node_id, int32_t* out) {
+  if (!c || !out) return false;
+  if (node_id >= c->node_cap || !c->nodes[node_id].present) return false;
+  const node_info_t* n = &c->nodes[node_id];
+  if (!n->tag || strcmp(n->tag, "const.i32") != 0) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  int64_t v = 0;
+  if (!json_get_i64(json_obj_get(n->fields_obj, "value"), &v)) return false;
+  if (v < INT32_MIN || v > INT32_MAX) return false;
+  *out = (int32_t)v;
+  return true;
+}
 
 static bool lower_fn_body(sirj_ctx_t* c, uint32_t fn_node_id, bool is_entry) {
   if (!c) return false;
@@ -969,6 +1035,30 @@ static bool lower_fn_body(sirj_ctx_t* c, uint32_t fn_node_id, bool is_entry) {
             if (!sir_mb_emit_cbr(c->mb, c->fn, term.cond_slot, 0, 0, &ip)) return false;
             if (patch_n >= (uint32_t)(sizeof(patches) / sizeof(patches[0]))) return false;
             patches[patch_n++] = (patch_rec_t){.k = 2, .ip = ip, .a = term.then_block, .b = term.else_block};
+          } else if (term.k == TERM_SWITCH) {
+            sir_val_id_t scrut_slot = 0;
+            val_kind_t sk = VK_INVALID;
+            if (!eval_node(c, term.switch_scrut, &scrut_slot, &sk)) return false;
+            if (sk != VK_I32) return false; // MVP
+
+            const uint32_t ncase = term.switch_case_count;
+            int32_t* case_lits = NULL;
+            uint32_t* case_ip0 = NULL;
+            if (ncase) {
+              case_lits = (int32_t*)arena_alloc(&c->arena, (size_t)ncase * sizeof(int32_t));
+              case_ip0 = (uint32_t*)arena_alloc(&c->arena, (size_t)ncase * sizeof(uint32_t));
+              if (!case_lits || !case_ip0) return false;
+              for (uint32_t ci = 0; ci < ncase; ci++) {
+                if (!parse_const_i32_value(c, term.switch_lits[ci], &case_lits[ci])) return false;
+                case_ip0[ci] = 0;
+              }
+            }
+
+            uint32_t ip = 0;
+            if (!sir_mb_emit_switch(c->mb, c->fn, scrut_slot, case_lits, case_ip0, ncase, 0, &ip)) return false;
+            if (patch_n >= (uint32_t)(sizeof(patches) / sizeof(patches[0]))) return false;
+            patches[patch_n++] =
+                (patch_rec_t){.k = 3, .ip = ip, .v = term.switch_tos, .n = ncase, .def = term.switch_default_to};
           } else {
             return false;
           }
@@ -996,6 +1086,29 @@ static bool lower_fn_body(sirj_ctx_t* c, uint32_t fn_node_id, bool is_entry) {
         if (th >= c->node_cap || el >= c->node_cap) return false;
         if (block_ip[th] == 0xFFFFFFFFu || block_ip[el] == 0xFFFFFFFFu) return false;
         if (!sir_mb_patch_cbr(c->mb, c->fn, patches[i].ip, block_ip[th], block_ip[el])) return false;
+      } else if (patches[i].k == 3) {
+        if (!patches[i].v && patches[i].n) return false;
+        if (patches[i].def >= c->node_cap || block_ip[patches[i].def] == 0xFFFFFFFFu) return false;
+
+        uint32_t tmp_small[16];
+        uint32_t* tmp = tmp_small;
+        if (patches[i].n > (uint32_t)(sizeof(tmp_small) / sizeof(tmp_small[0]))) {
+          tmp = (uint32_t*)malloc((size_t)patches[i].n * sizeof(uint32_t));
+          if (!tmp) return false;
+        }
+
+        for (uint32_t ci = 0; ci < patches[i].n; ci++) {
+          const uint32_t bid = patches[i].v[ci];
+          if (bid >= c->node_cap || block_ip[bid] == 0xFFFFFFFFu) {
+            if (tmp != tmp_small) free(tmp);
+            return false;
+          }
+          tmp[ci] = block_ip[bid];
+        }
+
+        const bool ok = sir_mb_patch_switch(c->mb, c->fn, patches[i].ip, tmp, patches[i].n, block_ip[patches[i].def]);
+        if (tmp != tmp_small) free(tmp);
+        if (!ok) return false;
       }
     }
 

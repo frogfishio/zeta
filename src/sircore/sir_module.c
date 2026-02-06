@@ -451,6 +451,38 @@ bool sir_mb_emit_cbr(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t cond
   return true;
 }
 
+bool sir_mb_emit_switch(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t scrut, const int32_t* case_lits, const uint32_t* case_target,
+                        uint32_t case_count, uint32_t default_ip, uint32_t* out_ip) {
+  if (!b) return false;
+  if (f == 0 || f > b->funcs.n) return false;
+  sir_dyn_insts_t* d = &b->func_insts[f - 1];
+  const uint32_t ip = d->n;
+
+  if (case_count && (!case_lits || !case_target)) return false;
+  const uint32_t lits_bytes = case_count * (uint32_t)sizeof(int32_t);
+  const uint32_t tgt_bytes = case_count * (uint32_t)sizeof(uint32_t);
+  const uint8_t* lp = NULL;
+  const uint8_t* tp = NULL;
+  if (case_count) {
+    lp = pool_copy_bytes(b, (const uint8_t*)case_lits, lits_bytes);
+    if (!lp) return false;
+    tp = pool_copy_bytes(b, (const uint8_t*)case_target, tgt_bytes);
+    if (!tp) return false;
+  }
+
+  sir_inst_t i = {0};
+  i.k = SIR_INST_SWITCH;
+  i.result_count = 0;
+  i.u.sw.scrut = scrut;
+  i.u.sw.case_lits = (const int32_t*)lp;
+  i.u.sw.case_target = (const uint32_t*)tp;
+  i.u.sw.case_count = case_count;
+  i.u.sw.default_ip = default_ip;
+  if (!emit_inst(b, f, i)) return false;
+  if (out_ip) *out_ip = ip;
+  return true;
+}
+
 bool sir_mb_emit_alloca(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst, uint32_t size, uint32_t align) {
   sir_inst_t i = {0};
   i.k = SIR_INST_ALLOCA;
@@ -601,6 +633,25 @@ bool sir_mb_patch_cbr(sir_module_builder_t* b, sir_func_id_t f, uint32_t ip, uin
   if (d->p[ip].k != SIR_INST_CBR) return false;
   d->p[ip].u.cbr.then_ip = then_ip;
   d->p[ip].u.cbr.else_ip = else_ip;
+  return true;
+}
+
+bool sir_mb_patch_switch(sir_module_builder_t* b, sir_func_id_t f, uint32_t ip, const uint32_t* case_target, uint32_t case_count,
+                         uint32_t default_ip) {
+  if (!b) return false;
+  if (f == 0 || f > b->funcs.n) return false;
+  sir_dyn_insts_t* d = &b->func_insts[f - 1];
+  if (ip >= d->n) return false;
+  if (d->p[ip].k != SIR_INST_SWITCH) return false;
+  if (d->p[ip].u.sw.case_count != case_count) return false;
+  if (case_count && !case_target) return false;
+
+  d->p[ip].u.sw.default_ip = default_ip;
+  if (case_count) {
+    uint32_t* tp = (uint32_t*)(uintptr_t)d->p[ip].u.sw.case_target;
+    if (!tp) return false;
+    memcpy(tp, case_target, (size_t)case_count * sizeof(uint32_t));
+  }
   return true;
 }
 
@@ -871,6 +922,28 @@ bool sir_module_validate(const sir_module_t* m, char* err, size_t err_cap) {
           }
           if (inst->u.cbr.then_ip >= f->inst_count || inst->u.cbr.else_ip >= f->inst_count) {
             set_err(err, err_cap, "cbr target_ip out of range");
+            return false;
+          }
+          break;
+        case SIR_INST_SWITCH:
+          if (inst->u.sw.scrut >= vc) {
+            set_err(err, err_cap, "switch scrut out of range");
+            return false;
+          }
+          if (inst->u.sw.case_count) {
+            if (!inst->u.sw.case_lits || !inst->u.sw.case_target) {
+              set_err(err, err_cap, "switch case_count set but arrays are null");
+              return false;
+            }
+            for (uint32_t ci = 0; ci < inst->u.sw.case_count; ci++) {
+              if (inst->u.sw.case_target[ci] >= f->inst_count) {
+                set_err(err, err_cap, "switch case target_ip out of range");
+                return false;
+              }
+            }
+          }
+          if (inst->u.sw.default_ip >= f->inst_count) {
+            set_err(err, err_cap, "switch default_ip out of range");
             return false;
           }
           break;
@@ -1402,6 +1475,34 @@ static int32_t exec_func(const sir_module_t* m, sem_guest_mem_t* mem, sir_host_t
           return ZI_E_INVALID;
         }
         ip = cv.u.b ? i->u.cbr.then_ip : i->u.cbr.else_ip;
+        break;
+      }
+      case SIR_INST_SWITCH: {
+        const sir_val_id_t sid = i->u.sw.scrut;
+        if (sid >= f->value_count) {
+          free(vals);
+          return ZI_E_BOUNDS;
+        }
+        const sir_value_t sv = vals[sid];
+        if (sv.kind != SIR_VAL_I32) {
+          free(vals);
+          return ZI_E_INVALID;
+        }
+        const uint32_t n = i->u.sw.case_count;
+        const int32_t* lits = i->u.sw.case_lits;
+        const uint32_t* tgt = i->u.sw.case_target;
+        if (n && (!lits || !tgt)) {
+          free(vals);
+          return ZI_E_INVALID;
+        }
+        uint32_t next_ip = i->u.sw.default_ip;
+        for (uint32_t ci = 0; ci < n; ci++) {
+          if (sv.u.i32 == lits[ci]) {
+            next_ip = tgt[ci];
+            break;
+          }
+        }
+        ip = next_ip;
         break;
       }
       case SIR_INST_ALLOCA: {
