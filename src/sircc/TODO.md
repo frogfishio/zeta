@@ -88,6 +88,7 @@ Goal: make the LLVM backend + node frontend stable enough that an integrator can
   - [x] `call.fun` / `call.closure`: improve errors (show expected vs actual arity/types)
   - [x] `sem.*`: validate branch operand shape (`{kind:"val"|"thunk", ...}`) and thunk arity (0-arg for `sem.if/and_sc/or_sc`, 0-arg or 1-arg for `sem.match_sum` cases)
     - [x] `sem.match_sum`: when thunk arity is 1, require param type matches payload type
+  - [x] `--verify-only` semantic validator covers fun/closure/adt/sem pack shapes (not just LLVM lowering)
 
 - [x] **ADT layout + determinism hardening**
   - [x] Add explicit tests for padding/align edge cases (payload align > 4, mixed sizes)

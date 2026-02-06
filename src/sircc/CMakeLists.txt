@@ -144,6 +144,26 @@ add_test(
 )
 
 add_test(
+  NAME sircc_verify_fun_sym_call
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/fun_sym_call.sir.jsonl
+)
+
+add_test(
+  NAME sircc_verify_closure_make_call
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/closure_make_call.sir.jsonl
+)
+
+add_test(
+  NAME sircc_verify_adt_make_get
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/adt_make_get.sir.jsonl
+)
+
+add_test(
+  NAME sircc_verify_sem_match_sum_option_i32
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/sem_match_sum_option_i32.sir.jsonl
+)
+
+add_test(
   NAME sircc_verify_feature_gate_late_meta
   COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/feature_gate_late_meta.sir.jsonl
 )
@@ -274,8 +294,8 @@ add_test(
   NAME sircc_diag_bad_fun_sym_conflict_global
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>
-    -DARGS=${CMAKE_CURRENT_LIST_DIR}/examples/bad_fun_sym_conflict_global.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/bad_fun_sym_conflict_global.ll\\;--emit-llvm
-    "-DEXPECT=fun.sym 'sir_add2' references a data symbol"
+    -DARGS=--diagnostics\\;json\\;--verify-only\\;${CMAKE_CURRENT_LIST_DIR}/examples/bad_fun_sym_conflict_global.sir.jsonl
+    "-DEXPECT=\\\"code\\\":\\\"sircc.fun.sym.conflict_sym\\\""
     -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
 )
 
@@ -283,8 +303,8 @@ add_test(
   NAME sircc_diag_bad_fun_sym_sig_mismatch_vs_fn
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>
-    -DARGS=${CMAKE_CURRENT_LIST_DIR}/examples/bad_fun_sym_sig_mismatch_vs_fn.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/bad_fun_sym_sig_mismatch_vs_fn.ll\\;--emit-llvm
-    "-DEXPECT=signature mismatch vs fn node type_ref"
+    -DARGS=--diagnostics\\;json\\;--verify-only\\;${CMAKE_CURRENT_LIST_DIR}/examples/bad_fun_sym_sig_mismatch_vs_fn.sir.jsonl
+    "-DEXPECT=\\\"code\\\":\\\"sircc.fun.sym.sig_mismatch\\\""
     -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
 )
 
@@ -292,8 +312,8 @@ add_test(
   NAME sircc_diag_bad_fun_sym_undefined
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>
-    -DARGS=${CMAKE_CURRENT_LIST_DIR}/examples/bad_fun_sym_undefined.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/bad_fun_sym_undefined.ll\\;--emit-llvm
-    "-DEXPECT=requires a prior fn or decl.fn of matching signature"
+    -DARGS=--diagnostics\\;json\\;--verify-only\\;${CMAKE_CURRENT_LIST_DIR}/examples/bad_fun_sym_undefined.sir.jsonl
+    "-DEXPECT=\\\"code\\\":\\\"sircc.fun.sym.undefined\\\""
     -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
 )
 
@@ -310,8 +330,8 @@ add_test(
   NAME sircc_diag_bad_closure_make_code_sig_mismatch
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>
-    -DARGS=${CMAKE_CURRENT_LIST_DIR}/examples/bad_closure_make_code_sig_mismatch.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/bad_closure_make_code_sig_mismatch.ll\\;--emit-llvm
-    "-DEXPECT=closure.make code signature does not match"
+    -DARGS=--diagnostics\\;json\\;--verify-only\\;${CMAKE_CURRENT_LIST_DIR}/examples/bad_closure_make_code_sig_mismatch.sir.jsonl
+    "-DEXPECT=\\\"code\\\":\\\"sircc.closure.make.code.sig_mismatch\\\""
     -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
 )
 
@@ -319,8 +339,8 @@ add_test(
   NAME sircc_diag_bad_sem_if_branch_kind
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>
-    -DARGS=${CMAKE_CURRENT_LIST_DIR}/examples/bad_sem_if_branch_kind.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/bad_sem_if_branch_kind.ll\\;--emit-llvm
-    "-DEXPECT=kind must be 'val' or 'thunk'"
+    -DARGS=--diagnostics\\;json\\;--verify-only\\;${CMAKE_CURRENT_LIST_DIR}/examples/bad_sem_if_branch_kind.sir.jsonl
+    "-DEXPECT=\\\"code\\\":\\\"sircc.sem.branch.kind.bad\\\""
     -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
 )
 
@@ -328,8 +348,8 @@ add_test(
   NAME sircc_diag_bad_sem_match_sum_thunk_param_ty
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>
-    -DARGS=${CMAKE_CURRENT_LIST_DIR}/examples/bad_sem_match_sum_thunk_param_ty.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/bad_sem_match_sum_thunk_param_ty.ll\\;--emit-llvm
-    "-DEXPECT=thunk parameter type must match payload type"
+    -DARGS=--diagnostics\\;json\\;--verify-only\\;${CMAKE_CURRENT_LIST_DIR}/examples/bad_sem_match_sum_thunk_param_ty.sir.jsonl
+    "-DEXPECT=\\\"code\\\":\\\"sircc.sem.match_sum.thunk.param.bad\\\""
     -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
 )
 
