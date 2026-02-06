@@ -41,9 +41,14 @@ Frontends handle:
 - multi‑file logistics / stream merging
 - user‑facing error formatting and context
 
-## Host boundary: pure `zi_ctl`
+## Host boundary: minimal `zi_*` + `zi_ctl`
 
-`sircore` can only call out via `zi_ctl(req, resp)`:
+`sircore` calls out through a small, capability-based host ABI:
+
+- **minimal primitives** (always present): `zi_read` / `zi_write` / `zi_end`, `zi_alloc` / `zi_free`, `zi_telemetry`
+- **optional capabilities** (may not exist): discovered via `zi_ctl` and opened via `zi_cap_open`
+
+`zi_ctl(req, resp)` is a message-ABI:
 
 - request/response are **binary** messages
 - no raw host pointers are ever passed

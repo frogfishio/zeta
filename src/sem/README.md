@@ -66,3 +66,9 @@ sem --cat /a.txt --fs-root /path/to/sandbox
 ```
 sem --sir-hello
 ```
+
+`sircore` module smoke (structured module builder + interpreter):
+
+```
+sem --sir-module-hello
+```

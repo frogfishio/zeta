@@ -1,5 +1,6 @@
 #include "sem_host.h"
 #include "hosted_zabi.h"
+#include "sir_module.h"
 #include "sircore_vm.h"
 #include "zi_tape.h"
 #include "zcl1.h"
@@ -35,6 +36,7 @@ static void sem_print_help(FILE* out) {
           "      [--tape-out PATH] [--tape-in PATH] [--tape-lax]\n"
           "  sem --cat GUEST_PATH --fs-root PATH\n"
           "  sem --sir-hello\n"
+          "  sem --sir-module-hello\n"
           "\n"
           "Options:\n"
           "  --help        Show this help message\n"
@@ -42,6 +44,7 @@ static void sem_print_help(FILE* out) {
           "  --caps        Issue zi_ctl CAPS_LIST and print capabilities\n"
           "  --cat PATH    Read PATH via file/fs and write to stdout\n"
           "  --sir-hello   Run a tiny built-in sircore VM smoke program\n"
+          "  --sir-module-hello  Run a tiny built-in sircore module smoke program\n"
           "  --json        Emit --caps output as JSON (stdout)\n"
           "\n"
           "  --cap KIND:NAME[:FLAGS]\n"
@@ -498,12 +501,120 @@ static int sem_do_sir_hello(void) {
   return (rc < 0) ? 1 : rc;
 }
 
+static int sem_do_sir_module_hello(void) {
+  sir_hosted_zabi_t hz;
+  if (!sir_hosted_zabi_init(&hz, (sir_hosted_zabi_cfg_t){.abi_version = 0x00020005u, .guest_mem_cap = 1024 * 1024, .guest_mem_base = 0x10000ull})) {
+    fprintf(stderr, "sem: hosted zabi init failed\n");
+    return 1;
+  }
+
+  sir_host_t host = {0};
+  host.user = &hz;
+  host.v = (sir_host_vtable_t){
+      .zi_abi_version = hz_abi_version,
+      .zi_ctl = hz_ctl,
+      .zi_read = hz_read,
+      .zi_write = hz_write,
+      .zi_end = hz_end,
+      .zi_alloc = hz_alloc,
+      .zi_free = hz_free,
+      .zi_telemetry = hz_telemetry,
+      .zi_cap_count = hz_cap_count,
+      .zi_cap_get_size = hz_cap_get_size,
+      .zi_cap_get = hz_cap_get,
+      .zi_cap_open = hz_cap_open,
+      .zi_handle_hflags = hz_handle_hflags,
+  };
+
+  sir_module_builder_t* b = sir_mb_new();
+  if (!b) {
+    sir_hosted_zabi_dispose(&hz);
+    fprintf(stderr, "sem: sir module builder alloc failed\n");
+    return 1;
+  }
+
+  const sir_type_id_t ty_i32 = sir_mb_type_prim(b, SIR_PRIM_I32);
+  const sir_type_id_t ty_i64 = sir_mb_type_prim(b, SIR_PRIM_I64);
+  const sir_type_id_t ty_ptr = sir_mb_type_prim(b, SIR_PRIM_PTR);
+  if (!ty_i32 || !ty_i64 || !ty_ptr) {
+    sir_mb_free(b);
+    sir_hosted_zabi_dispose(&hz);
+    fprintf(stderr, "sem: sir module type init failed\n");
+    return 1;
+  }
+
+  const sir_type_id_t zi_write_params[] = {ty_i32, ty_ptr, ty_i64};
+  sir_sig_t zi_write_sig = {
+      .params = zi_write_params,
+      .param_count = (uint32_t)(sizeof(zi_write_params) / sizeof(zi_write_params[0])),
+      .results = NULL,
+      .result_count = 0,
+  };
+  const sir_sym_id_t sym_zi_write = sir_mb_sym_extern_fn(b, "zi_write", zi_write_sig);
+  if (!sym_zi_write) {
+    sir_mb_free(b);
+    sir_hosted_zabi_dispose(&hz);
+    fprintf(stderr, "sem: sir module extern init failed\n");
+    return 1;
+  }
+
+  const sir_func_id_t f = sir_mb_func_begin(b, "main");
+  if (!f || !sir_mb_func_set_entry(b, f) || !sir_mb_func_set_value_count(b, f, 3)) {
+    sir_mb_free(b);
+    sir_hosted_zabi_dispose(&hz);
+    fprintf(stderr, "sem: sir module func init failed\n");
+    return 1;
+  }
+
+  static const uint8_t msg[] = "hello from sir_module\n";
+  if (!sir_mb_emit_const_i32(b, f, 0, 1)) {
+    sir_mb_free(b);
+    sir_hosted_zabi_dispose(&hz);
+    fprintf(stderr, "sem: sir module emit failed\n");
+    return 1;
+  }
+  if (!sir_mb_emit_const_bytes(b, f, 1, 2, msg, (uint32_t)(sizeof(msg) - 1))) {
+    sir_mb_free(b);
+    sir_hosted_zabi_dispose(&hz);
+    fprintf(stderr, "sem: sir module emit failed\n");
+    return 1;
+  }
+
+  const sir_val_id_t args[] = {0, 1, 2};
+  if (!sir_mb_emit_call_extern(b, f, sym_zi_write, args, (uint32_t)(sizeof(args) / sizeof(args[0])))) {
+    sir_mb_free(b);
+    sir_hosted_zabi_dispose(&hz);
+    fprintf(stderr, "sem: sir module emit failed\n");
+    return 1;
+  }
+  if (!sir_mb_emit_exit(b, f, 0)) {
+    sir_mb_free(b);
+    sir_hosted_zabi_dispose(&hz);
+    fprintf(stderr, "sem: sir module emit failed\n");
+    return 1;
+  }
+
+  sir_module_t* m = sir_mb_finalize(b);
+  sir_mb_free(b);
+  if (!m) {
+    sir_hosted_zabi_dispose(&hz);
+    fprintf(stderr, "sem: sir module finalize failed\n");
+    return 1;
+  }
+
+  const int32_t rc = sir_module_run(m, hz.mem, host);
+  sir_module_free(m);
+  sir_hosted_zabi_dispose(&hz);
+  return (rc < 0) ? 1 : rc;
+}
+
 int main(int argc, char** argv) {
   bool want_caps = false;
   bool json = false;
   const char* fs_root = NULL;
   const char* cat_path = NULL;
   bool sir_hello = false;
+  bool sir_module_hello = false;
   const char* tape_out = NULL;
   const char* tape_in = NULL;
   bool tape_strict = true;
@@ -530,6 +641,10 @@ int main(int argc, char** argv) {
     }
     if (strcmp(a, "--sir-hello") == 0) {
       sir_hello = true;
+      continue;
+    }
+    if (strcmp(a, "--sir-module-hello") == 0) {
+      sir_module_hello = true;
       continue;
     }
     if (strcmp(a, "--cat") == 0 && i + 1 < argc) {
@@ -596,7 +711,7 @@ int main(int argc, char** argv) {
     return 2;
   }
 
-  if (!want_caps && !cat_path && !sir_hello) {
+  if (!want_caps && !cat_path && !sir_hello && !sir_module_hello) {
     sem_print_help(stdout);
     sem_free_caps(dyn_caps, dyn_n);
     return 0;
@@ -629,6 +744,10 @@ int main(int argc, char** argv) {
   if (sir_hello) {
     sem_free_caps(dyn_caps, dyn_n);
     return sem_do_sir_hello();
+  }
+  if (sir_module_hello) {
+    sem_free_caps(dyn_caps, dyn_n);
+    return sem_do_sir_module_hello();
   }
 
   sem_host_t host;
