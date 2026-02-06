@@ -18,12 +18,14 @@ typedef struct type_info {
   bool present;
   bool is_fn;
   bool is_array;
+  bool is_ptr;
   sir_prim_type_t prim; // for prim
   uint32_t* params;     // for fn, arena-owned
   uint32_t param_count;
   uint32_t ret; // SIR type id
   uint32_t array_of;
   uint32_t array_len;
+  uint32_t ptr_of;
   uint32_t loc_line;
 } type_info_t;
 
@@ -323,6 +325,7 @@ static bool parse_u32_array(const JsonValue* v, uint32_t** out, uint32_t* out_n,
 
 static sir_prim_type_t prim_from_string(const char* s) {
   if (!s) return SIR_PRIM_INVALID;
+  if (strcmp(s, "void") == 0) return SIR_PRIM_VOID;
   if (strcmp(s, "i8") == 0) return SIR_PRIM_I8;
   if (strcmp(s, "i32") == 0) return SIR_PRIM_I32;
   if (strcmp(s, "i64") == 0) return SIR_PRIM_I64;
@@ -334,6 +337,8 @@ static sir_prim_type_t prim_from_string(const char* s) {
 static sir_type_id_t mod_ty_for_prim(sirj_ctx_t* c, sir_prim_type_t prim) {
   if (!c) return 0;
   switch (prim) {
+    case SIR_PRIM_VOID:
+      return 0;
     case SIR_PRIM_I8:
       return c->ty_i8;
     case SIR_PRIM_I32:
@@ -430,10 +435,13 @@ static bool resolve_decl_fn_sym(sirj_ctx_t* c, uint32_t node_id, sir_sym_id_t* o
   if (ti->ret != 0) {
     const uint32_t sir_rid = ti->ret;
     if (sir_rid == 0 || sir_rid >= c->type_cap || !c->types[sir_rid].present || c->types[sir_rid].is_fn) return false;
-    const sir_type_id_t mt = mod_ty_for_prim(c, c->types[sir_rid].prim);
-    if (!mt) return false;
-    results[0] = mt;
-    result_count = 1;
+    const sir_prim_type_t rp = c->types[sir_rid].prim;
+    if (rp != SIR_PRIM_VOID) {
+      const sir_type_id_t mt = mod_ty_for_prim(c, rp);
+      if (!mt) return false;
+      results[0] = mt;
+      result_count = 1;
+    }
   }
 
   sir_sig_t sig = {
@@ -456,6 +464,8 @@ static bool val_kind_for_type_ref(const sirj_ctx_t* c, uint32_t type_ref, val_ki
   if (!c->types[type_ref].present) return false;
   if (c->types[type_ref].is_fn) return false;
   switch (c->types[type_ref].prim) {
+    case SIR_PRIM_VOID:
+      return false;
     case SIR_PRIM_I8:
       *out = VK_I8;
       return true;
@@ -487,6 +497,7 @@ static bool type_layout(const sirj_ctx_t* c, uint32_t type_ref, uint32_t* out_si
     if (t->array_of == 0) return false;
     uint32_t es = 0, ea = 0;
     if (!type_layout(c, t->array_of, &es, &ea)) return false;
+    if (es == 0) return false;
     if (t->array_len == 0) return false;
     const uint64_t size64 = (uint64_t)es * (uint64_t)t->array_len;
     if (size64 > 0x7FFFFFFFull) return false;
@@ -497,6 +508,10 @@ static bool type_layout(const sirj_ctx_t* c, uint32_t type_ref, uint32_t* out_si
 
   uint32_t size = 0, align = 1;
   switch (t->prim) {
+    case SIR_PRIM_VOID:
+      size = 0;
+      align = 1;
+      break;
     case SIR_PRIM_I8:
       size = 1;
       align = 1;
@@ -2221,6 +2236,10 @@ static bool parse_file(sirj_ctx_t* c, const char* path) {
             fclose(f);
             return false;
           }
+        } else if (strcmp(kind, "ptr") == 0) {
+          ti.is_ptr = true;
+          ti.prim = SIR_PRIM_PTR;
+          (void)json_get_u32(json_obj_get(root, "of"), &ti.ptr_of);
         } else {
           // ignore other kinds for now
           memset(&ti, 0, sizeof(ti));
@@ -2367,12 +2386,14 @@ static bool build_fn_sig(sirj_ctx_t* c, uint32_t fn_type_id, sir_sig_t* out_sig)
     if (rid == 0 || rid >= c->type_cap) return false;
     const type_info_t* rt = &c->types[rid];
     if (!rt->present || rt->is_fn) return false;
-    const sir_type_id_t mt = mod_ty_for_prim(c, rt->prim);
-    if (!mt) return false;
-    results = (sir_type_id_t*)arena_alloc(&c->arena, sizeof(sir_type_id_t));
-    if (!results) return false;
-    results[0] = mt;
-    result_count = 1;
+    if (rt->prim != SIR_PRIM_VOID) {
+      const sir_type_id_t mt = mod_ty_for_prim(c, rt->prim);
+      if (!mt) return false;
+      results = (sir_type_id_t*)arena_alloc(&c->arena, sizeof(sir_type_id_t));
+      if (!results) return false;
+      results[0] = mt;
+      result_count = 1;
+    }
   }
 
   out_sig->params = params;
@@ -2507,12 +2528,8 @@ static bool lower_globals(sirj_ctx_t* c) {
   return true;
 }
 
-int sem_run_sir_jsonl(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root) {
-  return sem_run_sir_jsonl_ex(path, caps, cap_count, fs_root, SEM_DIAG_TEXT, false);
-}
-
-int sem_run_sir_jsonl_ex(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root, sem_diag_format_t diag_format,
-                         bool diag_all) {
+static int sem_run_or_verify_sir_jsonl_ex(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root,
+                                         sem_diag_format_t diag_format, bool diag_all, bool do_run) {
   if (!path) return 2;
 
   sirj_ctx_t c;
@@ -2662,6 +2679,12 @@ int sem_run_sir_jsonl_ex(const char* path, const sem_cap_t* caps, uint32_t cap_c
     return 1;
   }
 
+  if (!do_run) {
+    sir_module_free(m);
+    ctx_dispose(&c);
+    return 0;
+  }
+
   sir_hosted_zabi_t hz;
   if (!sir_hosted_zabi_init(
           &hz, (sir_hosted_zabi_cfg_t){.abi_version = 0x00020005u,
@@ -2694,4 +2717,21 @@ int sem_run_sir_jsonl_ex(const char* path, const sem_cap_t* caps, uint32_t cap_c
     return 1;
   }
   return (int)rc;
+}
+
+int sem_run_sir_jsonl(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root) {
+  return sem_run_or_verify_sir_jsonl_ex(path, caps, cap_count, fs_root, SEM_DIAG_TEXT, false, true);
+}
+
+int sem_run_sir_jsonl_ex(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root, sem_diag_format_t diag_format,
+                         bool diag_all) {
+  return sem_run_or_verify_sir_jsonl_ex(path, caps, cap_count, fs_root, diag_format, diag_all, true);
+}
+
+int sem_verify_sir_jsonl(const char* path, sem_diag_format_t diag_format) {
+  return sem_verify_sir_jsonl_ex(path, diag_format, false);
+}
+
+int sem_verify_sir_jsonl_ex(const char* path, sem_diag_format_t diag_format, bool diag_all) {
+  return sem_run_or_verify_sir_jsonl_ex(path, NULL, 0, NULL, diag_format, diag_all, false);
 }

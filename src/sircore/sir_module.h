@@ -26,6 +26,7 @@ typedef uint32_t sir_global_id_t;
 
 typedef enum sir_prim_type {
   SIR_PRIM_INVALID = 0,
+  SIR_PRIM_VOID,
   SIR_PRIM_I8,
   SIR_PRIM_I32,
   SIR_PRIM_I64,

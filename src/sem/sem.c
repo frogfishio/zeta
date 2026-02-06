@@ -41,6 +41,7 @@ static void sem_print_help(FILE* out) {
           "  sem --sir-hello\n"
           "  sem --sir-module-hello\n"
           "  sem --run FILE.sir.jsonl [--diagnostics text|json] [--fs-root PATH] [--cap ...]\n"
+          "  sem --verify FILE.sir.jsonl [--diagnostics text|json]\n"
           "\n"
           "Options:\n"
           "  --help        Show this help message\n"
@@ -51,9 +52,10 @@ static void sem_print_help(FILE* out) {
           "  --sir-hello   Run a tiny built-in sircore VM smoke program\n"
           "  --sir-module-hello  Run a tiny built-in sircore module smoke program\n"
           "  --run FILE    Run a small supported SIR subset (MVP)\n"
+          "  --verify FILE Validate + lower (no execution)\n"
           "  --json        Emit --caps output as JSON (stdout)\n"
-          "  --diagnostics Emit --run diagnostics as: text (default) or json\n"
-          "  --all         For --run, try to emit multiple diagnostics (best-effort)\n"
+          "  --diagnostics Emit --run/--verify diagnostics as: text (default) or json\n"
+          "  --all         For --run/--verify, try to emit multiple diagnostics (best-effort)\n"
           "\n"
           "  --cap KIND:NAME[:FLAGS]\n"
           "      Add a capability entry. FLAGS is a comma-list of:\n"
@@ -671,6 +673,7 @@ int main(int argc, char** argv) {
   bool sir_hello = false;
   bool sir_module_hello = false;
   const char* run_path = NULL;
+  const char* verify_path = NULL;
   sem_diag_format_t diag_format = SEM_DIAG_TEXT;
   bool diag_all = false;
   const char* tape_out = NULL;
@@ -711,6 +714,10 @@ int main(int argc, char** argv) {
     }
     if (strcmp(a, "--run") == 0 && i + 1 < argc) {
       run_path = argv[++i];
+      continue;
+    }
+    if (strcmp(a, "--verify") == 0 && i + 1 < argc) {
+      verify_path = argv[++i];
       continue;
     }
     if (strcmp(a, "--diagnostics") == 0 && i + 1 < argc) {
@@ -798,7 +805,13 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  if (!want_caps && !cat_path && !sir_hello && !sir_module_hello && !run_path) {
+  if (run_path && verify_path) {
+    fprintf(stderr, "sem: choose either --run or --verify\n");
+    sem_free_caps(dyn_caps, dyn_n);
+    return 2;
+  }
+
+  if (!want_caps && !cat_path && !sir_hello && !sir_module_hello && !run_path && !verify_path) {
     sem_print_help(stdout);
     sem_free_caps(dyn_caps, dyn_n);
     return 0;
@@ -838,6 +851,11 @@ int main(int argc, char** argv) {
   }
   if (run_path) {
     const int rc = sem_run_sir_jsonl_ex(run_path, caps, cap_n, fs_root, diag_format, diag_all);
+    sem_free_caps(dyn_caps, dyn_n);
+    return rc;
+  }
+  if (verify_path) {
+    const int rc = sem_verify_sir_jsonl_ex(verify_path, diag_format, diag_all);
     sem_free_caps(dyn_caps, dyn_n);
     return rc;
   }

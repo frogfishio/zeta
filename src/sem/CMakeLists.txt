@@ -491,3 +491,51 @@ target_link_libraries(sem_unit_run_sem_i32_trunc_i64 PRIVATE sircore_hosted_zabi
 target_compile_options(sem_unit_run_sem_i32_trunc_i64 PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 add_test(NAME sem_run_sem_i32_trunc_i64 COMMAND sem_unit_run_sem_i32_trunc_i64)
+
+add_executable(sem_unit_run_sem_void_type_ignored
+  tests/test_run_sem_void_type_ignored.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_sem_void_type_ignored PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_sem_void_type_ignored PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_sem_void_type_ignored PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_sem_void_type_ignored PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_sem_void_type_ignored PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_sem_void_type_ignored COMMAND sem_unit_run_sem_void_type_ignored)
+
+add_executable(sem_unit_run_sem_ptr_kind_param
+  tests/test_run_sem_ptr_kind_param.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_sem_ptr_kind_param PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_sem_ptr_kind_param PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_sem_ptr_kind_param PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_sem_ptr_kind_param PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_sem_ptr_kind_param PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_sem_ptr_kind_param COMMAND sem_unit_run_sem_ptr_kind_param)
+
+add_executable(sem_unit_verify_ptr_layout
+  tests/test_verify_ptr_layout.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_verify_ptr_layout PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_verify_ptr_layout PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_verify_ptr_layout PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_verify_ptr_layout PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_verify_ptr_layout PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_verify_ptr_layout COMMAND sem_unit_verify_ptr_layout)

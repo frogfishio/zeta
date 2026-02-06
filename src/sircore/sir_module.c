@@ -1811,6 +1811,9 @@ static int32_t exec_func(const sir_module_t* m, sem_guest_mem_t* mem, sir_host_t
       }
       const sir_prim_type_t prim = m->types[tid - 1].prim;
       switch (prim) {
+        case SIR_PRIM_VOID:
+          free(vals);
+          return ZI_E_INVALID;
         case SIR_PRIM_I8:
           vals[i] = (sir_value_t){.kind = SIR_VAL_I8, .u.u8 = 0};
           break;

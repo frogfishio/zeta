@@ -73,6 +73,10 @@ Scope notes:
 - [x] `mem.copy` (overlap: disallow/allow; disallow traps on overlap)
 - [x] `mem.fill`
 
+### Types (parser + lowering)
+- [x] `type.kind:"prim"` accepts `prim:"void"` (signature-only; no values)
+- [x] `type.kind:"ptr"` is treated as an untyped pointer
+
 ## P2 (data): globals + structured constants (enables “real programs”)
 
 - [x] Globals via `sym` records (module-level data)

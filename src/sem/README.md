@@ -81,6 +81,9 @@ sem --run src/sircc/examples/hello_zabi25_write.sir.jsonl
 
 The current `--run` MVP supports (growing over time):
 
+- types:
+  - `type.kind:"prim"` supports `prim:"void"` for signatures (no value / no storage)
+  - `type.kind:"ptr"` is treated as an untyped pointer (lowered as `ptr`)
 - `fn` in either form:
   - single `body: block` form
   - CFG form: `entry: block` + `blocks: [block...]`
