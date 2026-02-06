@@ -101,3 +101,12 @@ Enable via `meta.ext.features`.
 - Machine-readable failures: `sircc --diagnostics json --diag-context 2 --verify-only your.sir.jsonl`
 - Support surface: `sircc --print-support --format json`
 - Target ABI report: `sircc --print-target`
+
+## Safety limits (ingestion)
+
+`sircc` enforces high default safety limits when reading JSONL:
+
+- `SIRCC_MAX_LINE_BYTES`: max bytes per JSONL record line (default: 16 MiB)
+- `SIRCC_MAX_RECORDS`: max non-blank records per input file (default: 5,000,000)
+
+These are intended to prevent accidental OOM/degenerate inputs; raise them if you have extremely large modules.

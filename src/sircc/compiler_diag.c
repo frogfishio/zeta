@@ -164,7 +164,9 @@ static void err_vimpl(SirProgram* p, const char* diag_code, const char* fmt, va_
         size_t llen = 0;
         size_t lno = 0;
         bool first = true;
-        while (read_line(ctxf, &lbuf, &lcap, &llen)) {
+        bool too_long = false;
+        while (read_line(ctxf, &lbuf, &lcap, &llen, 1024u * 1024u, &too_long)) {
+          if (too_long) break;
           lno++;
           if (lno < lo) continue;
           if (lno > hi) break;
@@ -223,7 +225,9 @@ static void err_vimpl(SirProgram* p, const char* diag_code, const char* fmt, va_
         size_t lcap = 0;
         size_t llen = 0;
         size_t lno = 0;
-        while (read_line(ctxf, &lbuf, &lcap, &llen)) {
+        bool too_long = false;
+        while (read_line(ctxf, &lbuf, &lcap, &llen, 1024u * 1024u, &too_long)) {
+          if (too_long) break;
           lno++;
           if (lno < lo) continue;
           if (lno > hi) break;

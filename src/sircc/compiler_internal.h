@@ -222,7 +222,7 @@ const char* must_string(SirProgram* p, JsonValue* v, const char* ctx);
 bool must_i64(SirProgram* p, JsonValue* v, int64_t* out, const char* ctx);
 bool is_ident(const char* s);
 
-bool read_line(FILE* f, char** buf, size_t* cap, size_t* out_len);
+bool read_line(FILE* f, char** buf, size_t* cap, size_t* out_len, size_t max_line_bytes, bool* out_too_long);
 bool is_blank_line(const char* s);
 
 // Tables

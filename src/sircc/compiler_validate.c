@@ -10,6 +10,336 @@
 
 static bool validate_cfg_fn(SirProgram* p, NodeRec* fn);
 
+static bool is_prim_named(SirProgram* p, int64_t type_id, const char* prim) {
+  if (!p || !prim || type_id == 0) return false;
+  TypeRec* t = get_type(p, type_id);
+  return t && t->kind == TYPE_PRIM && t->prim && strcmp(t->prim, prim) == 0;
+}
+
+static bool is_vec_type_id(SirProgram* p, int64_t type_id, TypeRec** out_vec, TypeRec** out_lane) {
+  if (out_vec) *out_vec = NULL;
+  if (out_lane) *out_lane = NULL;
+  if (!p || type_id == 0) return false;
+  TypeRec* v = get_type(p, type_id);
+  if (!v || v->kind != TYPE_VEC || v->lane_ty == 0) return false;
+  TypeRec* lane = get_type(p, v->lane_ty);
+  if (!lane || lane->kind != TYPE_PRIM || !lane->prim) return false;
+  if (out_vec) *out_vec = v;
+  if (out_lane) *out_lane = lane;
+  return true;
+}
+
+static bool lane_is_bool(TypeRec* lane) {
+  if (!lane || lane->kind != TYPE_PRIM || !lane->prim) return false;
+  return strcmp(lane->prim, "bool") == 0 || strcmp(lane->prim, "i1") == 0;
+}
+
+static int64_t find_bool_vec_type_id(SirProgram* p, int64_t lanes) {
+  if (!p || lanes <= 0) return 0;
+  for (size_t i = 0; i < p->types_cap; i++) {
+    TypeRec* t = p->types[i];
+    if (!t || t->kind != TYPE_VEC) continue;
+    if (t->lanes != lanes) continue;
+    TypeRec* lane = get_type(p, t->lane_ty);
+    if (lane_is_bool(lane)) return (int64_t)i;
+  }
+  return 0;
+}
+
+static bool validate_simd_node(SirProgram* p, NodeRec* n) {
+  if (!p || !n) return false;
+  if (!p->feat_simd_v1) return true;
+  if (!(strncmp(n->tag, "vec.", 4) == 0 || strcmp(n->tag, "load.vec") == 0 || strcmp(n->tag, "store.vec") == 0)) return true;
+
+  SirDiagSaved saved = sir_diag_push_node(p, n);
+
+  // Helper: fetch args array.
+  JsonValue* args = (n->fields && n->fields->type == JSON_OBJECT) ? json_obj_get(n->fields, "args") : NULL;
+
+  if (strcmp(n->tag, "vec.splat") == 0) {
+    if (n->type_ref == 0) {
+      err_codef(p, "sircc.vec.splat.missing_type", "sircc: vec.splat node %lld missing type_ref (vec type)", (long long)n->id);
+      goto bad;
+    }
+    TypeRec* vec = NULL;
+    TypeRec* lane = NULL;
+    if (!is_vec_type_id(p, n->type_ref, &vec, &lane)) {
+      err_codef(p, "sircc.vec.splat.type.bad", "sircc: vec.splat node %lld type_ref must be a vec type", (long long)n->id);
+      goto bad;
+    }
+    if (!args || args->type != JSON_ARRAY || args->v.arr.len != 1) {
+      err_codef(p, "sircc.vec.splat.args.bad", "sircc: vec.splat node %lld requires args:[x]", (long long)n->id);
+      goto bad;
+    }
+    int64_t xid = 0;
+    if (!parse_node_ref_id(p, args->v.arr.items[0], &xid)) {
+      err_codef(p, "sircc.vec.splat.args.ref_bad", "sircc: vec.splat node %lld args[0] must be a node ref", (long long)n->id);
+      goto bad;
+    }
+    NodeRec* x = get_node(p, xid);
+    if (!x || x->type_ref != vec->lane_ty) {
+      err_codef(p, "sircc.vec.splat.lane.type_mismatch", "sircc: vec.splat node %lld arg type must match lane type", (long long)n->id);
+      goto bad;
+    }
+    goto ok;
+  }
+
+  if (strcmp(n->tag, "vec.extract") == 0) {
+    if (!args || args->type != JSON_ARRAY || args->v.arr.len != 2) {
+      err_codef(p, "sircc.vec.extract.args.bad", "sircc: vec.extract node %lld requires args:[v, idx]", (long long)n->id);
+      goto bad;
+    }
+    int64_t vid = 0, idxid = 0;
+    if (!parse_node_ref_id(p, args->v.arr.items[0], &vid) || !parse_node_ref_id(p, args->v.arr.items[1], &idxid)) {
+      err_codef(p, "sircc.vec.extract.args.ref_bad", "sircc: vec.extract node %lld args must be node refs", (long long)n->id);
+      goto bad;
+    }
+    NodeRec* v = get_node(p, vid);
+    NodeRec* idx = get_node(p, idxid);
+    TypeRec* vec = NULL;
+    TypeRec* lane = NULL;
+    if (!v || !is_vec_type_id(p, v->type_ref, &vec, &lane)) {
+      err_codef(p, "sircc.vec.extract.v.type.bad", "sircc: vec.extract node %lld v must be a vec", (long long)n->id);
+      goto bad;
+    }
+    if (!idx || !is_prim_named(p, idx->type_ref, "i32")) {
+      err_codef(p, "sircc.vec.extract.idx.type.bad", "sircc: vec.extract node %lld idx must be i32", (long long)n->id);
+      goto bad;
+    }
+    if (n->type_ref && n->type_ref != vec->lane_ty) {
+      err_codef(p, "sircc.vec.extract.type.bad", "sircc: vec.extract node %lld type_ref must match lane type", (long long)n->id);
+      goto bad;
+    }
+    goto ok;
+  }
+
+  if (strcmp(n->tag, "vec.replace") == 0) {
+    if (n->type_ref == 0) {
+      err_codef(p, "sircc.vec.replace.missing_type", "sircc: vec.replace node %lld missing type_ref (vec type)", (long long)n->id);
+      goto bad;
+    }
+    TypeRec* vec = NULL;
+    TypeRec* lane = NULL;
+    if (!is_vec_type_id(p, n->type_ref, &vec, &lane)) {
+      err_codef(p, "sircc.vec.replace.type.bad", "sircc: vec.replace node %lld type_ref must be a vec type", (long long)n->id);
+      goto bad;
+    }
+    if (!args || args->type != JSON_ARRAY || args->v.arr.len != 3) {
+      err_codef(p, "sircc.vec.replace.args.bad", "sircc: vec.replace node %lld requires args:[v, idx, x]", (long long)n->id);
+      goto bad;
+    }
+    int64_t vid = 0, idxid = 0, xid = 0;
+    if (!parse_node_ref_id(p, args->v.arr.items[0], &vid) || !parse_node_ref_id(p, args->v.arr.items[1], &idxid) ||
+        !parse_node_ref_id(p, args->v.arr.items[2], &xid)) {
+      err_codef(p, "sircc.vec.replace.args.ref_bad", "sircc: vec.replace node %lld args must be node refs", (long long)n->id);
+      goto bad;
+    }
+    NodeRec* v = get_node(p, vid);
+    NodeRec* idx = get_node(p, idxid);
+    NodeRec* x = get_node(p, xid);
+    if (!v || v->type_ref != n->type_ref) {
+      err_codef(p, "sircc.vec.replace.v.type.bad", "sircc: vec.replace node %lld v must match type_ref", (long long)n->id);
+      goto bad;
+    }
+    if (!idx || !is_prim_named(p, idx->type_ref, "i32")) {
+      err_codef(p, "sircc.vec.replace.idx.type.bad", "sircc: vec.replace node %lld idx must be i32", (long long)n->id);
+      goto bad;
+    }
+    if (!x || x->type_ref != vec->lane_ty) {
+      err_codef(p, "sircc.vec.replace.x.type.bad", "sircc: vec.replace node %lld x must match lane type", (long long)n->id);
+      goto bad;
+    }
+    goto ok;
+  }
+
+  if (strcmp(n->tag, "vec.shuffle") == 0) {
+    if (n->type_ref == 0) {
+      err_codef(p, "sircc.vec.shuffle.missing_type", "sircc: vec.shuffle node %lld missing type_ref (vec type)", (long long)n->id);
+      goto bad;
+    }
+    TypeRec* vec = NULL;
+    TypeRec* lane = NULL;
+    if (!is_vec_type_id(p, n->type_ref, &vec, &lane)) {
+      err_codef(p, "sircc.vec.shuffle.type.bad", "sircc: vec.shuffle node %lld type_ref must be a vec type", (long long)n->id);
+      goto bad;
+    }
+    if (!args || args->type != JSON_ARRAY || args->v.arr.len != 2) {
+      err_codef(p, "sircc.vec.shuffle.args.bad", "sircc: vec.shuffle node %lld requires args:[a,b]", (long long)n->id);
+      goto bad;
+    }
+    int64_t aid = 0, bid = 0;
+    if (!parse_node_ref_id(p, args->v.arr.items[0], &aid) || !parse_node_ref_id(p, args->v.arr.items[1], &bid)) {
+      err_codef(p, "sircc.vec.shuffle.args.ref_bad", "sircc: vec.shuffle node %lld args must be node refs", (long long)n->id);
+      goto bad;
+    }
+    NodeRec* a = get_node(p, aid);
+    NodeRec* b = get_node(p, bid);
+    if (!a || !b || a->type_ref != n->type_ref || b->type_ref != n->type_ref) {
+      err_codef(p, "sircc.vec.shuffle.ab.type.bad", "sircc: vec.shuffle node %lld requires a,b of the same vec type", (long long)n->id);
+      goto bad;
+    }
+    JsonValue* flags = json_obj_get(n->fields, "flags");
+    JsonValue* idxs = (flags && flags->type == JSON_OBJECT) ? json_obj_get(flags, "idx") : NULL;
+    if (!idxs || idxs->type != JSON_ARRAY || idxs->v.arr.len != (size_t)vec->lanes) {
+      err_codef(p, "sircc.vec.shuffle.idx.len_bad", "sircc: vec.shuffle node %lld flags.idx length must equal lanes", (long long)n->id);
+      goto bad;
+    }
+    for (size_t i = 0; i < idxs->v.arr.len; i++) {
+      int64_t x = 0;
+      if (!json_get_i64(idxs->v.arr.items[i], &x)) {
+        err_codef(p, "sircc.vec.shuffle.idx.elem_bad", "sircc: vec.shuffle node %lld flags.idx[%zu] must be an integer", (long long)n->id, i);
+        goto bad;
+      }
+    }
+    goto ok;
+  }
+
+  if (strcmp(n->tag, "load.vec") == 0) {
+    if (n->type_ref == 0 || !is_vec_type_id(p, n->type_ref, NULL, NULL)) {
+      err_codef(p, "sircc.load.vec.type.bad", "sircc: load.vec node %lld type_ref must be a vec type", (long long)n->id);
+      goto bad;
+    }
+    JsonValue* addr = n->fields ? json_obj_get(n->fields, "addr") : NULL;
+    int64_t aid = 0;
+    if (!parse_node_ref_id(p, addr, &aid)) {
+      err_codef(p, "sircc.load.vec.addr.ref_bad", "sircc: load.vec node %lld missing fields.addr ref", (long long)n->id);
+      goto bad;
+    }
+    NodeRec* a = get_node(p, aid);
+    if (!a) {
+      err_codef(p, "sircc.load.vec.addr.ref_bad", "sircc: load.vec node %lld addr references unknown node %lld", (long long)n->id, (long long)aid);
+      goto bad;
+    }
+    if (a->type_ref) {
+      TypeRec* at = get_type(p, a->type_ref);
+      if (!at || at->kind != TYPE_PTR) {
+        err_codef(p, "sircc.load.vec.addr.not_ptr", "sircc: load.vec node %lld requires pointer addr", (long long)n->id);
+        goto bad;
+      }
+    }
+    goto ok;
+  }
+
+  if (strcmp(n->tag, "store.vec") == 0) {
+    JsonValue* addr = n->fields ? json_obj_get(n->fields, "addr") : NULL;
+    JsonValue* val = n->fields ? json_obj_get(n->fields, "value") : NULL;
+    int64_t aid = 0, vid = 0;
+    if (!parse_node_ref_id(p, addr, &aid) || !parse_node_ref_id(p, val, &vid)) {
+      err_codef(p, "sircc.store.vec.addr_value.ref_bad", "sircc: store.vec node %lld requires fields.addr and fields.value refs", (long long)n->id);
+      goto bad;
+    }
+    NodeRec* a = get_node(p, aid);
+    if (!a) {
+      err_codef(p, "sircc.store.vec.addr_value.ref_bad", "sircc: store.vec node %lld addr references unknown node %lld", (long long)n->id, (long long)aid);
+      goto bad;
+    }
+    if (a->type_ref) {
+      TypeRec* at = get_type(p, a->type_ref);
+      if (!at || at->kind != TYPE_PTR) {
+        err_codef(p, "sircc.store.vec.addr.not_ptr", "sircc: store.vec node %lld requires pointer addr", (long long)n->id);
+        goto bad;
+      }
+    }
+    NodeRec* v = get_node(p, vid);
+    int64_t vec_ty = v ? v->type_ref : 0;
+    if (vec_ty == 0) {
+      (void)parse_type_ref_id(p, n->fields ? json_obj_get(n->fields, "ty") : NULL, &vec_ty);
+    }
+    if (!vec_ty || !is_vec_type_id(p, vec_ty, NULL, NULL)) {
+      err_codef(p, "sircc.store.vec.type.bad", "sircc: store.vec node %lld requires vec type (value.type_ref or fields.ty)", (long long)n->id);
+      goto bad;
+    }
+    if (v && v->type_ref && v->type_ref != vec_ty) {
+      err_codef(p, "sircc.store.vec.type.mismatch", "sircc: store.vec node %lld value vec type does not match fields.ty", (long long)n->id);
+      goto bad;
+    }
+    goto ok;
+  }
+
+  if (strcmp(n->tag, "vec.bitcast") == 0) {
+    if (!n->fields) {
+      err_codef(p, "sircc.vec.bitcast.missing_fields", "sircc: vec.bitcast node %lld missing fields", (long long)n->id);
+      goto bad;
+    }
+    int64_t from_id = 0, to_id = 0;
+    if (!parse_type_ref_id(p, json_obj_get(n->fields, "from"), &from_id) || !parse_type_ref_id(p, json_obj_get(n->fields, "to"), &to_id)) {
+      err_codef(p, "sircc.vec.bitcast.from_to.bad", "sircc: vec.bitcast node %lld requires fields.from and fields.to type refs", (long long)n->id);
+      goto bad;
+    }
+    if (!is_vec_type_id(p, from_id, NULL, NULL) || !is_vec_type_id(p, to_id, NULL, NULL)) {
+      err_codef(p, "sircc.vec.bitcast.type.bad", "sircc: vec.bitcast node %lld from/to must be vec types", (long long)n->id);
+      goto bad;
+    }
+    int64_t from_sz = 0, from_al = 0, to_sz = 0, to_al = 0;
+    if (!type_size_align(p, from_id, &from_sz, &from_al) || !type_size_align(p, to_id, &to_sz, &to_al) || from_sz != to_sz) {
+      err_codef(p, "sircc.vec.bitcast.size_mismatch", "sircc: vec.bitcast node %lld requires sizeof(from)==sizeof(to)", (long long)n->id);
+      goto bad;
+    }
+    if (!args || args->type != JSON_ARRAY || args->v.arr.len != 1) {
+      err_codef(p, "sircc.vec.bitcast.args.bad", "sircc: vec.bitcast node %lld requires args:[v]", (long long)n->id);
+      goto bad;
+    }
+    int64_t vid = 0;
+    if (!parse_node_ref_id(p, args->v.arr.items[0], &vid)) {
+      err_codef(p, "sircc.vec.bitcast.args.ref_bad", "sircc: vec.bitcast node %lld args[0] must be a node ref", (long long)n->id);
+      goto bad;
+    }
+    NodeRec* v = get_node(p, vid);
+    if (!v || v->type_ref != from_id) {
+      err_codef(p, "sircc.vec.bitcast.v.type.bad", "sircc: vec.bitcast node %lld value must have type from", (long long)n->id);
+      goto bad;
+    }
+    goto ok;
+  }
+
+  // Remaining vec.* families: validate arity + type shape (best-effort).
+  if (strncmp(n->tag, "vec.cmp.", 8) == 0 || strcmp(n->tag, "vec.select") == 0 || strcmp(n->tag, "vec.add") == 0 || strcmp(n->tag, "vec.sub") == 0 ||
+      strcmp(n->tag, "vec.mul") == 0 || strcmp(n->tag, "vec.and") == 0 || strcmp(n->tag, "vec.or") == 0 || strcmp(n->tag, "vec.xor") == 0 ||
+      strcmp(n->tag, "vec.not") == 0) {
+    if (!args || args->type != JSON_ARRAY) {
+      err_codef(p, "sircc.vec.op.args.bad", "sircc: %s node %lld requires args array", n->tag, (long long)n->id);
+      goto bad;
+    }
+    // Defer deep type checking to lowering for now; but keep arity tight.
+    size_t want = 0;
+    if (strcmp(n->tag, "vec.not") == 0) want = 1;
+    else if (strncmp(n->tag, "vec.cmp.", 8) == 0) want = 2;
+    else if (strcmp(n->tag, "vec.select") == 0) want = 3;
+    else want = 2;
+    if (args->v.arr.len != want) {
+      err_codef(p, "sircc.vec.op.arity_bad", "sircc: %s node %lld requires %zu args", n->tag, (long long)n->id, want);
+      goto bad;
+    }
+
+    // For vec.cmp.*, ensure there is a bool vec type when type_ref is absent.
+    if (strncmp(n->tag, "vec.cmp.", 8) == 0 && n->type_ref == 0) {
+      int64_t aid = 0;
+      if (parse_node_ref_id(p, args->v.arr.items[0], &aid)) {
+        NodeRec* a = get_node(p, aid);
+        TypeRec* src = NULL;
+        TypeRec* lane = NULL;
+        if (a && is_vec_type_id(p, a->type_ref, &src, &lane)) {
+          int64_t bty = find_bool_vec_type_id(p, src->lanes);
+          if (bty == 0) {
+            err_codef(p, "sircc.vec.cmp.bool_ty_missing",
+                      "sircc: %s node %lld requires a vec(bool,%lld) type definition to exist in the stream", n->tag, (long long)n->id,
+                      (long long)src->lanes);
+            goto bad;
+          }
+        }
+      }
+    }
+    goto ok;
+  }
+
+ok:
+  sir_diag_pop(p, saved);
+  return true;
+bad:
+  sir_diag_pop(p, saved);
+  return false;
+}
+
 bool validate_program(SirProgram* p) {
   // Validate CFG-form functions even under --verify-only.
   for (size_t i = 0; i < p->nodes_cap; i++) {
@@ -122,6 +452,15 @@ bool validate_program(SirProgram* p) {
       err_codef(p, "sircc.feature.dep", "sircc: sem.match_sum requires adt:v1");
       sir_diag_pop(p, saved);
       return false;
+    }
+  }
+
+  // SIMD semantic checks (close the "verify-only vs lowering" delta).
+  if (p->feat_simd_v1) {
+    for (size_t i = 0; i < p->nodes_cap; i++) {
+      NodeRec* n = p->nodes[i];
+      if (!n) continue;
+      if (!validate_simd_node(p, n)) return false;
     }
   }
 

@@ -269,7 +269,20 @@ static bool note_pending_feature_use(SirProgram* p, const char* mnemonic, const 
   return true;
 }
 
-bool read_line(FILE* f, char** buf, size_t* cap, size_t* out_len) {
+static bool parse_env_u64(const char* name, uint64_t* out) {
+  if (!name || !out) return false;
+  const char* s = getenv(name);
+  if (!s || !*s) return false;
+  errno = 0;
+  char* end = NULL;
+  unsigned long long v = strtoull(s, &end, 10);
+  if (errno != 0 || !end || *end != 0) return false;
+  *out = (uint64_t)v;
+  return true;
+}
+
+bool read_line(FILE* f, char** buf, size_t* cap, size_t* out_len, size_t max_line_bytes, bool* out_too_long) {
+  if (out_too_long) *out_too_long = false;
   if (!*buf || *cap == 0) {
     *cap = 4096;
     *buf = (char*)malloc(*cap);
@@ -283,6 +296,10 @@ bool read_line(FILE* f, char** buf, size_t* cap, size_t* out_len) {
     if (len && (*buf)[len - 1] == '\n') break;
     if (*cap - len < 2) {
       size_t next = (*cap) * 2;
+      if (max_line_bytes && next > max_line_bytes) {
+        if (out_too_long) *out_too_long = true;
+        return false;
+      }
       char* bigger = (char*)realloc(*buf, next);
       if (!bigger) return false;
       *buf = bigger;
@@ -797,9 +814,34 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
   size_t len = 0;
   size_t line_no = 0;
 
-  while (read_line(f, &line, &cap, &len)) {
+  // Safety limits to keep JSONL ingestion robust under adversarial inputs.
+  // These defaults are intentionally high; override via env vars if needed:
+  //   SIRCC_MAX_LINE_BYTES, SIRCC_MAX_RECORDS.
+  size_t max_line_bytes = 16u * 1024u * 1024u; // 16 MiB per JSONL record line
+  uint64_t max_records_u64 = 5ull * 1000ull * 1000ull; // 5,000,000 records
+  uint64_t max_line_u64 = 0;
+  if (parse_env_u64("SIRCC_MAX_LINE_BYTES", &max_line_u64)) {
+    if (max_line_u64 > (uint64_t)SIZE_MAX) max_line_bytes = SIZE_MAX;
+    else max_line_bytes = (size_t)max_line_u64;
+  }
+  (void)parse_env_u64("SIRCC_MAX_RECORDS", &max_records_u64);
+  if (max_line_bytes == 0) max_line_bytes = 16u * 1024u * 1024u;
+  if (max_records_u64 == 0) max_records_u64 = 5ull * 1000ull * 1000ull;
+  size_t max_records = (max_records_u64 > (uint64_t)SIZE_MAX) ? SIZE_MAX : (size_t)max_records_u64;
+  size_t records = 0;
+
+  bool too_long = false;
+  while (read_line(f, &line, &cap, &len, max_line_bytes, &too_long)) {
     line_no++;
     if (len == 0 || is_blank_line(line)) continue;
+    records++;
+    if (max_records && records > max_records) {
+      err_codef(p, "sircc.limit.records",
+                "sircc: input exceeded record limit (%zu) (override via SIRCC_MAX_RECORDS)", max_records);
+      free(line);
+      fclose(f);
+      return false;
+    }
 
     p->cur_path = input_path;
     p->cur_line = line_no;
@@ -962,6 +1004,13 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
     }
 
     err_codef(p, "sircc.schema.record_kind.unknown", "sircc: unknown record kind '%s'", k);
+    free(line);
+    fclose(f);
+    return false;
+  }
+  if (too_long) {
+    err_codef(p, "sircc.limit.line_too_long",
+              "sircc: JSONL line exceeded limit (%zu bytes) (override via SIRCC_MAX_LINE_BYTES)", max_line_bytes);
     free(line);
     fclose(f);
     return false;
