@@ -2,11 +2,15 @@ cmake_minimum_required(VERSION 3.20)
 
 add_executable(sem
   sem.c
+  sem_hosted.c
+  sir_jsonl.c
   zi_tape.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
 )
 
 target_compile_definitions(sem PRIVATE SIR_VERSION="${SIR_VERSION}")
-target_include_directories(sem PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore)
+target_include_directories(sem PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
 target_link_libraries(sem PRIVATE sircore_hosted_zabi sircore_vm sircore_module)
 
 target_compile_options(sem PRIVATE
@@ -66,3 +70,8 @@ target_compile_options(sem_unit_semrt_file_fs PRIVATE
 )
 
 add_test(NAME sem_semrt_file_fs COMMAND sem_unit_semrt_file_fs)
+
+add_test(
+  NAME sem_run_hello_zabi25_write
+  COMMAND $<TARGET_FILE:sem> --run ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_write.sir.jsonl
+)

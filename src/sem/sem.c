@@ -2,6 +2,8 @@
 #include "hosted_zabi.h"
 #include "sir_module.h"
 #include "sircore_vm.h"
+#include "sem_hosted.h"
+#include "sir_jsonl.h"
 #include "zi_tape.h"
 #include "zcl1.h"
 
@@ -37,6 +39,7 @@ static void sem_print_help(FILE* out) {
           "  sem --cat GUEST_PATH --fs-root PATH\n"
           "  sem --sir-hello\n"
           "  sem --sir-module-hello\n"
+          "  sem --run FILE.sir.jsonl [--fs-root PATH] [--cap ...]\n"
           "\n"
           "Options:\n"
           "  --help        Show this help message\n"
@@ -45,6 +48,7 @@ static void sem_print_help(FILE* out) {
           "  --cat PATH    Read PATH via file/fs and write to stdout\n"
           "  --sir-hello   Run a tiny built-in sircore VM smoke program\n"
           "  --sir-module-hello  Run a tiny built-in sircore module smoke program\n"
+          "  --run FILE    Run a small supported SIR subset (MVP)\n"
           "  --json        Emit --caps output as JSON (stdout)\n"
           "\n"
           "  --cap KIND:NAME[:FLAGS]\n"
@@ -440,22 +444,6 @@ static int sem_do_cat(const sem_cap_t* caps, uint32_t cap_n, const char* fs_root
   return 0;
 }
 
-static uint32_t hz_abi_version(void* u) { return sir_zi_abi_version((sir_hosted_zabi_t*)u); }
-static int32_t hz_ctl(void* u, zi_ptr_t a, zi_size32_t b, zi_ptr_t c, zi_size32_t d) { return sir_zi_ctl((sir_hosted_zabi_t*)u, a, b, c, d); }
-static int32_t hz_read(void* u, zi_handle_t h, zi_ptr_t p, zi_size32_t n) { return sir_zi_read((sir_hosted_zabi_t*)u, h, p, n); }
-static int32_t hz_write(void* u, zi_handle_t h, zi_ptr_t p, zi_size32_t n) { return sir_zi_write((sir_hosted_zabi_t*)u, h, p, n); }
-static int32_t hz_end(void* u, zi_handle_t h) { return sir_zi_end((sir_hosted_zabi_t*)u, h); }
-static zi_ptr_t hz_alloc(void* u, zi_size32_t n) { return sir_zi_alloc((sir_hosted_zabi_t*)u, n); }
-static int32_t hz_free(void* u, zi_ptr_t p) { return sir_zi_free((sir_hosted_zabi_t*)u, p); }
-static int32_t hz_telemetry(void* u, zi_ptr_t a, zi_size32_t b, zi_ptr_t c, zi_size32_t d) {
-  return sir_zi_telemetry((sir_hosted_zabi_t*)u, a, b, c, d);
-}
-static int32_t hz_cap_count(void* u) { return sir_zi_cap_count((sir_hosted_zabi_t*)u); }
-static int32_t hz_cap_get_size(void* u, int32_t i) { return sir_zi_cap_get_size((sir_hosted_zabi_t*)u, i); }
-static int32_t hz_cap_get(void* u, int32_t i, zi_ptr_t p, zi_size32_t n) { return sir_zi_cap_get((sir_hosted_zabi_t*)u, i, p, n); }
-static zi_handle_t hz_cap_open(void* u, zi_ptr_t p) { return sir_zi_cap_open((sir_hosted_zabi_t*)u, p); }
-static uint32_t hz_handle_hflags(void* u, zi_handle_t h) { return sir_zi_handle_hflags((sir_hosted_zabi_t*)u, h); }
-
 static int sem_do_sir_hello(void) {
   // Initialize a VM memory arena.
   sir_vm_t vm;
@@ -472,22 +460,7 @@ static int sem_do_sir_hello(void) {
     return 1;
   }
 
-  vm.host.user = &hz;
-  vm.host.v = (sir_host_vtable_t){
-      .zi_abi_version = hz_abi_version,
-      .zi_ctl = hz_ctl,
-      .zi_read = hz_read,
-      .zi_write = hz_write,
-      .zi_end = hz_end,
-      .zi_alloc = hz_alloc,
-      .zi_free = hz_free,
-      .zi_telemetry = hz_telemetry,
-      .zi_cap_count = hz_cap_count,
-      .zi_cap_get_size = hz_cap_get_size,
-      .zi_cap_get = hz_cap_get,
-      .zi_cap_open = hz_cap_open,
-      .zi_handle_hflags = hz_handle_hflags,
-  };
+  vm.host = sem_hosted_make_host(&hz);
 
   static const uint8_t msg[] = "hello from sircore_vm\n";
   const sir_ins_t ins[] = {
@@ -508,23 +481,7 @@ static int sem_do_sir_module_hello(void) {
     return 1;
   }
 
-  sir_host_t host = {0};
-  host.user = &hz;
-  host.v = (sir_host_vtable_t){
-      .zi_abi_version = hz_abi_version,
-      .zi_ctl = hz_ctl,
-      .zi_read = hz_read,
-      .zi_write = hz_write,
-      .zi_end = hz_end,
-      .zi_alloc = hz_alloc,
-      .zi_free = hz_free,
-      .zi_telemetry = hz_telemetry,
-      .zi_cap_count = hz_cap_count,
-      .zi_cap_get_size = hz_cap_get_size,
-      .zi_cap_get = hz_cap_get,
-      .zi_cap_open = hz_cap_open,
-      .zi_handle_hflags = hz_handle_hflags,
-  };
+  const sir_host_t host = sem_hosted_make_host(&hz);
 
   sir_module_builder_t* b = sir_mb_new();
   if (!b) {
@@ -615,6 +572,7 @@ int main(int argc, char** argv) {
   const char* cat_path = NULL;
   bool sir_hello = false;
   bool sir_module_hello = false;
+  const char* run_path = NULL;
   const char* tape_out = NULL;
   const char* tape_in = NULL;
   bool tape_strict = true;
@@ -645,6 +603,10 @@ int main(int argc, char** argv) {
     }
     if (strcmp(a, "--sir-module-hello") == 0) {
       sir_module_hello = true;
+      continue;
+    }
+    if (strcmp(a, "--run") == 0 && i + 1 < argc) {
+      run_path = argv[++i];
       continue;
     }
     if (strcmp(a, "--cat") == 0 && i + 1 < argc) {
@@ -711,7 +673,7 @@ int main(int argc, char** argv) {
     return 2;
   }
 
-  if (!want_caps && !cat_path && !sir_hello && !sir_module_hello) {
+  if (!want_caps && !cat_path && !sir_hello && !sir_module_hello && !run_path) {
     sem_print_help(stdout);
     sem_free_caps(dyn_caps, dyn_n);
     return 0;
@@ -748,6 +710,11 @@ int main(int argc, char** argv) {
   if (sir_module_hello) {
     sem_free_caps(dyn_caps, dyn_n);
     return sem_do_sir_module_hello();
+  }
+  if (run_path) {
+    const int rc = sem_run_sir_jsonl(run_path, caps, cap_n, fs_root);
+    sem_free_caps(dyn_caps, dyn_n);
+    return rc;
   }
 
   sem_host_t host;

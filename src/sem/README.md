@@ -72,3 +72,9 @@ sem --sir-hello
 ```
 sem --sir-module-hello
 ```
+
+Run a small supported SIR subset from a `.sir.jsonl` file:
+
+```
+sem --run src/sircc/examples/hello_zabi25_write.sir.jsonl
+```

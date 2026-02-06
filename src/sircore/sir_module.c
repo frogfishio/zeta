@@ -692,10 +692,12 @@ static int32_t exec_call_extern(const sir_module_t* m, sem_guest_mem_t* mem, sir
     const sir_value_t p = vals[a1];
     const sir_value_t l = vals[a2];
     if (h.kind != SIR_VAL_I32) return ZI_E_INVALID;
-    if (p.kind != SIR_VAL_PTR) return ZI_E_INVALID;
-    if (l.kind != SIR_VAL_I64) return ZI_E_INVALID;
-    if (l.u.i64 < 0 || l.u.i64 > 0x7FFFFFFFll) return ZI_E_INVALID;
-    const int32_t rc = host.v.zi_write(host.user, (zi_handle_t)h.u.i32, p.u.ptr, (zi_size32_t)l.u.i64);
+    const zi_ptr_t pp = (p.kind == SIR_VAL_PTR) ? p.u.ptr : (p.kind == SIR_VAL_I64) ? (zi_ptr_t)p.u.i64 : (zi_ptr_t)0;
+    if (p.kind != SIR_VAL_PTR && p.kind != SIR_VAL_I64) return ZI_E_INVALID;
+    const int64_t ll = (l.kind == SIR_VAL_I64) ? l.u.i64 : (l.kind == SIR_VAL_I32) ? (int64_t)l.u.i32 : (int64_t)-1;
+    if (l.kind != SIR_VAL_I64 && l.kind != SIR_VAL_I32) return ZI_E_INVALID;
+    if (ll < 0 || ll > 0x7FFFFFFFll) return ZI_E_INVALID;
+    const int32_t rc = host.v.zi_write(host.user, (zi_handle_t)h.u.i32, pp, (zi_size32_t)ll);
     if (rc < 0) return rc;
     if (inst->result_count == 1) {
       vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = rc};
@@ -727,10 +729,12 @@ static int32_t exec_call_extern(const sir_module_t* m, sem_guest_mem_t* mem, sir
     const sir_value_t p = vals[a1];
     const sir_value_t l = vals[a2];
     if (h.kind != SIR_VAL_I32) return ZI_E_INVALID;
-    if (p.kind != SIR_VAL_PTR) return ZI_E_INVALID;
-    if (l.kind != SIR_VAL_I64) return ZI_E_INVALID;
-    if (l.u.i64 < 0 || l.u.i64 > 0x7FFFFFFFll) return ZI_E_INVALID;
-    const int32_t rc = host.v.zi_read(host.user, (zi_handle_t)h.u.i32, p.u.ptr, (zi_size32_t)l.u.i64);
+    const zi_ptr_t pp = (p.kind == SIR_VAL_PTR) ? p.u.ptr : (p.kind == SIR_VAL_I64) ? (zi_ptr_t)p.u.i64 : (zi_ptr_t)0;
+    if (p.kind != SIR_VAL_PTR && p.kind != SIR_VAL_I64) return ZI_E_INVALID;
+    const int64_t ll = (l.kind == SIR_VAL_I64) ? l.u.i64 : (l.kind == SIR_VAL_I32) ? (int64_t)l.u.i32 : (int64_t)-1;
+    if (l.kind != SIR_VAL_I64 && l.kind != SIR_VAL_I32) return ZI_E_INVALID;
+    if (ll < 0 || ll > 0x7FFFFFFFll) return ZI_E_INVALID;
+    const int32_t rc = host.v.zi_read(host.user, (zi_handle_t)h.u.i32, pp, (zi_size32_t)ll);
     if (rc < 0) return rc;
     if (inst->result_count == 1) {
       vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = rc};
@@ -777,9 +781,12 @@ static int32_t exec_call_extern(const sir_module_t* m, sem_guest_mem_t* mem, sir
     const sir_value_t tl = vals[a1];
     const sir_value_t mp = vals[a2];
     const sir_value_t ml = vals[a3];
-    if (tp.kind != SIR_VAL_PTR || mp.kind != SIR_VAL_PTR) return ZI_E_INVALID;
+    const zi_ptr_t tpp = (tp.kind == SIR_VAL_PTR) ? tp.u.ptr : (tp.kind == SIR_VAL_I64) ? (zi_ptr_t)tp.u.i64 : (zi_ptr_t)0;
+    const zi_ptr_t mpp = (mp.kind == SIR_VAL_PTR) ? mp.u.ptr : (mp.kind == SIR_VAL_I64) ? (zi_ptr_t)mp.u.i64 : (zi_ptr_t)0;
+    if (tp.kind != SIR_VAL_PTR && tp.kind != SIR_VAL_I64) return ZI_E_INVALID;
+    if (mp.kind != SIR_VAL_PTR && mp.kind != SIR_VAL_I64) return ZI_E_INVALID;
     if (tl.kind != SIR_VAL_I32 || ml.kind != SIR_VAL_I32) return ZI_E_INVALID;
-    const int32_t rc = host.v.zi_telemetry(host.user, tp.u.ptr, (zi_size32_t)tl.u.i32, mp.u.ptr, (zi_size32_t)ml.u.i32);
+    const int32_t rc = host.v.zi_telemetry(host.user, tpp, (zi_size32_t)tl.u.i32, mpp, (zi_size32_t)ml.u.i32);
     if (rc < 0) return rc;
     if (inst->result_count == 1) {
       vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = rc};
