@@ -1,0 +1,10 @@
+{"ir":"sir-v1.0","k":"meta","producer":"sircc-example","unit":"term_unreachable"}
+
+{"ir":"sir-v1.0","k":"type","id":1,"kind":"prim","prim":"i32"}
+{"ir":"sir-v1.0","k":"type","id":2,"kind":"fn","params":[],"ret":1}
+
+{"ir":"sir-v1.0","k":"node","id":30,"tag":"term.unreachable"}
+{"ir":"sir-v1.0","k":"node","id":200,"tag":"block","fields":{"stmts":[{"t":"ref","id":30}]}}
+
+{"ir":"sir-v1.0","k":"node","id":70,"tag":"fn","type_ref":2,"fields":{"name":"main","params":[],"entry":{"t":"ref","id":200},"blocks":[{"t":"ref","id":200}]}}
+

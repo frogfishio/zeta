@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 
 typedef struct type_info {
@@ -20,6 +21,7 @@ typedef struct type_info {
   uint32_t* params;     // for fn, arena-owned
   uint32_t param_count;
   uint32_t ret; // SIR type id
+  uint32_t loc_line;
 } type_info_t;
 
 typedef struct node_info {
@@ -27,6 +29,7 @@ typedef struct node_info {
   const char* tag;       // arena-owned
   uint32_t type_ref;     // 0 if missing
   JsonValue* fields_obj; // object or NULL
+  uint32_t loc_line;
 } node_info_t;
 
 typedef enum val_kind {
@@ -77,7 +80,99 @@ typedef struct sirj_ctx {
     val_kind_t kind;
   } params[32];
   uint32_t param_count;
+
+  // Diagnostics
+  sem_diag_format_t diag_format;
+  const char* cur_path;
+  struct {
+    bool set;
+    const char* code;
+    char msg[256];
+    const char* path;
+    uint32_t line;
+    uint32_t node_id;
+    const char* tag;
+  } diag;
 } sirj_ctx_t;
+
+static void sirj_diag_setf(sirj_ctx_t* c, const char* code, const char* path, uint32_t line, uint32_t node_id, const char* tag, const char* fmt,
+                           ...) {
+  if (!c || c->diag.set) return;
+  c->diag.set = true;
+  c->diag.code = code ? code : "sem.error";
+  c->diag.path = path;
+  c->diag.line = line;
+  c->diag.node_id = node_id;
+  c->diag.tag = tag;
+  va_list ap;
+  va_start(ap, fmt);
+  (void)vsnprintf(c->diag.msg, sizeof(c->diag.msg), fmt ? fmt : "error", ap);
+  va_end(ap);
+}
+
+static void sem_json_write_escaped(FILE* out, const char* s) {
+  if (!out) return;
+  if (!s) s = "";
+  for (const unsigned char* p = (const unsigned char*)s; *p; p++) {
+    const unsigned char ch = *p;
+    if (ch == '\\' || ch == '"') {
+      fputc('\\', out);
+      fputc((int)ch, out);
+    } else if (ch == '\n') {
+      fputs("\\n", out);
+    } else if (ch == '\r') {
+      fputs("\\r", out);
+    } else if (ch == '\t') {
+      fputs("\\t", out);
+    } else if (ch < 0x20) {
+      fprintf(out, "\\u%04x", (unsigned)ch);
+    } else {
+      fputc((int)ch, out);
+    }
+  }
+}
+
+static void sem_print_diag(const sirj_ctx_t* c) {
+  if (!c || !c->diag.set) return;
+  const char* code = c->diag.code ? c->diag.code : "sem.error";
+  const char* msg = c->diag.msg[0] ? c->diag.msg : "error";
+  const char* path = c->diag.path ? c->diag.path : "";
+  const uint32_t line = c->diag.line;
+  const uint32_t node = c->diag.node_id;
+  const char* tag = c->diag.tag ? c->diag.tag : "";
+
+  if (c->diag_format == SEM_DIAG_JSON) {
+    fprintf(stderr, "{\"tool\":\"sem\",\"code\":\"");
+    sem_json_write_escaped(stderr, code);
+    fprintf(stderr, "\",\"message\":\"");
+    sem_json_write_escaped(stderr, msg);
+    fprintf(stderr, "\"");
+    if (path && path[0]) {
+      fprintf(stderr, ",\"path\":\"");
+      sem_json_write_escaped(stderr, path);
+      fprintf(stderr, "\"");
+    }
+    if (line) fprintf(stderr, ",\"line\":%u", (unsigned)line);
+    if (node) fprintf(stderr, ",\"node\":%u", (unsigned)node);
+    if (tag && tag[0]) {
+      fprintf(stderr, ",\"tag\":\"");
+      sem_json_write_escaped(stderr, tag);
+      fprintf(stderr, "\"");
+    }
+    fprintf(stderr, "}\n");
+  } else {
+    if (path && path[0] && line) {
+      fprintf(stderr, "sem: %s: %s (%s:%u)\n", code, msg, path, (unsigned)line);
+    } else if (path && path[0]) {
+      fprintf(stderr, "sem: %s: %s (%s)\n", code, msg, path);
+    } else {
+      fprintf(stderr, "sem: %s: %s\n", code, msg);
+    }
+    if (node || (tag && tag[0])) {
+      fprintf(stderr, "sem:   at node=%u tag=%s\n", (unsigned)node, tag);
+    }
+  }
+}
 
 static void ctx_dispose(sirj_ctx_t* c) {
   if (!c) return;
@@ -687,6 +782,7 @@ static bool eval_node(sirj_ctx_t* c, uint32_t node_id, sir_val_id_t* out_slot, v
   if (strcmp(n->tag, "load.i64") == 0) return eval_load_mnemonic(c, node_id, n, SIR_INST_LOAD_I64, VK_I64, out_slot, out_kind);
   if (strcmp(n->tag, "call.indirect") == 0) return eval_call_indirect(c, node_id, n, out_slot, out_kind);
 
+  sirj_diag_setf(c, "sem.unsupported.node", c->cur_path, n->loc_line, node_id, n->tag, "unsupported node tag: %s", n->tag);
   return false;
 }
 
@@ -747,6 +843,8 @@ typedef enum term_kind {
   TERM_BR,
   TERM_CBR,
   TERM_SWITCH,
+  TERM_TRAP,
+  TERM_UNREACHABLE,
 } term_kind_t;
 
 typedef struct term_info {
@@ -763,6 +861,7 @@ typedef struct term_info {
   uint32_t* switch_tos;    // arena-owned; block ids; len=switch_case_count
   uint32_t switch_case_count;
   uint32_t switch_default_to;
+  uint32_t trap_code; // optional stable tag (ignored by MVP)
 } term_info_t;
 
 static bool lower_term_node(sirj_ctx_t* c, uint32_t term_id, term_info_t* out) {
@@ -889,6 +988,19 @@ static bool lower_term_node(sirj_ctx_t* c, uint32_t term_id, term_info_t* out) {
     return true;
   }
 
+  if (strcmp(n->tag, "term.trap") == 0) {
+    // MVP: ignore msg/code payload; treat as deterministic trap.
+    out->k = TERM_TRAP;
+    out->trap_code = 0;
+    return true;
+  }
+
+  if (strcmp(n->tag, "term.unreachable") == 0) {
+    out->k = TERM_UNREACHABLE;
+    return true;
+  }
+
+  sirj_diag_setf(c, "sem.unsupported.term", c->cur_path, n->loc_line, term_id, n->tag, "unsupported terminator tag: %s", n->tag);
   return false;
 }
 
@@ -1059,6 +1171,12 @@ static bool lower_fn_body(sirj_ctx_t* c, uint32_t fn_node_id, bool is_entry) {
             if (patch_n >= (uint32_t)(sizeof(patches) / sizeof(patches[0]))) return false;
             patches[patch_n++] =
                 (patch_rec_t){.k = 3, .ip = ip, .v = term.switch_tos, .n = ncase, .def = term.switch_default_to};
+          } else if (term.k == TERM_TRAP) {
+            // Deterministic trap: SEM returns a stable non-zero exit code.
+            if (!sir_mb_emit_exit(c->mb, c->fn, 255)) return false;
+          } else if (term.k == TERM_UNREACHABLE) {
+            // Unreachable is also a deterministic trap.
+            if (!sir_mb_emit_exit(c->mb, c->fn, 254)) return false;
           } else {
             return false;
           }
@@ -1155,6 +1273,15 @@ static bool lower_fn_body(sirj_ctx_t* c, uint32_t fn_node_id, bool is_entry) {
   return true;
 }
 
+static uint32_t loc_line_from_root(const JsonValue* root, uint32_t fallback) {
+  if (!root || root->type != JSON_OBJECT) return fallback;
+  const JsonValue* locv = json_obj_get((JsonValue*)root, "loc");
+  if (!locv || locv->type != JSON_OBJECT) return fallback;
+  uint32_t ln = 0;
+  if (!json_get_u32(json_obj_get((JsonValue*)locv, "line"), &ln)) return fallback;
+  return ln ? ln : fallback;
+}
+
 static bool parse_file(sirj_ctx_t* c, const char* path) {
   if (!c || !path) return false;
   FILE* f = fopen(path, "rb");
@@ -1164,6 +1291,9 @@ static bool parse_file(sirj_ctx_t* c, const char* path) {
   size_t cap = 0;
   size_t len = 0;
   int ch = 0;
+  uint32_t rec_no = 0;
+
+  const char* diag_path = path;
 
   // Minimal line reader (no reliance on POSIX getline).
   for (;;) {
@@ -1194,16 +1324,18 @@ static bool parse_file(sirj_ctx_t* c, const char* path) {
         continue;
       }
 
+      rec_no++;
       JsonValue* root = NULL;
       JsonError err = {0};
       if (!json_parse(&c->arena, line, &root, &err) || !root) {
-        fprintf(stderr, "sem: json parse error at %zu: %s\n", err.offset, err.msg ? err.msg : "error");
+        sirj_diag_setf(c, "sem.parse.json", diag_path, rec_no, 0, NULL, "json parse error at offset %u: %s", (unsigned)err.offset,
+                       err.msg ? err.msg : "error");
         free(line);
         fclose(f);
         return false;
       }
       if (!json_is_object(root)) {
-        fprintf(stderr, "sem: record is not an object\n");
+        sirj_diag_setf(c, "sem.parse.record", diag_path, rec_no, 0, NULL, "record is not an object");
         free(line);
         fclose(f);
         return false;
@@ -1217,21 +1349,23 @@ static bool parse_file(sirj_ctx_t* c, const char* path) {
       }
 
       if (strcmp(k, "type") == 0) {
+        const uint32_t loc_line = loc_line_from_root(root, rec_no);
         uint32_t id = 0;
         if (!json_get_u32(json_obj_get(root, "id"), &id)) {
-          fprintf(stderr, "sem: type.id missing/invalid\n");
+          sirj_diag_setf(c, "sem.parse.type.id", diag_path, loc_line, 0, NULL, "type.id missing/invalid");
           free(line);
           fclose(f);
           return false;
         }
         if (!ensure_type_cap(c, id)) {
+          sirj_diag_setf(c, "sem.oom", diag_path, loc_line, 0, NULL, "out of memory");
           free(line);
           fclose(f);
           return false;
         }
         const char* kind = json_get_string(json_obj_get(root, "kind"));
         if (!kind) {
-          fprintf(stderr, "sem: type.kind missing\n");
+          sirj_diag_setf(c, "sem.parse.type.kind", diag_path, loc_line, 0, NULL, "type.kind missing");
           free(line);
           fclose(f);
           return false;
@@ -1239,11 +1373,12 @@ static bool parse_file(sirj_ctx_t* c, const char* path) {
 
         type_info_t ti = {0};
         ti.present = true;
+        ti.loc_line = loc_line;
         if (strcmp(kind, "prim") == 0) {
           const char* prim = json_get_string(json_obj_get(root, "prim"));
           ti.prim = prim_from_string(prim);
           if (ti.prim == SIR_PRIM_INVALID) {
-            fprintf(stderr, "sem: unsupported prim: %s\n", prim ? prim : "(null)");
+            sirj_diag_setf(c, "sem.unsupported.prim", diag_path, loc_line, 0, NULL, "unsupported prim: %s", prim ? prim : "(null)");
             free(line);
             fclose(f);
             return false;
@@ -1252,13 +1387,13 @@ static bool parse_file(sirj_ctx_t* c, const char* path) {
           ti.is_fn = true;
           const JsonValue* pv = obj_req(root, "params");
           if (!parse_u32_array(pv, &ti.params, &ti.param_count, &c->arena)) {
-            fprintf(stderr, "sem: bad fn params\n");
+            sirj_diag_setf(c, "sem.parse.type.fn.params", diag_path, loc_line, 0, NULL, "bad fn params array");
             free(line);
             fclose(f);
             return false;
           }
           if (!json_get_u32(json_obj_get(root, "ret"), &ti.ret)) {
-            fprintf(stderr, "sem: bad fn ret\n");
+            sirj_diag_setf(c, "sem.parse.type.fn.ret", diag_path, loc_line, 0, NULL, "bad fn ret");
             free(line);
             fclose(f);
             return false;
@@ -1267,17 +1402,20 @@ static bool parse_file(sirj_ctx_t* c, const char* path) {
           // ignore other kinds for now
           memset(&ti, 0, sizeof(ti));
           ti.present = true;
+          ti.loc_line = loc_line;
         }
         c->types[id] = ti;
       } else if (strcmp(k, "node") == 0) {
+        const uint32_t loc_line = loc_line_from_root(root, rec_no);
         uint32_t id = 0;
         if (!json_get_u32(json_obj_get(root, "id"), &id)) {
-          fprintf(stderr, "sem: node.id missing/invalid\n");
+          sirj_diag_setf(c, "sem.parse.node.id", diag_path, loc_line, 0, NULL, "node.id missing/invalid");
           free(line);
           fclose(f);
           return false;
         }
         if (!ensure_node_cap(c, id)) {
+          sirj_diag_setf(c, "sem.oom", diag_path, loc_line, id, NULL, "out of memory");
           free(line);
           fclose(f);
           return false;
@@ -1288,6 +1426,7 @@ static bool parse_file(sirj_ctx_t* c, const char* path) {
         (void)json_get_u32(json_obj_get(root, "type_ref"), &ni.type_ref);
         const JsonValue* fv = json_obj_get(root, "fields");
         if (fv && json_is_object(fv)) ni.fields_obj = (JsonValue*)fv;
+        ni.loc_line = loc_line;
         c->nodes[id] = ni;
       }
 
@@ -1422,34 +1561,44 @@ static bool init_params_for_fn(sirj_ctx_t* c, uint32_t fn_node_id, uint32_t fn_t
 }
 
 int sem_run_sir_jsonl(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root) {
+  return sem_run_sir_jsonl_ex(path, caps, cap_count, fs_root, SEM_DIAG_TEXT);
+}
+
+int sem_run_sir_jsonl_ex(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root, sem_diag_format_t diag_format) {
   if (!path) return 2;
 
   sirj_ctx_t c;
   memset(&c, 0, sizeof(c));
   arena_init(&c.arena);
+  c.diag_format = diag_format;
+  c.cur_path = path;
 
   if (!parse_file(&c, path)) {
+    if (!c.diag.set) sirj_diag_setf(&c, "sem.parse", path, 0, 0, NULL, "failed to parse: %s", path);
+    sem_print_diag(&c);
     ctx_dispose(&c);
-    fprintf(stderr, "sem: failed to parse: %s\n", path);
     return 1;
   }
 
   uint32_t entry_fn_node_id = 0;
   if (!find_entry_fn(&c, &entry_fn_node_id)) {
+    sirj_diag_setf(&c, "sem.no_entry_fn", path, 0, 0, NULL, "no entry fn (expected fn name zir_main or main)");
+    sem_print_diag(&c);
     ctx_dispose(&c);
-    fprintf(stderr, "sem: no entry fn (expected fn name zir_main or main)\n");
     return 1;
   }
 
   c.mb = sir_mb_new();
   if (!c.mb) {
+    sirj_diag_setf(&c, "sem.oom", path, 0, 0, NULL, "out of memory");
+    sem_print_diag(&c);
     ctx_dispose(&c);
-    fprintf(stderr, "sem: OOM\n");
     return 1;
   }
   if (!ensure_prim_types(&c)) {
+    sirj_diag_setf(&c, "sem.oom", path, 0, 0, NULL, "out of memory");
+    sem_print_diag(&c);
     ctx_dispose(&c);
-    fprintf(stderr, "sem: OOM\n");
     return 1;
   }
 
@@ -1463,8 +1612,9 @@ int sem_run_sir_jsonl(const char* path, const sem_cap_t* caps, uint32_t cap_coun
     if (!nm) continue;
     const sir_func_id_t fid = sir_mb_func_begin(c.mb, nm);
     if (!fid) {
+      sirj_diag_setf(&c, "sem.oom", path, c.nodes[i].loc_line, i, "fn", "out of memory");
+      sem_print_diag(&c);
       ctx_dispose(&c);
-      fprintf(stderr, "sem: OOM\n");
       return 1;
     }
     c.func_by_node[i] = fid;
@@ -1479,8 +1629,9 @@ int sem_run_sir_jsonl(const char* path, const sem_cap_t* caps, uint32_t cap_coun
         sig.result_count = 0;
       }
       if (!sir_mb_func_set_sig(c.mb, fid, sig)) {
+        sirj_diag_setf(&c, "sem.oom", path, c.nodes[i].loc_line, i, "fn", "out of memory");
+        sem_print_diag(&c);
         ctx_dispose(&c);
-        fprintf(stderr, "sem: OOM\n");
         return 1;
       }
     }
@@ -1488,13 +1639,15 @@ int sem_run_sir_jsonl(const char* path, const sem_cap_t* caps, uint32_t cap_coun
     if (i == entry_fn_node_id) entry_fid = fid;
   }
   if (!entry_fid) {
+    sirj_diag_setf(&c, "sem.internal", path, 0, 0, NULL, "failed to map entry function");
+    sem_print_diag(&c);
     ctx_dispose(&c);
-    fprintf(stderr, "sem: internal: failed to map entry function\n");
     return 1;
   }
   if (!sir_mb_func_set_entry(c.mb, entry_fid)) {
+    sirj_diag_setf(&c, "sem.internal", path, 0, 0, NULL, "failed to init module func");
+    sem_print_diag(&c);
     ctx_dispose(&c);
-    fprintf(stderr, "sem: internal: failed to init module func\n");
     return 1;
   }
 
@@ -1504,69 +1657,84 @@ int sem_run_sir_jsonl(const char* path, const sem_cap_t* caps, uint32_t cap_coun
     if (!fid) continue;
     const node_info_t* fnn = &c.nodes[i];
     if (!fnn->fields_obj || fnn->fields_obj->type != JSON_OBJECT) {
+      sirj_diag_setf(&c, "sem.internal", path, fnn->loc_line, i, "fn", "fn fields malformed");
+      sem_print_diag(&c);
       ctx_dispose(&c);
-      fprintf(stderr, "sem: internal: fn fields malformed (node_id=%u)\n", (unsigned)i);
       return 1;
     }
     const uint32_t fty = fnn->type_ref;
 
     if (!init_params_for_fn(&c, i, fty)) {
+      sirj_diag_setf(&c, "sem.unsupported.fn_params", path, fnn->loc_line, i, "fn", "unsupported fn params");
+      sem_print_diag(&c);
       ctx_dispose(&c);
-      fprintf(stderr, "sem: unsupported fn params (node_id=%u)\n", (unsigned)i);
       return 1;
     }
     c.fn = fid;
     const bool is_entry = (fid == entry_fid);
     if (!lower_fn_body(&c, i, is_entry)) {
+      if (!c.diag.set) {
+        const char* nm = json_get_string(json_obj_get(fnn->fields_obj, "name"));
+        sirj_diag_setf(&c, "sem.unsupported", path, fnn->loc_line, i, "fn", "unsupported SIR subset in fn=%s", nm ? nm : "?");
+      }
+      sem_print_diag(&c);
       ctx_dispose(&c);
-      const char* nm = json_get_string(json_obj_get(fnn->fields_obj, "name"));
-      fprintf(stderr, "sem: unsupported SIR subset in %s (fn=%s node_id=%u)\n", path, nm ? nm : "?", (unsigned)i);
       return 1;
     }
     if (!sir_mb_func_set_value_count(c.mb, fid, c.next_slot)) {
+      sirj_diag_setf(&c, "sem.internal", path, fnn->loc_line, i, "fn", "failed to set value count");
+      sem_print_diag(&c);
       ctx_dispose(&c);
-      fprintf(stderr, "sem: internal: failed to set value count\n");
       return 1;
     }
   }
 
   sir_module_t* m = sir_mb_finalize(c.mb);
   if (!m) {
+    sirj_diag_setf(&c, "sem.internal", path, 0, 0, NULL, "failed to finalize module");
+    sem_print_diag(&c);
     ctx_dispose(&c);
-    fprintf(stderr, "sem: internal: failed to finalize module\n");
     return 1;
   }
 
   char verr[160];
   if (!sir_module_validate(m, verr, sizeof(verr))) {
     sir_module_free(m);
+    sirj_diag_setf(&c, "sem.validate", path, 0, 0, NULL, "module validate failed: %s", verr[0] ? verr : "invalid");
+    sem_print_diag(&c);
     ctx_dispose(&c);
-    fprintf(stderr, "sem: validate failed: %s\n", verr[0] ? verr : "invalid");
     return 1;
   }
 
   sir_hosted_zabi_t hz;
-  if (!sir_hosted_zabi_init(&hz, (sir_hosted_zabi_cfg_t){.abi_version = 0x00020005u, .guest_mem_cap = 16u * 1024u * 1024u, .guest_mem_base = 0x10000ull, .caps = caps, .cap_count = cap_count, .fs_root = fs_root})) {
+  if (!sir_hosted_zabi_init(
+          &hz, (sir_hosted_zabi_cfg_t){.abi_version = 0x00020005u,
+                                       .guest_mem_cap = 16u * 1024u * 1024u,
+                                       .guest_mem_base = 0x10000ull,
+                                       .caps = caps,
+                                       .cap_count = cap_count,
+                                       .fs_root = fs_root})) {
     sir_module_free(m);
+    sirj_diag_setf(&c, "sem.runtime_init", path, 0, 0, NULL, "failed to init runtime");
+    sem_print_diag(&c);
     ctx_dispose(&c);
-    fprintf(stderr, "sem: failed to init runtime\n");
     return 1;
   }
 
   const sir_host_t host = sem_hosted_make_host(&hz);
   const int32_t rc = sir_module_run(m, hz.mem, host);
-  if (rc == -1) {
-    char derr[160];
-    if (!sir_module_validate(m, derr, sizeof(derr))) {
-      fprintf(stderr, "sem: internal: module re-validate failed at run-time: %s\n", derr[0] ? derr : "invalid");
-    }
-  }
+
   sir_hosted_zabi_dispose(&hz);
   sir_module_free(m);
   ctx_dispose(&c);
 
   if (rc < 0) {
-    fprintf(stderr, "sem: execution failed: %d\n", rc);
+    // Execution errors come from sircore (ZI_E_*).
+    if (diag_format == SEM_DIAG_JSON) {
+      fprintf(stderr, "{\"tool\":\"sem\",\"code\":\"sem.exec\",\"message\":\"execution failed\",\"rc\":%d}\n", (int)rc);
+    } else {
+      fprintf(stderr, "sem: execution failed: %d\n", (int)rc);
+    }
     return 1;
   }
   return (int)rc;

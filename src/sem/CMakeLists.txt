@@ -155,3 +155,35 @@ target_link_libraries(sem_unit_run_cfg_switch PRIVATE sircore_hosted_zabi sircor
 target_compile_options(sem_unit_run_cfg_switch PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 add_test(NAME sem_run_cfg_switch COMMAND sem_unit_run_cfg_switch)
+
+add_executable(sem_unit_run_term_trap
+  tests/test_run_term_trap.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_term_trap PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_term_trap PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_term_trap PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_term_trap PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_term_trap PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_term_trap COMMAND sem_unit_run_term_trap)
+
+add_executable(sem_unit_run_term_unreachable
+  tests/test_run_term_unreachable.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_term_unreachable PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_term_unreachable PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_term_unreachable PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_term_unreachable PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_term_unreachable PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_term_unreachable COMMAND sem_unit_run_term_unreachable)

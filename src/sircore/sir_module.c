@@ -1233,7 +1233,8 @@ static int32_t exec_call_func(const sir_module_t* m, sem_guest_mem_t* mem, sir_h
   sir_value_t resv[2];
   memset(resv, 0, sizeof(resv));
   const int32_t rc = exec_func(m, mem, host, fid, argv, inst->u.call_func.arg_count, resv, inst->result_count, depth + 1);
-  if (rc < 0) return rc;
+  // Propagate errors and process-exit requests.
+  if (rc != 0) return rc;
   for (uint8_t ri = 0; ri < inst->result_count; ri++) {
     const sir_val_id_t dst = inst->results[ri];
     if (dst >= val_count) return ZI_E_BOUNDS;
@@ -1647,7 +1648,11 @@ static int32_t exec_func(const sir_module_t* m, sem_guest_mem_t* mem, sir_host_t
         return 0;
       case SIR_INST_EXIT:
         free(vals);
-        return i->u.exit_.code;
+        if (i->u.exit_.code < 0) return ZI_E_INVALID;
+        if (i->u.exit_.code == INT32_MAX) return ZI_E_INVALID;
+        // Encode "process exit requested" as rc+1 so callers can distinguish from
+        // a normal `RET` (which returns 0).
+        return i->u.exit_.code + 1;
       case SIR_INST_EXIT_VAL: {
         const sir_val_id_t cv = i->u.exit_val.code;
         if (cv >= f->value_count) {
@@ -1657,7 +1662,9 @@ static int32_t exec_func(const sir_module_t* m, sem_guest_mem_t* mem, sir_host_t
         const sir_value_t v = vals[cv];
         if (v.kind == SIR_VAL_I32) {
           free(vals);
-          return v.u.i32;
+          if (v.u.i32 < 0) return ZI_E_INVALID;
+          if (v.u.i32 == INT32_MAX) return ZI_E_INVALID;
+          return v.u.i32 + 1;
         }
         if (v.kind == SIR_VAL_I64) {
           if (v.u.i64 < INT32_MIN || v.u.i64 > INT32_MAX) {
@@ -1665,7 +1672,8 @@ static int32_t exec_func(const sir_module_t* m, sem_guest_mem_t* mem, sir_host_t
             return ZI_E_INVALID;
           }
           free(vals);
-          return (int32_t)v.u.i64;
+          if (v.u.i64 < 0 || v.u.i64 == INT32_MAX) return ZI_E_INVALID;
+          return (int32_t)v.u.i64 + 1;
         }
         {
           free(vals);
@@ -1686,5 +1694,7 @@ int32_t sir_module_run(const sir_module_t* m, sem_guest_mem_t* mem, sir_host_t h
   if (!m || !mem) return ZI_E_INTERNAL;
   char err[160];
   if (!sir_module_validate(m, err, sizeof(err))) return ZI_E_INVALID;
-  return exec_func(m, mem, host, m->entry, NULL, 0, NULL, 0, 0);
+  const int32_t r = exec_func(m, mem, host, m->entry, NULL, 0, NULL, 0, 0);
+  if (r > 0) return r - 1;
+  return r;
 }

@@ -39,7 +39,7 @@ static void sem_print_help(FILE* out) {
           "  sem --cat GUEST_PATH --fs-root PATH\n"
           "  sem --sir-hello\n"
           "  sem --sir-module-hello\n"
-          "  sem --run FILE.sir.jsonl [--fs-root PATH] [--cap ...]\n"
+          "  sem --run FILE.sir.jsonl [--diagnostics text|json] [--fs-root PATH] [--cap ...]\n"
           "\n"
           "Options:\n"
           "  --help        Show this help message\n"
@@ -50,6 +50,7 @@ static void sem_print_help(FILE* out) {
           "  --sir-module-hello  Run a tiny built-in sircore module smoke program\n"
           "  --run FILE    Run a small supported SIR subset (MVP)\n"
           "  --json        Emit --caps output as JSON (stdout)\n"
+          "  --diagnostics Emit --run diagnostics as: text (default) or json\n"
           "\n"
           "  --cap KIND:NAME[:FLAGS]\n"
           "      Add a capability entry. FLAGS is a comma-list of:\n"
@@ -573,6 +574,7 @@ int main(int argc, char** argv) {
   bool sir_hello = false;
   bool sir_module_hello = false;
   const char* run_path = NULL;
+  sem_diag_format_t diag_format = SEM_DIAG_TEXT;
   const char* tape_out = NULL;
   const char* tape_in = NULL;
   bool tape_strict = true;
@@ -607,6 +609,17 @@ int main(int argc, char** argv) {
     }
     if (strcmp(a, "--run") == 0 && i + 1 < argc) {
       run_path = argv[++i];
+      continue;
+    }
+    if (strcmp(a, "--diagnostics") == 0 && i + 1 < argc) {
+      const char* f = argv[++i];
+      if (strcmp(f, "text") == 0) diag_format = SEM_DIAG_TEXT;
+      else if (strcmp(f, "json") == 0) diag_format = SEM_DIAG_JSON;
+      else {
+        fprintf(stderr, "sem: bad --diagnostics value (expected text|json)\n");
+        sem_free_caps(dyn_caps, dyn_n);
+        return 2;
+      }
       continue;
     }
     if (strcmp(a, "--cat") == 0 && i + 1 < argc) {
@@ -712,7 +725,7 @@ int main(int argc, char** argv) {
     return sem_do_sir_module_hello();
   }
   if (run_path) {
-    const int rc = sem_run_sir_jsonl(run_path, caps, cap_n, fs_root);
+    const int rc = sem_run_sir_jsonl_ex(run_path, caps, cap_n, fs_root, diag_format);
     sem_free_caps(dyn_caps, dyn_n);
     return rc;
   }
