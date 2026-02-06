@@ -89,3 +89,4 @@ The current `--run` MVP supports (growing over time):
 - comparisons: `i32.cmp.eq`
 - calls: `call.indirect` where callee is `decl.fn` (extern) or `ptr.sym` (in-module function)
 - control flow: `term.br`, `term.cbr` / `term.condbr`
+- memory: `alloca.i8/i32/i64`, `store.i8/i32/i64`, `load.i8/i32/i64`

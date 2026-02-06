@@ -31,6 +31,7 @@ typedef struct node_info {
 
 typedef enum val_kind {
   VK_INVALID = 0,
+  VK_I8,
   VK_I32,
   VK_I64,
   VK_PTR,
@@ -63,6 +64,7 @@ typedef struct sirj_ctx {
   uint32_t func_by_node_cap;
 
   // Primitive module type ids
+  sir_type_id_t ty_i8;
   sir_type_id_t ty_i32;
   sir_type_id_t ty_i64;
   sir_type_id_t ty_ptr;
@@ -161,6 +163,7 @@ static bool parse_u32_array(const JsonValue* v, uint32_t** out, uint32_t* out_n,
 
 static sir_prim_type_t prim_from_string(const char* s) {
   if (!s) return SIR_PRIM_INVALID;
+  if (strcmp(s, "i8") == 0) return SIR_PRIM_I8;
   if (strcmp(s, "i32") == 0) return SIR_PRIM_I32;
   if (strcmp(s, "i64") == 0) return SIR_PRIM_I64;
   if (strcmp(s, "ptr") == 0) return SIR_PRIM_PTR;
@@ -171,6 +174,8 @@ static sir_prim_type_t prim_from_string(const char* s) {
 static sir_type_id_t mod_ty_for_prim(sirj_ctx_t* c, sir_prim_type_t prim) {
   if (!c) return 0;
   switch (prim) {
+    case SIR_PRIM_I8:
+      return c->ty_i8;
     case SIR_PRIM_I32:
       return c->ty_i32;
     case SIR_PRIM_I64:
@@ -186,11 +191,12 @@ static sir_type_id_t mod_ty_for_prim(sirj_ctx_t* c, sir_prim_type_t prim) {
 
 static bool ensure_prim_types(sirj_ctx_t* c) {
   if (!c || !c->mb) return false;
+  if (!c->ty_i8) c->ty_i8 = sir_mb_type_prim(c->mb, SIR_PRIM_I8);
   if (!c->ty_i32) c->ty_i32 = sir_mb_type_prim(c->mb, SIR_PRIM_I32);
   if (!c->ty_i64) c->ty_i64 = sir_mb_type_prim(c->mb, SIR_PRIM_I64);
   if (!c->ty_ptr) c->ty_ptr = sir_mb_type_prim(c->mb, SIR_PRIM_PTR);
   if (!c->ty_bool) c->ty_bool = sir_mb_type_prim(c->mb, SIR_PRIM_BOOL);
-  return c->ty_i32 && c->ty_i64 && c->ty_ptr && c->ty_bool;
+  return c->ty_i8 && c->ty_i32 && c->ty_i64 && c->ty_ptr && c->ty_bool;
 }
 
 static sir_val_id_t alloc_slot(sirj_ctx_t* c, val_kind_t k) {
@@ -301,6 +307,21 @@ static bool eval_const_i32(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n
   return true;
 }
 
+static bool eval_const_i8(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* vv = json_obj_get(n->fields_obj, "value");
+  int64_t i = 0;
+  if (!json_get_i64(vv, &i)) return false;
+  if (i < 0 || i > 255) return false;
+  const sir_val_id_t slot = alloc_slot(c, VK_I8);
+  if (!sir_mb_emit_const_i8(c->mb, c->fn, slot, (uint8_t)i)) return false;
+  if (!set_node_val(c, node_id, slot, VK_I8)) return false;
+  *out_slot = slot;
+  *out_kind = VK_I8;
+  return true;
+}
+
 static bool eval_const_i64(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
   if (!c || !n || !out_slot || !out_kind) return false;
   if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
@@ -312,6 +333,61 @@ static bool eval_const_i64(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n
   if (!set_node_val(c, node_id, slot, VK_I64)) return false;
   *out_slot = slot;
   *out_kind = VK_I64;
+  return true;
+}
+
+static bool eval_alloca_mnemonic(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, uint32_t size, uint32_t align, sir_val_id_t* out_slot,
+                                 val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  const sir_val_id_t slot = alloc_slot(c, VK_PTR);
+  if (!sir_mb_emit_alloca(c->mb, c->fn, slot, size, align)) return false;
+  if (!set_node_val(c, node_id, slot, VK_PTR)) return false;
+  *out_slot = slot;
+  *out_kind = VK_PTR;
+  return true;
+}
+
+static bool eval_store_mnemonic(sirj_ctx_t* c, const node_info_t* n, sir_inst_kind_t k) {
+  if (!c || !n) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  uint32_t addr_id = 0, val_id = 0;
+  if (!parse_ref_id(json_obj_get(n->fields_obj, "addr"), &addr_id)) return false;
+  if (!parse_ref_id(json_obj_get(n->fields_obj, "value"), &val_id)) return false;
+  uint32_t align = 1;
+  (void)json_get_u32(json_obj_get(n->fields_obj, "align"), &align);
+  sir_val_id_t addr_slot = 0, val_slot = 0;
+  val_kind_t ak = VK_INVALID, vk = VK_INVALID;
+  if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
+  if (!eval_node(c, val_id, &val_slot, &vk)) return false;
+  if (ak != VK_PTR) return false;
+
+  if (k == SIR_INST_STORE_I8) return sir_mb_emit_store_i8(c->mb, c->fn, addr_slot, val_slot, align);
+  if (k == SIR_INST_STORE_I32) return sir_mb_emit_store_i32(c->mb, c->fn, addr_slot, val_slot, align);
+  if (k == SIR_INST_STORE_I64) return sir_mb_emit_store_i64(c->mb, c->fn, addr_slot, val_slot, align);
+  return false;
+}
+
+static bool eval_load_mnemonic(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_inst_kind_t k, val_kind_t outk, sir_val_id_t* out_slot,
+                               val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  uint32_t addr_id = 0;
+  if (!parse_ref_id(json_obj_get(n->fields_obj, "addr"), &addr_id)) return false;
+  uint32_t align = 1;
+  (void)json_get_u32(json_obj_get(n->fields_obj, "align"), &align);
+  sir_val_id_t addr_slot = 0;
+  val_kind_t ak = VK_INVALID;
+  if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
+  if (ak != VK_PTR) return false;
+  const sir_val_id_t dst = alloc_slot(c, outk);
+  bool ok = false;
+  if (k == SIR_INST_LOAD_I8) ok = sir_mb_emit_load_i8(c->mb, c->fn, dst, addr_slot, align);
+  else if (k == SIR_INST_LOAD_I32) ok = sir_mb_emit_load_i32(c->mb, c->fn, dst, addr_slot, align);
+  else if (k == SIR_INST_LOAD_I64) ok = sir_mb_emit_load_i64(c->mb, c->fn, dst, addr_slot, align);
+  if (!ok) return false;
+  if (!set_node_val(c, node_id, dst, outk)) return false;
+  *out_slot = dst;
+  *out_kind = outk;
   return true;
 }
 
@@ -545,6 +621,7 @@ static bool eval_node(sirj_ctx_t* c, uint32_t node_id, sir_val_id_t* out_slot, v
   const node_info_t* n = &c->nodes[node_id];
   if (!n->tag) return false;
 
+  if (strcmp(n->tag, "const.i8") == 0) return eval_const_i8(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "const.i32") == 0) return eval_const_i32(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "const.i64") == 0) return eval_const_i64(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "cstr") == 0) return eval_cstr(c, node_id, n, out_slot, out_kind);
@@ -553,6 +630,12 @@ static bool eval_node(sirj_ctx_t* c, uint32_t node_id, sir_val_id_t* out_slot, v
   if (strcmp(n->tag, "i32.add") == 0) return eval_i32_add_mnemonic(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "i32.cmp.eq") == 0) return eval_i32_cmp_eq(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "binop.add") == 0) return eval_binop_add(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "alloca.i8") == 0) return eval_alloca_mnemonic(c, node_id, n, 1, 1, out_slot, out_kind);
+  if (strcmp(n->tag, "alloca.i32") == 0) return eval_alloca_mnemonic(c, node_id, n, 4, 4, out_slot, out_kind);
+  if (strcmp(n->tag, "alloca.i64") == 0) return eval_alloca_mnemonic(c, node_id, n, 8, 8, out_slot, out_kind);
+  if (strcmp(n->tag, "load.i8") == 0) return eval_load_mnemonic(c, node_id, n, SIR_INST_LOAD_I8, VK_I8, out_slot, out_kind);
+  if (strcmp(n->tag, "load.i32") == 0) return eval_load_mnemonic(c, node_id, n, SIR_INST_LOAD_I32, VK_I32, out_slot, out_kind);
+  if (strcmp(n->tag, "load.i64") == 0) return eval_load_mnemonic(c, node_id, n, SIR_INST_LOAD_I64, VK_I64, out_slot, out_kind);
   if (strcmp(n->tag, "call.indirect") == 0) return eval_call_indirect(c, node_id, n, out_slot, out_kind);
 
   return false;
@@ -578,6 +661,10 @@ static bool exec_stmt(sirj_ctx_t* c, uint32_t stmt_id, bool* out_did_return, sir
     (void)tk;
     return true;
   }
+
+  if (strcmp(n->tag, "store.i8") == 0) return eval_store_mnemonic(c, n, SIR_INST_STORE_I8);
+  if (strcmp(n->tag, "store.i32") == 0) return eval_store_mnemonic(c, n, SIR_INST_STORE_I32);
+  if (strcmp(n->tag, "store.i64") == 0) return eval_store_mnemonic(c, n, SIR_INST_STORE_I64);
 
   if (strcmp(n->tag, "term.ret") == 0 || strcmp(n->tag, "return") == 0) {
     // MVP: return a previously computed value (or default 0).
@@ -1093,6 +1180,7 @@ static bool init_params_for_fn(sirj_ctx_t* c, uint32_t fn_node_id, uint32_t fn_t
     const type_info_t* pt = &c->types[param_type_id];
     if (!pt->present || pt->is_fn) return false;
     if (pt->prim == SIR_PRIM_I32) k = VK_I32;
+    else if (pt->prim == SIR_PRIM_I8) k = VK_I8;
     else if (pt->prim == SIR_PRIM_I64) k = VK_I64;
     else if (pt->prim == SIR_PRIM_PTR) k = VK_PTR;
     else if (pt->prim == SIR_PRIM_BOOL) k = VK_BOOL;
