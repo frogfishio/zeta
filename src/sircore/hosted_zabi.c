@@ -64,7 +64,7 @@ int32_t sir_zi_cap_get(sir_hosted_zabi_t* rt, int32_t index, zi_ptr_t out_ptr, z
   if (need > out_cap) return ZI_E_BOUNDS;
 
   uint8_t* out = NULL;
-  if (!sem_guest_mem_map_rw(&rt->mem, out_ptr, out_cap, &out) || !out) return ZI_E_BOUNDS;
+  if (!sem_guest_mem_map_rw(rt->mem, out_ptr, out_cap, &out) || !out) return ZI_E_BOUNDS;
 
   uint32_t off = 0;
   const uint32_t kind_len = u32_len(c->kind);
@@ -147,42 +147,19 @@ static bool str_eq_bytes(const char* s, const uint8_t* b, uint32_t n) {
 
 bool sir_hosted_zabi_init(sir_hosted_zabi_t* rt, sir_hosted_zabi_cfg_t cfg) {
   if (!rt) return false;
-  memset(rt, 0, sizeof(*rt));
-
-  if (!sem_guest_mem_init(&rt->mem, cfg.guest_mem_cap ? cfg.guest_mem_cap : (16u * 1024u * 1024u),
+  sem_guest_mem_t* mem = (sem_guest_mem_t*)calloc(1, sizeof(*mem));
+  if (!mem) return false;
+  if (!sem_guest_mem_init(mem, cfg.guest_mem_cap ? cfg.guest_mem_cap : (16u * 1024u * 1024u),
                           cfg.guest_mem_base ? cfg.guest_mem_base : 0x10000ull)) {
+    free(mem);
     return false;
   }
-
-  if (!sem_handles_init(&rt->handles, 4096)) {
-    sem_guest_mem_dispose(&rt->mem);
+  if (!sir_hosted_zabi_init_with_mem(rt, mem, cfg)) {
+    sem_guest_mem_dispose(mem);
+    free(mem);
     return false;
   }
-
-  rt->abi_version = cfg.abi_version ? cfg.abi_version : 0x00020005u;
-  rt->fs_root = (cfg.fs_root && cfg.fs_root[0] != '\0') ? cfg.fs_root : NULL;
-
-  sem_host_init(&rt->ctl_host, (sem_host_cfg_t){.caps = cfg.caps, .cap_count = cfg.cap_count});
-
-  sir_stdio_stream_t* in = (sir_stdio_stream_t*)calloc(1, sizeof(*in));
-  sir_stdio_stream_t* out = (sir_stdio_stream_t*)calloc(1, sizeof(*out));
-  sir_stdio_stream_t* err = (sir_stdio_stream_t*)calloc(1, sizeof(*err));
-  if (!in || !out || !err) {
-    free(in);
-    free(out);
-    free(err);
-    sem_handles_dispose(&rt->handles);
-    sem_guest_mem_dispose(&rt->mem);
-    return false;
-  }
-  in->f = stdin;
-  out->f = stdout;
-  err->f = stderr;
-
-  (void)sem_handle_install(&rt->handles, 0, (sem_handle_entry_t){.ops = &stdio_ops, .ctx = in, .hflags = ZI_H_READABLE | ZI_H_ENDABLE});
-  (void)sem_handle_install(&rt->handles, 1, (sem_handle_entry_t){.ops = &stdio_ops, .ctx = out, .hflags = ZI_H_WRITABLE | ZI_H_ENDABLE});
-  (void)sem_handle_install(&rt->handles, 2, (sem_handle_entry_t){.ops = &stdio_ops, .ctx = err, .hflags = ZI_H_WRITABLE | ZI_H_ENDABLE});
-
+  rt->owns_mem = true;
   return true;
 }
 
@@ -195,7 +172,10 @@ void sir_hosted_zabi_dispose(sir_hosted_zabi_t* rt) {
   if (sem_handle_lookup(&rt->handles, 2, &e)) free(e.ctx);
 
   sem_handles_dispose(&rt->handles);
-  sem_guest_mem_dispose(&rt->mem);
+  if (rt->owns_mem && rt->mem) {
+    sem_guest_mem_dispose(rt->mem);
+    free(rt->mem);
+  }
   memset(rt, 0, sizeof(*rt));
 }
 
@@ -205,12 +185,12 @@ uint32_t sir_zi_abi_version(const sir_hosted_zabi_t* rt) {
 
 zi_ptr_t sir_zi_alloc(sir_hosted_zabi_t* rt, zi_size32_t size) {
   if (!rt) return 0;
-  return sem_guest_alloc(&rt->mem, size, 16);
+  return sem_guest_alloc(rt->mem, size, 16);
 }
 
 int32_t sir_zi_free(sir_hosted_zabi_t* rt, zi_ptr_t ptr) {
   if (!rt) return ZI_E_INTERNAL;
-  return sem_guest_free(&rt->mem, ptr);
+  return sem_guest_free(rt->mem, ptr);
 }
 
 int32_t sir_zi_read(sir_hosted_zabi_t* rt, zi_handle_t h, zi_ptr_t dst_ptr, zi_size32_t cap) {
@@ -218,7 +198,7 @@ int32_t sir_zi_read(sir_hosted_zabi_t* rt, zi_handle_t h, zi_ptr_t dst_ptr, zi_s
   sem_handle_entry_t e;
   if (!sem_handle_lookup(&rt->handles, h, &e) || !e.ops || !e.ops->read) return ZI_E_NOSYS;
   if ((e.hflags & ZI_H_READABLE) == 0) return ZI_E_NOSYS;
-  return e.ops->read(e.ctx, &rt->mem, dst_ptr, cap);
+  return e.ops->read(e.ctx, rt->mem, dst_ptr, cap);
 }
 
 int32_t sir_zi_write(sir_hosted_zabi_t* rt, zi_handle_t h, zi_ptr_t src_ptr, zi_size32_t len) {
@@ -226,7 +206,7 @@ int32_t sir_zi_write(sir_hosted_zabi_t* rt, zi_handle_t h, zi_ptr_t src_ptr, zi_
   sem_handle_entry_t e;
   if (!sem_handle_lookup(&rt->handles, h, &e) || !e.ops || !e.ops->write) return ZI_E_NOSYS;
   if ((e.hflags & ZI_H_WRITABLE) == 0) return ZI_E_NOSYS;
-  return e.ops->write(e.ctx, &rt->mem, src_ptr, len);
+  return e.ops->write(e.ctx, rt->mem, src_ptr, len);
 }
 
 int32_t sir_zi_end(sir_hosted_zabi_t* rt, zi_handle_t h) {
@@ -234,7 +214,7 @@ int32_t sir_zi_end(sir_hosted_zabi_t* rt, zi_handle_t h) {
   sem_handle_entry_t e;
   if (!sem_handle_lookup(&rt->handles, h, &e) || !e.ops) return ZI_E_NOSYS;
   int32_t r = 0;
-  if (e.ops->end) r = e.ops->end(e.ctx, &rt->mem);
+  if (e.ops->end) r = e.ops->end(e.ctx, rt->mem);
   if (h >= 3) (void)sem_handle_release(&rt->handles, h);
   return r;
 }
@@ -243,8 +223,8 @@ int32_t sir_zi_telemetry(sir_hosted_zabi_t* rt, zi_ptr_t topic_ptr, zi_size32_t 
   if (!rt) return ZI_E_INTERNAL;
   const uint8_t* topic = NULL;
   const uint8_t* msg = NULL;
-  if (topic_len && (!sem_guest_mem_map_ro(&rt->mem, topic_ptr, topic_len, &topic) || !topic)) return ZI_E_BOUNDS;
-  if (msg_len && (!sem_guest_mem_map_ro(&rt->mem, msg_ptr, msg_len, &msg) || !msg)) return ZI_E_BOUNDS;
+  if (topic_len && (!sem_guest_mem_map_ro(rt->mem, topic_ptr, topic_len, &topic) || !topic)) return ZI_E_BOUNDS;
+  if (msg_len && (!sem_guest_mem_map_ro(rt->mem, msg_ptr, msg_len, &msg) || !msg)) return ZI_E_BOUNDS;
   fprintf(stderr, "telemetry[%.*s]: %.*s\n", (int)topic_len, (const char*)topic, (int)msg_len, (const char*)msg);
   return 0;
 }
@@ -254,10 +234,10 @@ int32_t sir_zi_ctl(sir_hosted_zabi_t* rt, zi_ptr_t req_ptr, zi_size32_t req_len,
   if (req_len < ZCL1_HDR_SIZE) return ZI_E_INVALID;
 
   const uint8_t* req = NULL;
-  if (!sem_guest_mem_map_ro(&rt->mem, req_ptr, req_len, &req) || !req) return ZI_E_BOUNDS;
+  if (!sem_guest_mem_map_ro(rt->mem, req_ptr, req_len, &req) || !req) return ZI_E_BOUNDS;
 
   uint8_t* resp = NULL;
-  if (!sem_guest_mem_map_rw(&rt->mem, resp_ptr, resp_cap, &resp) || !resp) return ZI_E_BOUNDS;
+  if (!sem_guest_mem_map_rw(rt->mem, resp_ptr, resp_cap, &resp) || !resp) return ZI_E_BOUNDS;
 
   return sem_zi_ctl(&rt->ctl_host, req, req_len, resp, resp_cap);
 }
@@ -267,7 +247,7 @@ zi_handle_t sir_zi_cap_open(sir_hosted_zabi_t* rt, zi_ptr_t req_ptr) {
 
   const uint32_t REQ_LEN = 40u;
   const uint8_t* req = NULL;
-  if (!sem_guest_mem_map_ro(&rt->mem, req_ptr, REQ_LEN, &req) || !req) return (zi_handle_t)ZI_E_BOUNDS;
+  if (!sem_guest_mem_map_ro(rt->mem, req_ptr, REQ_LEN, &req) || !req) return (zi_handle_t)ZI_E_BOUNDS;
 
   const uint32_t kind_len = zcl1_read_u32le(req + 8);
   const uint32_t name_len = zcl1_read_u32le(req + 20);
@@ -283,8 +263,8 @@ zi_handle_t sir_zi_cap_open(sir_hosted_zabi_t* rt, zi_ptr_t req_ptr) {
 
   const uint8_t* kind = NULL;
   const uint8_t* name = NULL;
-  if (!sem_guest_mem_map_ro(&rt->mem, (zi_ptr_t)kind_ptr, (zi_size32_t)kind_len, &kind) || !kind) return (zi_handle_t)ZI_E_BOUNDS;
-  if (!sem_guest_mem_map_ro(&rt->mem, (zi_ptr_t)name_ptr, (zi_size32_t)name_len, &name) || !name) return (zi_handle_t)ZI_E_BOUNDS;
+  if (!sem_guest_mem_map_ro(rt->mem, (zi_ptr_t)kind_ptr, (zi_size32_t)kind_len, &kind) || !kind) return (zi_handle_t)ZI_E_BOUNDS;
+  if (!sem_guest_mem_map_ro(rt->mem, (zi_ptr_t)name_ptr, (zi_size32_t)name_len, &name) || !name) return (zi_handle_t)ZI_E_BOUNDS;
 
   const sem_cap_t* found = NULL;
   for (uint32_t i = 0; i < cap_count(rt); i++) {
@@ -301,7 +281,7 @@ zi_handle_t sir_zi_cap_open(sir_hosted_zabi_t* rt, zi_ptr_t req_ptr) {
   if (strcmp(found->kind, "file") == 0 && strcmp(found->name, "fs") == 0) {
     sir_hosted_file_fs_t fs;
     sir_hosted_file_fs_init(&fs, (sir_hosted_file_fs_cfg_t){.fs_root = rt->fs_root});
-    return sir_hosted_file_fs_open_from_params(&fs, &rt->handles, &rt->mem, (zi_ptr_t)params_ptr, (zi_size32_t)params_len);
+    return sir_hosted_file_fs_open_from_params(&fs, &rt->handles, rt->mem, (zi_ptr_t)params_ptr, (zi_size32_t)params_len);
   }
 
   (void)params_ptr;
@@ -309,3 +289,42 @@ zi_handle_t sir_zi_cap_open(sir_hosted_zabi_t* rt, zi_ptr_t req_ptr) {
   return (zi_handle_t)ZI_E_DENIED;
 }
 
+bool sir_hosted_zabi_init_with_mem(sir_hosted_zabi_t* rt, sem_guest_mem_t* mem, sir_hosted_zabi_cfg_t cfg) {
+  if (!rt || !mem) return false;
+  memset(rt, 0, sizeof(*rt));
+
+  rt->mem = mem;
+  rt->owns_mem = false;
+
+  if (!sem_handles_init(&rt->handles, 4096)) {
+    return false;
+  }
+
+  rt->abi_version = cfg.abi_version ? cfg.abi_version : 0x00020005u;
+  rt->fs_root = (cfg.fs_root && cfg.fs_root[0] != '\0') ? cfg.fs_root : NULL;
+
+  sem_host_init(&rt->ctl_host, (sem_host_cfg_t){.caps = cfg.caps, .cap_count = cfg.cap_count});
+
+  sir_stdio_stream_t* in = (sir_stdio_stream_t*)calloc(1, sizeof(*in));
+  sir_stdio_stream_t* out = (sir_stdio_stream_t*)calloc(1, sizeof(*out));
+  sir_stdio_stream_t* err = (sir_stdio_stream_t*)calloc(1, sizeof(*err));
+  if (!in || !out || !err) {
+    free(in);
+    free(out);
+    free(err);
+    sem_handles_dispose(&rt->handles);
+    return false;
+  }
+  in->f = stdin;
+  out->f = stdout;
+  err->f = stderr;
+
+  (void)sem_handle_install(&rt->handles, 0,
+                           (sem_handle_entry_t){.ops = &stdio_ops, .ctx = in, .hflags = ZI_H_READABLE | ZI_H_ENDABLE});
+  (void)sem_handle_install(&rt->handles, 1,
+                           (sem_handle_entry_t){.ops = &stdio_ops, .ctx = out, .hflags = ZI_H_WRITABLE | ZI_H_ENDABLE});
+  (void)sem_handle_install(&rt->handles, 2,
+                           (sem_handle_entry_t){.ops = &stdio_ops, .ctx = err, .hflags = ZI_H_WRITABLE | ZI_H_ENDABLE});
+
+  return true;
+}

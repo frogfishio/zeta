@@ -60,3 +60,9 @@ Quick smoke test (read a file under a sandbox root):
 ```
 sem --cat /a.txt --fs-root /path/to/sandbox
 ```
+
+`sircore` VM smoke (prints using `zi_write` via the hosted runtime):
+
+```
+sem --sir-hello
+```

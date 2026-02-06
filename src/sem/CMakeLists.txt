@@ -7,7 +7,7 @@ add_executable(sem
 
 target_compile_definitions(sem PRIVATE SIR_VERSION="${SIR_VERSION}")
 target_include_directories(sem PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore)
-target_link_libraries(sem PRIVATE sircore_hosted_zabi)
+target_link_libraries(sem PRIVATE sircore_hosted_zabi sircore_vm)
 
 target_compile_options(sem PRIVATE
   -Wall

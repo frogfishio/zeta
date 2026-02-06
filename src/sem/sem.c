@@ -1,5 +1,6 @@
 #include "sem_host.h"
 #include "hosted_zabi.h"
+#include "sircore_vm.h"
 #include "zi_tape.h"
 #include "zcl1.h"
 
@@ -33,12 +34,14 @@ static void sem_print_help(FILE* out) {
           "      [--fs-root PATH]\n"
           "      [--tape-out PATH] [--tape-in PATH] [--tape-lax]\n"
           "  sem --cat GUEST_PATH --fs-root PATH\n"
+          "  sem --sir-hello\n"
           "\n"
           "Options:\n"
           "  --help        Show this help message\n"
           "  --version     Show version information (from ./VERSION)\n"
           "  --caps        Issue zi_ctl CAPS_LIST and print capabilities\n"
           "  --cat PATH    Read PATH via file/fs and write to stdout\n"
+          "  --sir-hello   Run a tiny built-in sircore VM smoke program\n"
           "  --json        Emit --caps output as JSON (stdout)\n"
           "\n"
           "  --cap KIND:NAME[:FLAGS]\n"
@@ -315,7 +318,7 @@ static int sem_do_cat(const sem_cap_t* caps, uint32_t cap_n, const char* fs_root
     return 1;
   }
   uint8_t* w = NULL;
-  if (!sem_guest_mem_map_rw(&rt.mem, guest_path_ptr, guest_path_len, &w) || !w) {
+  if (!sem_guest_mem_map_rw(rt.mem, guest_path_ptr, guest_path_len, &w) || !w) {
     sir_hosted_zabi_dispose(&rt);
     fprintf(stderr, "sem: map failed\n");
     return 1;
@@ -336,7 +339,7 @@ static int sem_do_cat(const sem_cap_t* caps, uint32_t cap_n, const char* fs_root
     fprintf(stderr, "sem: alloc failed\n");
     return 1;
   }
-  if (!sem_guest_mem_map_rw(&rt.mem, params_ptr, (zi_size32_t)sizeof(params), &w) || !w) {
+  if (!sem_guest_mem_map_rw(rt.mem, params_ptr, (zi_size32_t)sizeof(params), &w) || !w) {
     sir_hosted_zabi_dispose(&rt);
     fprintf(stderr, "sem: map failed\n");
     return 1;
@@ -355,13 +358,13 @@ static int sem_do_cat(const sem_cap_t* caps, uint32_t cap_n, const char* fs_root
     fprintf(stderr, "sem: alloc failed\n");
     return 1;
   }
-  if (!sem_guest_mem_map_rw(&rt.mem, kind_ptr, kind_len, &w) || !w) {
+  if (!sem_guest_mem_map_rw(rt.mem, kind_ptr, kind_len, &w) || !w) {
     sir_hosted_zabi_dispose(&rt);
     fprintf(stderr, "sem: map failed\n");
     return 1;
   }
   memcpy(w, kind, kind_len);
-  if (!sem_guest_mem_map_rw(&rt.mem, name_ptr, name_len, &w) || !w) {
+  if (!sem_guest_mem_map_rw(rt.mem, name_ptr, name_len, &w) || !w) {
     sir_hosted_zabi_dispose(&rt);
     fprintf(stderr, "sem: map failed\n");
     return 1;
@@ -388,7 +391,7 @@ static int sem_do_cat(const sem_cap_t* caps, uint32_t cap_n, const char* fs_root
     fprintf(stderr, "sem: alloc failed\n");
     return 1;
   }
-  if (!sem_guest_mem_map_rw(&rt.mem, open_req_ptr, (zi_size32_t)sizeof(open_req), &w) || !w) {
+  if (!sem_guest_mem_map_rw(rt.mem, open_req_ptr, (zi_size32_t)sizeof(open_req), &w) || !w) {
     sir_hosted_zabi_dispose(&rt);
     fprintf(stderr, "sem: map failed\n");
     return 1;
@@ -420,7 +423,7 @@ static int sem_do_cat(const sem_cap_t* caps, uint32_t cap_n, const char* fs_root
     }
     if (n == 0) break;
     const uint8_t* r = NULL;
-    if (!sem_guest_mem_map_ro(&rt.mem, buf_ptr, (zi_size32_t)n, &r) || !r) {
+    if (!sem_guest_mem_map_ro(rt.mem, buf_ptr, (zi_size32_t)n, &r) || !r) {
       (void)sir_zi_end(&rt, h);
       sir_hosted_zabi_dispose(&rt);
       fprintf(stderr, "sem: map failed\n");
@@ -434,11 +437,73 @@ static int sem_do_cat(const sem_cap_t* caps, uint32_t cap_n, const char* fs_root
   return 0;
 }
 
+static uint32_t hz_abi_version(void* u) { return sir_zi_abi_version((sir_hosted_zabi_t*)u); }
+static int32_t hz_ctl(void* u, zi_ptr_t a, zi_size32_t b, zi_ptr_t c, zi_size32_t d) { return sir_zi_ctl((sir_hosted_zabi_t*)u, a, b, c, d); }
+static int32_t hz_read(void* u, zi_handle_t h, zi_ptr_t p, zi_size32_t n) { return sir_zi_read((sir_hosted_zabi_t*)u, h, p, n); }
+static int32_t hz_write(void* u, zi_handle_t h, zi_ptr_t p, zi_size32_t n) { return sir_zi_write((sir_hosted_zabi_t*)u, h, p, n); }
+static int32_t hz_end(void* u, zi_handle_t h) { return sir_zi_end((sir_hosted_zabi_t*)u, h); }
+static zi_ptr_t hz_alloc(void* u, zi_size32_t n) { return sir_zi_alloc((sir_hosted_zabi_t*)u, n); }
+static int32_t hz_free(void* u, zi_ptr_t p) { return sir_zi_free((sir_hosted_zabi_t*)u, p); }
+static int32_t hz_telemetry(void* u, zi_ptr_t a, zi_size32_t b, zi_ptr_t c, zi_size32_t d) {
+  return sir_zi_telemetry((sir_hosted_zabi_t*)u, a, b, c, d);
+}
+static int32_t hz_cap_count(void* u) { return sir_zi_cap_count((sir_hosted_zabi_t*)u); }
+static int32_t hz_cap_get_size(void* u, int32_t i) { return sir_zi_cap_get_size((sir_hosted_zabi_t*)u, i); }
+static int32_t hz_cap_get(void* u, int32_t i, zi_ptr_t p, zi_size32_t n) { return sir_zi_cap_get((sir_hosted_zabi_t*)u, i, p, n); }
+static zi_handle_t hz_cap_open(void* u, zi_ptr_t p) { return sir_zi_cap_open((sir_hosted_zabi_t*)u, p); }
+static uint32_t hz_handle_hflags(void* u, zi_handle_t h) { return sir_zi_handle_hflags((sir_hosted_zabi_t*)u, h); }
+
+static int sem_do_sir_hello(void) {
+  // Initialize a VM memory arena.
+  sir_vm_t vm;
+  if (!sir_vm_init(&vm, (sir_vm_cfg_t){.guest_mem_cap = 1024 * 1024, .guest_mem_base = 0x10000ull, .host = (sir_host_t){0}})) {
+    fprintf(stderr, "sem: sircore_vm init failed\n");
+    return 1;
+  }
+
+  // Hosted zABI implementation, bound to the VM's guest memory.
+  sir_hosted_zabi_t hz;
+  if (!sir_hosted_zabi_init_with_mem(&hz, &vm.mem, (sir_hosted_zabi_cfg_t){.abi_version = 0x00020005u})) {
+    sir_vm_dispose(&vm);
+    fprintf(stderr, "sem: hosted zabi init failed\n");
+    return 1;
+  }
+
+  vm.host.user = &hz;
+  vm.host.v = (sir_host_vtable_t){
+      .zi_abi_version = hz_abi_version,
+      .zi_ctl = hz_ctl,
+      .zi_read = hz_read,
+      .zi_write = hz_write,
+      .zi_end = hz_end,
+      .zi_alloc = hz_alloc,
+      .zi_free = hz_free,
+      .zi_telemetry = hz_telemetry,
+      .zi_cap_count = hz_cap_count,
+      .zi_cap_get_size = hz_cap_get_size,
+      .zi_cap_get = hz_cap_get,
+      .zi_cap_open = hz_cap_open,
+      .zi_handle_hflags = hz_handle_hflags,
+  };
+
+  static const uint8_t msg[] = "hello from sircore_vm\n";
+  const sir_ins_t ins[] = {
+      {.k = SIR_INS_WRITE_BYTES, .u.write_bytes = {.h = 1, .bytes = msg, .len = (uint32_t)(sizeof(msg) - 1)}},
+      {.k = SIR_INS_EXIT, .u.exit_ = {.code = 0}},
+  };
+
+  const int32_t rc = sir_vm_run(&vm, ins, sizeof(ins) / sizeof(ins[0]));
+  sir_hosted_zabi_dispose(&hz);
+  sir_vm_dispose(&vm);
+  return (rc < 0) ? 1 : rc;
+}
+
 int main(int argc, char** argv) {
   bool want_caps = false;
   bool json = false;
   const char* fs_root = NULL;
   const char* cat_path = NULL;
+  bool sir_hello = false;
   const char* tape_out = NULL;
   const char* tape_in = NULL;
   bool tape_strict = true;
@@ -461,6 +526,10 @@ int main(int argc, char** argv) {
     }
     if (strcmp(a, "--caps") == 0) {
       want_caps = true;
+      continue;
+    }
+    if (strcmp(a, "--sir-hello") == 0) {
+      sir_hello = true;
       continue;
     }
     if (strcmp(a, "--cat") == 0 && i + 1 < argc) {
@@ -527,7 +596,7 @@ int main(int argc, char** argv) {
     return 2;
   }
 
-  if (!want_caps && !cat_path) {
+  if (!want_caps && !cat_path && !sir_hello) {
     sem_print_help(stdout);
     sem_free_caps(dyn_caps, dyn_n);
     return 0;
@@ -556,6 +625,10 @@ int main(int argc, char** argv) {
     const int rc = sem_do_cat(caps, cap_n, fs_root, cat_path);
     sem_free_caps(dyn_caps, dyn_n);
     return rc;
+  }
+  if (sir_hello) {
+    sem_free_caps(dyn_caps, dyn_n);
+    return sem_do_sir_hello();
   }
 
   sem_host_t host;

@@ -18,7 +18,11 @@
 // development, while AOT-lowered binaries target the same zABI names.
 
 typedef struct sir_hosted_zabi {
-  sem_guest_mem_t mem;
+  // Guest memory is owned by the embedding VM/tool.
+  // In standalone `sem` usage we create and own an arena, but in `sircore` VM
+  // mode we typically reuse the VM's memory.
+  sem_guest_mem_t* mem;
+  bool owns_mem;
   sem_handles_t handles;
   sem_host_t ctl_host; // zi_ctl ops (e.g. CAPS_LIST)
   uint32_t abi_version;
@@ -41,6 +45,9 @@ typedef struct sir_hosted_zabi_cfg {
 bool sir_hosted_zabi_init(sir_hosted_zabi_t* rt, sir_hosted_zabi_cfg_t cfg);
 void sir_hosted_zabi_dispose(sir_hosted_zabi_t* rt);
 
+// Initializes using an externally owned guest memory arena.
+bool sir_hosted_zabi_init_with_mem(sir_hosted_zabi_t* rt, sem_guest_mem_t* mem, sir_hosted_zabi_cfg_t cfg);
+
 // --- zABI core surface (hosted) ---
 uint32_t sir_zi_abi_version(const sir_hosted_zabi_t* rt);
 int32_t sir_zi_ctl(sir_hosted_zabi_t* rt, zi_ptr_t req_ptr, zi_size32_t req_len, zi_ptr_t resp_ptr, zi_size32_t resp_cap);
@@ -57,4 +64,3 @@ int32_t sir_zi_cap_get_size(sir_hosted_zabi_t* rt, int32_t index);
 int32_t sir_zi_cap_get(sir_hosted_zabi_t* rt, int32_t index, zi_ptr_t out_ptr, zi_size32_t out_cap);
 zi_handle_t sir_zi_cap_open(sir_hosted_zabi_t* rt, zi_ptr_t req_ptr);
 uint32_t sir_zi_handle_hflags(sir_hosted_zabi_t* rt, zi_handle_t h);
-

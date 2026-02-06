@@ -55,7 +55,7 @@ int main(void) {
   }
 
   uint8_t* w = NULL;
-  if (!sem_guest_mem_map_rw(&rt.mem, p, msg_len, &w) || !w) {
+  if (!sem_guest_mem_map_rw(rt.mem, p, msg_len, &w) || !w) {
     sir_hosted_zabi_dispose(&rt);
     return fail("map_rw failed");
   }
