@@ -1,0 +1,8 @@
+{"ir":"sir-v1.0","k":"meta","producer":"sircc-example","unit":"bad_simd_missing_feature"}
+
+{"ir":"sir-v1.0","k":"type","id":1,"kind":"prim","prim":"i32"}
+{"ir":"sir-v1.0","k":"type","id":2,"kind":"vec","lane":1,"lanes":4}
+
+{"ir":"sir-v1.0","k":"node","id":10,"tag":"const.i32","type_ref":1,"fields":{"value":1}}
+{"ir":"sir-v1.0","k":"node","id":11,"tag":"vec.splat","type_ref":2,"fields":{"args":[{"t":"ref","id":10}]}}
+

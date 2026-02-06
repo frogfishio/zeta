@@ -199,6 +199,42 @@ add_test(
 )
 
 add_test(
+  NAME sircc_diag_bad_simd_missing_feature
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DARGS=--verify-only\\;${CMAKE_CURRENT_LIST_DIR}/examples/bad_simd_missing_feature.sir.jsonl
+    "-DEXPECT=requires feature simd:v1"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
+)
+
+add_test(
+  NAME sircc_diag_bad_simd_vec_lane_unsupported
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DARGS=--verify-only\\;${CMAKE_CURRENT_LIST_DIR}/examples/bad_simd_vec_lane_unsupported.sir.jsonl
+    "-DEXPECT=sircc.type.vec.lane.unsupported"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
+)
+
+add_test(
+  NAME sircc_diag_bad_simd_vec_lanes_zero
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DARGS=--verify-only\\;${CMAKE_CURRENT_LIST_DIR}/examples/bad_simd_vec_lanes_zero.sir.jsonl
+    "-DEXPECT=sircc.type.vec.lanes.bad"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
+)
+
+add_test(
+  NAME sircc_diag_bad_simd_shuffle_idx_len
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DARGS=--diagnostics\\;json\\;${CMAKE_CURRENT_LIST_DIR}/examples/bad_simd_shuffle_idx_len.sir.jsonl\\;-o\\;${CMAKE_CURRENT_BINARY_DIR}/bad_simd_shuffle_idx_len.ll\\;--emit-llvm
+    "-DEXPECT=\\\"code\\\":\\\"sircc.vec.shuffle.idx.len_bad\\\""
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
+)
+
+add_test(
   NAME sircc_diag_bad_ptr_add_fun
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>
@@ -357,6 +393,26 @@ add_test(
 add_test(
   NAME sircc_verify_simd_splat_extract
   COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/simd_splat_extract.sir.jsonl
+)
+
+add_test(
+  NAME sircc_verify_simd_i32_add_extract_replace
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/simd_i32_add_extract_replace.sir.jsonl
+)
+
+add_test(
+  NAME sircc_verify_simd_cmp_select_bool_mask
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/simd_cmp_select_bool_mask.sir.jsonl
+)
+
+add_test(
+  NAME sircc_verify_simd_shuffle_two_inputs
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/simd_shuffle_two_inputs.sir.jsonl
+)
+
+add_test(
+  NAME sircc_verify_simd_f32_mul_nan_canon_bits
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/simd_f32_mul_nan_canon_bits.sir.jsonl
 )
 
 add_test(
@@ -576,6 +632,46 @@ add_test(
     -DSIRCC=$<TARGET_FILE:sircc>
     -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/simd_splat_extract.sir.jsonl
     -DEXE=${CMAKE_CURRENT_BINARY_DIR}/simd_splat_extract.exe
+    -DEXPECT=7
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/run_and_expect_exit.cmake
+)
+
+add_test(
+  NAME sircc_run_simd_i32_add_extract_replace
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/simd_i32_add_extract_replace.sir.jsonl
+    -DEXE=${CMAKE_CURRENT_BINARY_DIR}/simd_i32_add_extract_replace.exe
+    -DEXPECT=9
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/run_and_expect_exit.cmake
+)
+
+add_test(
+  NAME sircc_run_simd_cmp_select_bool_mask
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/simd_cmp_select_bool_mask.sir.jsonl
+    -DEXE=${CMAKE_CURRENT_BINARY_DIR}/simd_cmp_select_bool_mask.exe
+    -DEXPECT=7
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/run_and_expect_exit.cmake
+)
+
+add_test(
+  NAME sircc_run_simd_shuffle_two_inputs
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/simd_shuffle_two_inputs.sir.jsonl
+    -DEXE=${CMAKE_CURRENT_BINARY_DIR}/simd_shuffle_two_inputs.exe
+    -DEXPECT=6
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/run_and_expect_exit.cmake
+)
+
+add_test(
+  NAME sircc_run_simd_f32_mul_nan_canon_bits
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/simd_f32_mul_nan_canon_bits.sir.jsonl
+    -DEXE=${CMAKE_CURRENT_BINARY_DIR}/simd_f32_mul_nan_canon_bits.exe
     -DEXPECT=7
     -P ${CMAKE_CURRENT_LIST_DIR}/tests/run_and_expect_exit.cmake
 )

@@ -1,0 +1,5 @@
+{"ir":"sir-v1.0","k":"meta","producer":"sircc-example","unit":"bad_simd_vec_lanes_zero","ext":{"features":["simd:v1"]}}
+
+{"ir":"sir-v1.0","k":"type","id":1,"kind":"prim","prim":"i32"}
+{"ir":"sir-v1.0","k":"type","id":2,"kind":"vec","lane":1,"lanes":0}
+

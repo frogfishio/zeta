@@ -55,17 +55,19 @@ static LLVMValueRef i8_to_bool(FunctionCtx* f, LLVMValueRef v) {
   return LLVMBuildICmp(f->builder, LLVMIntNE, v, z, "b");
 }
 
-static bool emit_vec_idx_bounds_check(FunctionCtx* f, int64_t node_id, LLVMValueRef idx, int64_t lanes) {
+static bool emit_vec_idx_bounds_check(FunctionCtx* f, int64_t node_id, NodeRec* n, LLVMValueRef idx, int64_t lanes) {
   if (!f || !idx) return false;
   if (lanes <= 0 || lanes > INT_MAX) {
-    err_codef(f->p, "sircc.vec.lanes.bad", "sircc: vec op node %lld has invalid lane count", (long long)node_id);
+    if (n) LOWER_ERR_NODE(f, n, "sircc.vec.lanes.bad", "sircc: %s node %lld has invalid lane count", n->tag, (long long)node_id);
+    else err_codef(f->p, "sircc.vec.lanes.bad", "sircc: vec op node %lld has invalid lane count", (long long)node_id);
     return false;
   }
 
   LLVMTypeRef i32 = LLVMInt32TypeInContext(f->ctx);
   if (LLVMTypeOf(idx) != i32) {
     if (LLVMGetTypeKind(LLVMTypeOf(idx)) != LLVMIntegerTypeKind) {
-      err_codef(f->p, "sircc.vec.idx.type_bad", "sircc: vec op node %lld idx must be i32", (long long)node_id);
+      if (n) LOWER_ERR_NODE(f, n, "sircc.vec.idx.type_bad", "sircc: %s node %lld idx must be i32", n->tag, (long long)node_id);
+      else err_codef(f->p, "sircc.vec.idx.type_bad", "sircc: vec op node %lld idx must be i32", (long long)node_id);
       return false;
     }
     idx = LLVMBuildTruncOrBitCast(f->builder, idx, i32, "idx.i32");
@@ -100,8 +102,127 @@ static LLVMValueRef canonicalize_float_vec(FunctionCtx* f, LLVMValueRef v, TypeR
   return out;
 }
 
+static LLVMValueRef bool_vec_normalize(FunctionCtx* f, LLVMValueRef v, int lanes) {
+  if (!f || !v || lanes <= 0 || lanes > INT_MAX) return NULL;
+  LLVMTypeRef i8 = LLVMInt8TypeInContext(f->ctx);
+  LLVMTypeRef vec_i8 = LLVMVectorType(i8, (unsigned)lanes);
+  if (LLVMTypeOf(v) != vec_i8) v = LLVMBuildTruncOrBitCast(f->builder, v, vec_i8, "bvec.cast");
+  LLVMValueRef z = LLVMConstNull(vec_i8);
+  LLVMValueRef i1v = LLVMBuildICmp(f->builder, LLVMIntNE, v, z, "bvec.i1");
+  return LLVMBuildZExt(f->builder, i1v, vec_i8, "bvec");
+}
+
+static LLVMValueRef bool_vec_from_i1(FunctionCtx* f, LLVMValueRef i1v, int lanes) {
+  if (!f || !i1v || lanes <= 0 || lanes > INT_MAX) return NULL;
+  LLVMTypeRef vec_i8 = LLVMVectorType(LLVMInt8TypeInContext(f->ctx), (unsigned)lanes);
+  return LLVMBuildZExt(f->builder, i1v, vec_i8, "bvec");
+}
+
+static int64_t find_bool_vec_type_id(SirProgram* p, int64_t lanes) {
+  if (!p || lanes <= 0) return 0;
+  for (size_t i = 0; i < p->types_cap; i++) {
+    TypeRec* t = p->types[i];
+    if (!t || t->kind != TYPE_VEC) continue;
+    if (t->lanes != lanes) continue;
+    TypeRec* lane = get_type(p, t->lane_ty);
+    if (!lane || lane->kind != TYPE_PRIM || !lane->prim) continue;
+    if (strcmp(lane->prim, "bool") == 0 || strcmp(lane->prim, "i1") == 0) return (int64_t)i;
+  }
+  return 0;
+}
+
 bool lower_expr_simd(FunctionCtx* f, int64_t node_id, NodeRec* n, LLVMValueRef* outp) {
   if (!f || !n || !outp) return false;
+
+  if (strcmp(n->tag, "vec.shuffle") == 0) {
+    if (!n->fields) {
+      LOWER_ERR_NODE(f, n, "sircc.vec.shuffle.missing_fields", "sircc: vec.shuffle node %lld missing fields", (long long)node_id);
+      return false;
+    }
+    JsonValue* args = json_obj_get(n->fields, "args");
+    if (!args || args->type != JSON_ARRAY || args->v.arr.len != 2) {
+      LOWER_ERR_NODE(f, n, "sircc.vec.shuffle.args.bad", "sircc: vec.shuffle node %lld requires args:[a, b]", (long long)node_id);
+      return false;
+    }
+    JsonValue* flags = json_obj_get(n->fields, "flags");
+    if (!flags || flags->type != JSON_OBJECT) {
+      LOWER_ERR_NODE(f, n, "sircc.vec.shuffle.flags.bad", "sircc: vec.shuffle node %lld requires fields.flags object", (long long)node_id);
+      return false;
+    }
+    JsonValue* idxs = json_obj_get(flags, "idx");
+    if (!idxs || idxs->type != JSON_ARRAY) {
+      LOWER_ERR_NODE(f, n, "sircc.vec.shuffle.idx.bad", "sircc: vec.shuffle node %lld requires flags.idx array", (long long)node_id);
+      return false;
+    }
+
+    int64_t aid = 0, bid = 0;
+    if (!parse_node_ref_id(f->p, args->v.arr.items[0], &aid) || !parse_node_ref_id(f->p, args->v.arr.items[1], &bid)) {
+      LOWER_ERR_NODE(f, n, "sircc.vec.shuffle.args.ref_bad", "sircc: vec.shuffle node %lld args must be node refs", (long long)node_id);
+      return false;
+    }
+    NodeRec* an = get_node(f->p, aid);
+    NodeRec* bn = get_node(f->p, bid);
+    int64_t vec_ty_id = n->type_ref ? n->type_ref : (an ? an->type_ref : 0);
+    if (!vec_ty_id || !an || !bn || an->type_ref == 0 || bn->type_ref == 0) {
+      LOWER_ERR_NODE(f, n, "sircc.vec.shuffle.type.missing", "sircc: vec.shuffle node %lld requires vec type_ref", (long long)node_id);
+      return false;
+    }
+    if (an->type_ref != vec_ty_id || bn->type_ref != vec_ty_id) {
+      LOWER_ERR_NODE(f, n, "sircc.vec.shuffle.type.mismatch", "sircc: vec.shuffle node %lld requires a,b to have the same vec type", (long long)node_id);
+      return false;
+    }
+
+    TypeRec* vec = NULL;
+    TypeRec* lane = NULL;
+    if (!is_vec_type(f->p, vec_ty_id, &vec, &lane)) {
+      LOWER_ERR_NODE(f, n, "sircc.vec.shuffle.type.bad", "sircc: vec.shuffle node %lld type_ref must be a vec type", (long long)node_id);
+      return false;
+    }
+    if (idxs->v.arr.len != (size_t)vec->lanes) {
+      LOWER_ERR_NODE(f, n, "sircc.vec.shuffle.idx.len_bad", "sircc: vec.shuffle node %lld flags.idx length must equal lanes", (long long)node_id);
+      return false;
+    }
+
+    // Validate indices; out-of-range is a deterministic trap.
+    int64_t max = vec->lanes * 2;
+    bool any_oob = false;
+    LLVMTypeRef i32 = LLVMInt32TypeInContext(f->ctx);
+    LLVMValueRef* mask_elts = (LLVMValueRef*)malloc((size_t)vec->lanes * sizeof(LLVMValueRef));
+    if (!mask_elts) return false;
+    for (int i = 0; i < (int)vec->lanes; i++) {
+      int64_t idx = 0;
+      if (!json_get_i64(idxs->v.arr.items[i], &idx)) {
+        free(mask_elts);
+        LOWER_ERR_NODE(f, n, "sircc.vec.shuffle.idx.elem_bad", "sircc: vec.shuffle node %lld flags.idx[%d] must be an integer", (long long)node_id, i);
+        return false;
+      }
+      if (idx < 0 || idx >= max) any_oob = true;
+      if (idx < 0) idx = 0;
+      if (idx >= max) idx = max - 1;
+      mask_elts[i] = LLVMConstInt(i32, (unsigned long long)idx, 0);
+    }
+    LLVMValueRef mask = LLVMConstVector(mask_elts, (unsigned)vec->lanes);
+    free(mask_elts);
+
+    if (any_oob) {
+      LLVMValueRef one = LLVMConstInt(LLVMInt1TypeInContext(f->ctx), 1, 0);
+      if (!emit_trap_if(f, one)) return false;
+    }
+
+    LLVMValueRef a = lower_expr(f, aid);
+    LLVMValueRef b = lower_expr(f, bid);
+    if (!a || !b) return false;
+
+    LLVMTypeRef vec_llvm = lower_type(f->p, f->ctx, vec_ty_id);
+    if (!vec_llvm) return false;
+    if (LLVMTypeOf(a) != vec_llvm) a = LLVMBuildBitCast(f->builder, a, vec_llvm, "a.cast");
+    if (LLVMTypeOf(b) != vec_llvm) b = LLVMBuildBitCast(f->builder, b, vec_llvm, "b.cast");
+
+    LLVMValueRef out = LLVMBuildShuffleVector(f->builder, a, b, mask, "shuf");
+    out = canonicalize_float_vec(f, out, vec, lane);
+    *outp = out;
+    return true;
+  }
 
   if (strcmp(n->tag, "vec.splat") == 0) {
     if (n->type_ref == 0) {
@@ -163,6 +284,284 @@ bool lower_expr_simd(FunctionCtx* f, int64_t node_id, NodeRec* n, LLVMValueRef* 
     return true;
   }
 
+  if (strcmp(n->tag, "vec.add") == 0 || strcmp(n->tag, "vec.sub") == 0 || strcmp(n->tag, "vec.mul") == 0 ||
+      strcmp(n->tag, "vec.and") == 0 || strcmp(n->tag, "vec.or") == 0 || strcmp(n->tag, "vec.xor") == 0 ||
+      strcmp(n->tag, "vec.not") == 0 || strncmp(n->tag, "vec.cmp.", 8) == 0 || strcmp(n->tag, "vec.select") == 0) {
+    if (!n->fields) {
+      LOWER_ERR_NODE(f, n, "sircc.vec.op.missing_fields", "sircc: %s node %lld missing fields", n->tag, (long long)node_id);
+      return false;
+    }
+    JsonValue* args = json_obj_get(n->fields, "args");
+    if (!args || args->type != JSON_ARRAY) {
+      LOWER_ERR_NODE(f, n, "sircc.vec.op.args.bad", "sircc: %s node %lld requires fields.args array", n->tag, (long long)node_id);
+      return false;
+    }
+
+    int64_t vec_ty_id = n->type_ref;
+    TypeRec* vec = NULL;
+    TypeRec* lane = NULL;
+
+    // For cmp/select we can infer dst types from operands when type_ref is omitted.
+    if (strncmp(n->tag, "vec.cmp.", 8) == 0) {
+      if (args->v.arr.len != 2) {
+        LOWER_ERR_NODE(f, n, "sircc.vec.cmp.args.bad", "sircc: %s node %lld requires args:[a,b]", n->tag, (long long)node_id);
+        return false;
+      }
+      int64_t aid = 0, bid = 0;
+      if (!parse_node_ref_id(f->p, args->v.arr.items[0], &aid) || !parse_node_ref_id(f->p, args->v.arr.items[1], &bid)) {
+        LOWER_ERR_NODE(f, n, "sircc.vec.cmp.args.ref_bad", "sircc: %s node %lld args must be node refs", n->tag, (long long)node_id);
+        return false;
+      }
+      NodeRec* an = get_node(f->p, aid);
+      NodeRec* bn = get_node(f->p, bid);
+      if (!an || !bn || an->type_ref == 0 || bn->type_ref == 0 || an->type_ref != bn->type_ref) {
+        LOWER_ERR_NODE(f, n, "sircc.vec.cmp.type.bad", "sircc: %s node %lld requires a,b with same vec type_ref", n->tag, (long long)node_id);
+        return false;
+      }
+      TypeRec* src_vec = NULL;
+      TypeRec* src_lane = NULL;
+      if (!is_vec_type(f->p, an->type_ref, &src_vec, &src_lane)) {
+        LOWER_ERR_NODE(f, n, "sircc.vec.cmp.src.bad", "sircc: %s node %lld requires vec operands", n->tag, (long long)node_id);
+        return false;
+      }
+      if (vec_ty_id == 0) {
+        vec_ty_id = find_bool_vec_type_id(f->p, src_vec->lanes);
+        if (vec_ty_id == 0) {
+          LOWER_ERR_NODE(f, n, "sircc.vec.cmp.bool_ty_missing",
+                         "sircc: %s node %lld requires a vec(bool,%lld) type definition to exist in the stream", n->tag, (long long)node_id,
+                         (long long)src_vec->lanes);
+          return false;
+        }
+      }
+      if (!is_vec_type(f->p, vec_ty_id, &vec, &lane) || !lane_is_bool(lane)) {
+        LOWER_ERR_NODE(f, n, "sircc.vec.cmp.dst.bad", "sircc: %s node %lld type_ref must be vec(bool,lanes)", n->tag, (long long)node_id);
+        return false;
+      }
+
+      LLVMValueRef a = lower_expr(f, aid);
+      LLVMValueRef b = lower_expr(f, bid);
+      if (!a || !b) return false;
+      LLVMTypeRef src_llvm = lower_type(f->p, f->ctx, an->type_ref);
+      if (!src_llvm) return false;
+      if (LLVMTypeOf(a) != src_llvm) a = LLVMBuildBitCast(f->builder, a, src_llvm, "a.cast");
+      if (LLVMTypeOf(b) != src_llvm) b = LLVMBuildBitCast(f->builder, b, src_llvm, "b.cast");
+
+      LLVMValueRef cmp = NULL;
+      const char* cc = n->tag + 8;
+      if (lane_is_float(src_lane)) {
+        LLVMRealPredicate pred = LLVMRealOEQ;
+        if (strcmp(cc, "eq") == 0) pred = LLVMRealOEQ;
+        else if (strcmp(cc, "ne") == 0) pred = LLVMRealONE;
+        else if (strcmp(cc, "lt") == 0) pred = LLVMRealOLT;
+        else if (strcmp(cc, "le") == 0) pred = LLVMRealOLE;
+        else if (strcmp(cc, "gt") == 0) pred = LLVMRealOGT;
+        else if (strcmp(cc, "ge") == 0) pred = LLVMRealOGE;
+        else {
+          LOWER_ERR_NODE(f, n, "sircc.vec.cmp.cc.bad", "sircc: unsupported vec.cmp predicate '%s'", cc);
+          return false;
+        }
+        cmp = LLVMBuildFCmp(f->builder, pred, a, b, "vcmp");
+      } else if (lane_is_bool(src_lane)) {
+        if (strcmp(cc, "eq") != 0 && strcmp(cc, "ne") != 0) {
+          LOWER_ERR_NODE(f, n, "sircc.vec.cmp.bool.cc.bad", "sircc: vec.cmp.%s not supported for bool lanes (only eq/ne)", cc);
+          return false;
+        }
+        LLVMValueRef na = bool_vec_normalize(f, a, (int)src_vec->lanes);
+        LLVMValueRef nb = bool_vec_normalize(f, b, (int)src_vec->lanes);
+        if (!na || !nb) return false;
+        cmp = LLVMBuildICmp(f->builder, (strcmp(cc, "eq") == 0) ? LLVMIntEQ : LLVMIntNE, na, nb, "vcmp");
+      } else {
+        LLVMIntPredicate pred = LLVMIntEQ;
+        if (strcmp(cc, "eq") == 0) pred = LLVMIntEQ;
+        else if (strcmp(cc, "ne") == 0) pred = LLVMIntNE;
+        else if (strcmp(cc, "lt") == 0) pred = LLVMIntSLT;
+        else if (strcmp(cc, "le") == 0) pred = LLVMIntSLE;
+        else if (strcmp(cc, "gt") == 0) pred = LLVMIntSGT;
+        else if (strcmp(cc, "ge") == 0) pred = LLVMIntSGE;
+        else {
+          LOWER_ERR_NODE(f, n, "sircc.vec.cmp.cc.bad", "sircc: unsupported vec.cmp predicate '%s'", cc);
+          return false;
+        }
+        cmp = LLVMBuildICmp(f->builder, pred, a, b, "vcmp");
+      }
+
+      LLVMValueRef out = bool_vec_from_i1(f, cmp, (int)vec->lanes);
+      if (!out) return false;
+      *outp = out;
+      return true;
+    }
+
+    if (strcmp(n->tag, "vec.select") == 0) {
+      if (args->v.arr.len != 3) {
+        LOWER_ERR_NODE(f, n, "sircc.vec.select.args.bad", "sircc: vec.select node %lld requires args:[mask,a,b]", (long long)node_id);
+        return false;
+      }
+      int64_t mid = 0, aid = 0, bid = 0;
+      if (!parse_node_ref_id(f->p, args->v.arr.items[0], &mid) || !parse_node_ref_id(f->p, args->v.arr.items[1], &aid) ||
+          !parse_node_ref_id(f->p, args->v.arr.items[2], &bid)) {
+        LOWER_ERR_NODE(f, n, "sircc.vec.select.args.ref_bad", "sircc: vec.select node %lld args must be node refs", (long long)node_id);
+        return false;
+      }
+      NodeRec* mn = get_node(f->p, mid);
+      NodeRec* an = get_node(f->p, aid);
+      NodeRec* bn = get_node(f->p, bid);
+      if (!mn || !an || !bn || mn->type_ref == 0 || an->type_ref == 0 || bn->type_ref == 0) {
+        LOWER_ERR_NODE(f, n, "sircc.vec.select.type.missing", "sircc: vec.select node %lld requires operand type_refs", (long long)node_id);
+        return false;
+      }
+      if (an->type_ref != bn->type_ref) {
+        LOWER_ERR_NODE(f, n, "sircc.vec.select.type.mismatch", "sircc: vec.select node %lld requires a and b to share type_ref", (long long)node_id);
+        return false;
+      }
+      TypeRec* src_vec = NULL;
+      TypeRec* src_lane = NULL;
+      if (!is_vec_type(f->p, an->type_ref, &src_vec, &src_lane)) {
+        LOWER_ERR_NODE(f, n, "sircc.vec.select.ab.bad", "sircc: vec.select node %lld requires vec a/b operands", (long long)node_id);
+        return false;
+      }
+      TypeRec* mask_vec = NULL;
+      TypeRec* mask_lane = NULL;
+      if (!is_vec_type(f->p, mn->type_ref, &mask_vec, &mask_lane) || !lane_is_bool(mask_lane) || mask_vec->lanes != src_vec->lanes) {
+        LOWER_ERR_NODE(f, n, "sircc.vec.select.mask.bad", "sircc: vec.select node %lld mask must be vec(bool,lanes)", (long long)node_id);
+        return false;
+      }
+
+      int64_t dst_ty_id = vec_ty_id ? vec_ty_id : an->type_ref;
+      if (dst_ty_id != an->type_ref) {
+        LOWER_ERR_NODE(f, n, "sircc.vec.select.dst.bad", "sircc: vec.select node %lld type_ref must match a/b vec type", (long long)node_id);
+        return false;
+      }
+      if (!is_vec_type(f->p, dst_ty_id, &vec, &lane)) return false;
+
+      LLVMValueRef m = lower_expr(f, mid);
+      LLVMValueRef a = lower_expr(f, aid);
+      LLVMValueRef b = lower_expr(f, bid);
+      if (!m || !a || !b) return false;
+
+      LLVMTypeRef mask_llvm = lower_type(f->p, f->ctx, mn->type_ref);
+      LLVMTypeRef src_llvm = lower_type(f->p, f->ctx, dst_ty_id);
+      if (!mask_llvm || !src_llvm) return false;
+      if (LLVMTypeOf(m) != mask_llvm) m = LLVMBuildBitCast(f->builder, m, mask_llvm, "m.cast");
+      if (LLVMTypeOf(a) != src_llvm) a = LLVMBuildBitCast(f->builder, a, src_llvm, "a.cast");
+      if (LLVMTypeOf(b) != src_llvm) b = LLVMBuildBitCast(f->builder, b, src_llvm, "b.cast");
+
+      LLVMValueRef mnz = LLVMBuildICmp(f->builder, LLVMIntNE, m, LLVMConstNull(mask_llvm), "m.nz");
+      LLVMValueRef out = LLVMBuildSelect(f->builder, mnz, a, b, "vsel");
+      out = canonicalize_float_vec(f, out, vec, lane);
+      if (lane_is_bool(lane)) out = bool_vec_normalize(f, out, (int)vec->lanes);
+      *outp = out;
+      return true;
+    }
+
+    // Unary op: vec.not
+    if (strcmp(n->tag, "vec.not") == 0) {
+      if (args->v.arr.len != 1) {
+        LOWER_ERR_NODE(f, n, "sircc.vec.not.args.bad", "sircc: vec.not node %lld requires args:[v]", (long long)node_id);
+        return false;
+      }
+      int64_t vid = 0;
+      if (!parse_node_ref_id(f->p, args->v.arr.items[0], &vid)) {
+        LOWER_ERR_NODE(f, n, "sircc.vec.not.args.ref_bad", "sircc: vec.not node %lld args must be node refs", (long long)node_id);
+        return false;
+      }
+      NodeRec* vn = get_node(f->p, vid);
+      int64_t src_ty_id = vn ? vn->type_ref : 0;
+      if (vec_ty_id == 0) vec_ty_id = src_ty_id;
+      if (!src_ty_id || vec_ty_id != src_ty_id) {
+        LOWER_ERR_NODE(f, n, "sircc.vec.not.type.bad", "sircc: vec.not node %lld requires type_ref matching operand vec type", (long long)node_id);
+        return false;
+      }
+      if (!is_vec_type(f->p, vec_ty_id, &vec, &lane)) return false;
+      if (lane_is_float(lane)) {
+        LOWER_ERR_NODE(f, n, "sircc.vec.not.lane.bad", "sircc: vec.not lane type must be integer or bool");
+        return false;
+      }
+
+      LLVMValueRef v = lower_expr(f, vid);
+      if (!v) return false;
+      LLVMTypeRef vec_llvm = lower_type(f->p, f->ctx, vec_ty_id);
+      if (!vec_llvm) return false;
+      if (LLVMTypeOf(v) != vec_llvm) v = LLVMBuildBitCast(f->builder, v, vec_llvm, "v.cast");
+
+      LLVMValueRef out = NULL;
+      if (lane_is_bool(lane)) {
+        LLVMValueRef nz = LLVMBuildICmp(f->builder, LLVMIntNE, v, LLVMConstNull(vec_llvm), "b.nz");
+        out = bool_vec_from_i1(f, LLVMBuildNot(f->builder, nz, "b.not"), (int)vec->lanes);
+      } else {
+        out = LLVMBuildNot(f->builder, v, "vnot");
+      }
+      if (lane_is_bool(lane)) out = bool_vec_normalize(f, out, (int)vec->lanes);
+      *outp = out;
+      return true;
+    }
+
+    // Binary arithmetic/logic ops.
+    bool is_arith = (strcmp(n->tag, "vec.add") == 0 || strcmp(n->tag, "vec.sub") == 0 || strcmp(n->tag, "vec.mul") == 0);
+    bool is_logic = (strcmp(n->tag, "vec.and") == 0 || strcmp(n->tag, "vec.or") == 0 || strcmp(n->tag, "vec.xor") == 0);
+    if (args->v.arr.len != 2) {
+      LOWER_ERR_NODE(f, n, "sircc.vec.bin.args.bad", "sircc: %s node %lld requires args:[a,b]", n->tag, (long long)node_id);
+      return false;
+    }
+    int64_t aid = 0, bid = 0;
+    if (!parse_node_ref_id(f->p, args->v.arr.items[0], &aid) || !parse_node_ref_id(f->p, args->v.arr.items[1], &bid)) {
+      LOWER_ERR_NODE(f, n, "sircc.vec.bin.args.ref_bad", "sircc: %s node %lld args must be node refs", n->tag, (long long)node_id);
+      return false;
+    }
+    NodeRec* an = get_node(f->p, aid);
+    NodeRec* bn = get_node(f->p, bid);
+    int64_t src_ty_id = (an && bn && an->type_ref == bn->type_ref) ? an->type_ref : 0;
+    if (vec_ty_id == 0) vec_ty_id = src_ty_id;
+    if (!vec_ty_id || vec_ty_id != src_ty_id) {
+      LOWER_ERR_NODE(f, n, "sircc.vec.bin.type.bad", "sircc: %s node %lld requires type_ref matching operand vec types", n->tag, (long long)node_id);
+      return false;
+    }
+    if (!is_vec_type(f->p, vec_ty_id, &vec, &lane)) return false;
+
+    if (is_arith && lane_is_bool(lane)) {
+      LOWER_ERR_NODE(f, n, "sircc.vec.arith.lane.bad", "sircc: %s lane type must be integer or float (not bool)", n->tag);
+      return false;
+    }
+    if (is_logic && lane_is_float(lane)) {
+      LOWER_ERR_NODE(f, n, "sircc.vec.logic.lane.bad", "sircc: %s lane type must be integer or bool (not float)", n->tag);
+      return false;
+    }
+
+    LLVMValueRef a = lower_expr(f, aid);
+    LLVMValueRef b = lower_expr(f, bid);
+    if (!a || !b) return false;
+    LLVMTypeRef vec_llvm = lower_type(f->p, f->ctx, vec_ty_id);
+    if (!vec_llvm) return false;
+    if (LLVMTypeOf(a) != vec_llvm) a = LLVMBuildBitCast(f->builder, a, vec_llvm, "a.cast");
+    if (LLVMTypeOf(b) != vec_llvm) b = LLVMBuildBitCast(f->builder, b, vec_llvm, "b.cast");
+
+    LLVMValueRef out = NULL;
+    if (lane_is_float(lane)) {
+      if (strcmp(n->tag, "vec.add") == 0) out = LLVMBuildFAdd(f->builder, a, b, "vadd");
+      else if (strcmp(n->tag, "vec.sub") == 0) out = LLVMBuildFSub(f->builder, a, b, "vsub");
+      else if (strcmp(n->tag, "vec.mul") == 0) out = LLVMBuildFMul(f->builder, a, b, "vmul");
+      else {
+        LOWER_ERR_NODE(f, n, "sircc.vec.op.bad", "sircc: unsupported float vec op '%s'", n->tag);
+        return false;
+      }
+      out = canonicalize_float_vec(f, out, vec, lane);
+    } else {
+      if (strcmp(n->tag, "vec.add") == 0) out = LLVMBuildAdd(f->builder, a, b, "vadd");
+      else if (strcmp(n->tag, "vec.sub") == 0) out = LLVMBuildSub(f->builder, a, b, "vsub");
+      else if (strcmp(n->tag, "vec.mul") == 0) out = LLVMBuildMul(f->builder, a, b, "vmul");
+      else if (strcmp(n->tag, "vec.and") == 0) out = LLVMBuildAnd(f->builder, a, b, "vand");
+      else if (strcmp(n->tag, "vec.or") == 0) out = LLVMBuildOr(f->builder, a, b, "vor");
+      else if (strcmp(n->tag, "vec.xor") == 0) out = LLVMBuildXor(f->builder, a, b, "vxor");
+      else {
+        LOWER_ERR_NODE(f, n, "sircc.vec.op.bad", "sircc: unsupported int/bool vec op '%s'", n->tag);
+        return false;
+      }
+      if (lane_is_bool(lane)) out = bool_vec_normalize(f, out, (int)vec->lanes);
+    }
+
+    *outp = out;
+    return true;
+  }
+
   if (strcmp(n->tag, "vec.extract") == 0) {
     if (!n->fields) {
       LOWER_ERR_NODE(f, n, "sircc.vec.extract.missing_fields", "sircc: vec.extract node %lld missing fields", (long long)node_id);
@@ -193,7 +592,7 @@ bool lower_expr_simd(FunctionCtx* f, int64_t node_id, NodeRec* n, LLVMValueRef* 
     LLVMValueRef idx = lower_expr(f, idxid);
     if (!v || !idx) return false;
 
-    if (!emit_vec_idx_bounds_check(f, node_id, idx, vec->lanes)) return false;
+    if (!emit_vec_idx_bounds_check(f, node_id, n, idx, vec->lanes)) return false;
 
     LLVMValueRef lane_idx = idx;
     if (LLVMTypeOf(lane_idx) != LLVMInt32TypeInContext(f->ctx)) {
@@ -246,7 +645,7 @@ bool lower_expr_simd(FunctionCtx* f, int64_t node_id, NodeRec* n, LLVMValueRef* 
     LLVMValueRef x = lower_expr(f, xid);
     if (!v || !idx || !x) return false;
 
-    if (!emit_vec_idx_bounds_check(f, node_id, idx, vec->lanes)) return false;
+    if (!emit_vec_idx_bounds_check(f, node_id, n, idx, vec->lanes)) return false;
 
     LLVMValueRef lane_idx = idx;
     if (LLVMTypeOf(lane_idx) != LLVMInt32TypeInContext(f->ctx)) {

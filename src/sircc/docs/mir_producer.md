@@ -76,10 +76,24 @@ Example is also covered by `ctest` as `sircc_cinterop_export_add2`.
 Enable via `meta.ext.features`.
 
 - `agg:v1`: structured constants + globals (`const.*`, `sym(kind=var|const)`, `ptr.sym`)
+- `simd:v1`: vector type + SIMD ops (`type.kind:"vec"`, `vec.*`, `load.vec`, `store.vec`)
 - `fun:v1`: `type.kind:"fun"`, `fun.sym`, `call.fun`, `fun.cmp.*`
 - `closure:v1`: `type.kind:"closure"`, `closure.make/sym/code/env`, `call.closure`, `closure.cmp.*`
 - `adt:v1`: `type.kind:"sum"`, `adt.make/tag/is/get`
 - `sem:v1`: `sem.if`, `sem.and_sc`, `sem.or_sc`, `sem.match_sum` (deterministically desugared)
+
+## SIMD pack notes (simd:v1)
+
+- Define vector types as `{"k":"type","kind":"vec","lane":<type-ref>,"lanes":<pos-int>}`.
+- Lane types must be one of: `i8/i16/i32/i64/f32/f64/bool`.
+- Deterministic lane/memory order:
+  - Lane 0 is stored at the lowest address; lane `i` follows lane `i-1`.
+  - Byte order inside each lane follows `meta.ext.target.endian`.
+- **Bool vector ABI (sircc)**: `vec(bool,N)` lowers to `<N x i8>` and is normalized to `0/1` (nonzero is treated as true).
+- Deterministic traps:
+  - `vec.extract` / `vec.replace` trap when `idx<0 || idx>=lanes`.
+  - `vec.shuffle` traps if any `flags.idx[i]` is outside `[0, 2*lanes)`.
+- `vec.cmp.*` results are `vec(bool,lanes)`; either set `node.type_ref` explicitly, or ensure a matching `vec(bool,lanes)` type definition exists so the consumer can infer it.
 
 ## Recommended: validate and introspect
 
@@ -87,4 +101,3 @@ Enable via `meta.ext.features`.
 - Machine-readable failures: `sircc --diagnostics json --diag-context 2 --verify-only your.sir.jsonl`
 - Support surface: `sircc --print-support --format json`
 - Target ABI report: `sircc --print-target`
-
