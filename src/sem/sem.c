@@ -31,6 +31,7 @@ static void sem_print_help(FILE* out) {
           "\n"
           "Usage:\n"
           "  sem [--help] [--version]\n"
+          "  sem --print-support [--json]\n"
           "  sem --caps [--json]\n"
           "      [--cap KIND:NAME[:FLAGS]]...\n"
           "      [--cap-file-fs] [--cap-async-default] [--cap-sys-info]\n"
@@ -44,6 +45,7 @@ static void sem_print_help(FILE* out) {
           "Options:\n"
           "  --help        Show this help message\n"
           "  --version     Show version information (from ./VERSION)\n"
+          "  --print-support  Print the supported SIR subset for `sem --run`\n"
           "  --caps        Issue zi_ctl CAPS_LIST and print capabilities\n"
           "  --cat PATH    Read PATH via file/fs and write to stdout\n"
           "  --sir-hello   Run a tiny built-in sircore VM smoke program\n"
@@ -51,6 +53,7 @@ static void sem_print_help(FILE* out) {
           "  --run FILE    Run a small supported SIR subset (MVP)\n"
           "  --json        Emit --caps output as JSON (stdout)\n"
           "  --diagnostics Emit --run diagnostics as: text (default) or json\n"
+          "  --all         For --run, try to emit multiple diagnostics (best-effort)\n"
           "\n"
           "  --cap KIND:NAME[:FLAGS]\n"
           "      Add a capability entry. FLAGS is a comma-list of:\n"
@@ -71,6 +74,66 @@ static void sem_print_help(FILE* out) {
 
 static void sem_print_version(FILE* out) {
   fprintf(out, "sem %s\n", SIR_VERSION);
+}
+
+static void sem_print_support(FILE* out, bool json) {
+  static const char* items[] = {
+      // values/exprs
+      "const.i8",
+      "const.i32",
+      "const.i64",
+      "cstr",
+      "name",
+      "i32.add",
+      "binop.add",
+      "i32.cmp.eq",
+      "ptr.to_i64 (passthrough)",
+
+      // memory (MVP)
+      "alloca.i8",
+      "alloca.i32",
+      "alloca.i64",
+      "load.i8",
+      "load.i32",
+      "load.i64",
+      "store.i8",
+      "store.i32",
+      "store.i64",
+
+      // calls
+      "decl.fn (extern import)",
+      "ptr.sym (in-module)",
+      "call.indirect",
+
+      // statements
+      "let",
+
+      // control flow
+      "bparam",
+      "term.br (+args)",
+      "term.cbr / term.condbr",
+      "term.switch (i32 scrut, const.i32 cases)",
+      "term.ret",
+      "term.trap",
+      "term.unreachable",
+  };
+
+  if (json) {
+    fprintf(out, "{\"tool\":\"sem\",\"run_support\":[");
+    for (size_t i = 0; i < (sizeof(items) / sizeof(items[0])); i++) {
+      if (i) fputc(',', out);
+      fputc('"', out);
+      fputs(items[i], out);
+      fputc('"', out);
+    }
+    fprintf(out, "]}\n");
+    return;
+  }
+
+  fprintf(out, "sem --run supports (MVP):\n");
+  for (size_t i = 0; i < (sizeof(items) / sizeof(items[0])); i++) {
+    fprintf(out, "  - %s\n", items[i]);
+  }
 }
 
 static char* sem_strdup(const char* s) {
@@ -568,6 +631,7 @@ static int sem_do_sir_module_hello(void) {
 
 int main(int argc, char** argv) {
   bool want_caps = false;
+  bool want_support = false;
   bool json = false;
   const char* fs_root = NULL;
   const char* cat_path = NULL;
@@ -575,6 +639,7 @@ int main(int argc, char** argv) {
   bool sir_module_hello = false;
   const char* run_path = NULL;
   sem_diag_format_t diag_format = SEM_DIAG_TEXT;
+  bool diag_all = false;
   const char* tape_out = NULL;
   const char* tape_in = NULL;
   bool tape_strict = true;
@@ -599,6 +664,10 @@ int main(int argc, char** argv) {
       want_caps = true;
       continue;
     }
+    if (strcmp(a, "--print-support") == 0) {
+      want_support = true;
+      continue;
+    }
     if (strcmp(a, "--sir-hello") == 0) {
       sir_hello = true;
       continue;
@@ -620,6 +689,10 @@ int main(int argc, char** argv) {
         sem_free_caps(dyn_caps, dyn_n);
         return 2;
       }
+      continue;
+    }
+    if (strcmp(a, "--all") == 0) {
+      diag_all = true;
       continue;
     }
     if (strcmp(a, "--cat") == 0 && i + 1 < argc) {
@@ -692,6 +765,12 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+  if (want_support) {
+    sem_print_support(stdout, json);
+    sem_free_caps(dyn_caps, dyn_n);
+    return 0;
+  }
+
   // If user provided a file sandbox root, ensure file/fs is at least listed (openable depends on fs_root).
   if (fs_root && fs_root[0] != '\0' && !sem_has_cap(dyn_caps, dyn_n, "file", "fs")) {
     if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "file:fs:open,block")) {
@@ -725,7 +804,7 @@ int main(int argc, char** argv) {
     return sem_do_sir_module_hello();
   }
   if (run_path) {
-    const int rc = sem_run_sir_jsonl_ex(run_path, caps, cap_n, fs_root, diag_format);
+    const int rc = sem_run_sir_jsonl_ex(run_path, caps, cap_n, fs_root, diag_format, diag_all);
     sem_free_caps(dyn_caps, dyn_n);
     return rc;
   }

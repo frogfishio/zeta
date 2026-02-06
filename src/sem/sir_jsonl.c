@@ -84,6 +84,16 @@ typedef struct sirj_ctx {
   // Diagnostics
   sem_diag_format_t diag_format;
   const char* cur_path;
+  bool diag_all;
+  struct {
+    const char* code;
+    char msg[256];
+    const char* path;
+    uint32_t line;
+    uint32_t node_id;
+    const char* tag;
+  } diags[16];
+  uint32_t diag_count;
   struct {
     bool set;
     const char* code;
@@ -97,17 +107,32 @@ typedef struct sirj_ctx {
 
 static void sirj_diag_setf(sirj_ctx_t* c, const char* code, const char* path, uint32_t line, uint32_t node_id, const char* tag, const char* fmt,
                            ...) {
-  if (!c || c->diag.set) return;
-  c->diag.set = true;
-  c->diag.code = code ? code : "sem.error";
-  c->diag.path = path;
-  c->diag.line = line;
-  c->diag.node_id = node_id;
-  c->diag.tag = tag;
+  if (!c) return;
   va_list ap;
   va_start(ap, fmt);
-  (void)vsnprintf(c->diag.msg, sizeof(c->diag.msg), fmt ? fmt : "error", ap);
+  char tmp[256];
+  (void)vsnprintf(tmp, sizeof(tmp), fmt ? fmt : "error", ap);
   va_end(ap);
+
+  if (!c->diag.set) {
+    c->diag.set = true;
+    c->diag.code = code ? code : "sem.error";
+    c->diag.path = path;
+    c->diag.line = line;
+    c->diag.node_id = node_id;
+    c->diag.tag = tag;
+    memcpy(c->diag.msg, tmp, sizeof(tmp));
+  }
+
+  if (c->diag_all && c->diag_count < (uint32_t)(sizeof(c->diags) / sizeof(c->diags[0]))) {
+    const uint32_t i = c->diag_count++;
+    c->diags[i].code = code ? code : "sem.error";
+    c->diags[i].path = path;
+    c->diags[i].line = line;
+    c->diags[i].node_id = node_id;
+    c->diags[i].tag = tag;
+    memcpy(c->diags[i].msg, tmp, sizeof(tmp));
+  }
 }
 
 static void sem_json_write_escaped(FILE* out, const char* s) {
@@ -132,46 +157,57 @@ static void sem_json_write_escaped(FILE* out, const char* s) {
   }
 }
 
-static void sem_print_diag(const sirj_ctx_t* c) {
-  if (!c || !c->diag.set) return;
-  const char* code = c->diag.code ? c->diag.code : "sem.error";
-  const char* msg = c->diag.msg[0] ? c->diag.msg : "error";
-  const char* path = c->diag.path ? c->diag.path : "";
-  const uint32_t line = c->diag.line;
-  const uint32_t node = c->diag.node_id;
-  const char* tag = c->diag.tag ? c->diag.tag : "";
+static void sem_print_one_diag(sem_diag_format_t fmt, const char* code, const char* msg, const char* path, uint32_t line, uint32_t node,
+                               const char* tag) {
+  if (!code) code = "sem.error";
+  if (!msg || !msg[0]) msg = "error";
+  if (!path) path = "";
+  if (!tag) tag = "";
 
-  if (c->diag_format == SEM_DIAG_JSON) {
+  if (fmt == SEM_DIAG_JSON) {
     fprintf(stderr, "{\"tool\":\"sem\",\"code\":\"");
     sem_json_write_escaped(stderr, code);
     fprintf(stderr, "\",\"message\":\"");
     sem_json_write_escaped(stderr, msg);
     fprintf(stderr, "\"");
-    if (path && path[0]) {
+    if (path[0]) {
       fprintf(stderr, ",\"path\":\"");
       sem_json_write_escaped(stderr, path);
       fprintf(stderr, "\"");
     }
     if (line) fprintf(stderr, ",\"line\":%u", (unsigned)line);
     if (node) fprintf(stderr, ",\"node\":%u", (unsigned)node);
-    if (tag && tag[0]) {
+    if (tag[0]) {
       fprintf(stderr, ",\"tag\":\"");
       sem_json_write_escaped(stderr, tag);
       fprintf(stderr, "\"");
     }
     fprintf(stderr, "}\n");
-  } else {
-    if (path && path[0] && line) {
-      fprintf(stderr, "sem: %s: %s (%s:%u)\n", code, msg, path, (unsigned)line);
-    } else if (path && path[0]) {
-      fprintf(stderr, "sem: %s: %s (%s)\n", code, msg, path);
-    } else {
-      fprintf(stderr, "sem: %s: %s\n", code, msg);
-    }
-    if (node || (tag && tag[0])) {
-      fprintf(stderr, "sem:   at node=%u tag=%s\n", (unsigned)node, tag);
-    }
+    return;
   }
+
+  if (path[0] && line) {
+    fprintf(stderr, "sem: %s: %s (%s:%u)\n", code, msg, path, (unsigned)line);
+  } else if (path[0]) {
+    fprintf(stderr, "sem: %s: %s (%s)\n", code, msg, path);
+  } else {
+    fprintf(stderr, "sem: %s: %s\n", code, msg);
+  }
+  if (node || tag[0]) {
+    fprintf(stderr, "sem:   at node=%u tag=%s\n", (unsigned)node, tag);
+  }
+}
+
+static void sem_print_diag(const sirj_ctx_t* c) {
+  if (!c || !c->diag.set) return;
+  if (c->diag_all && c->diag_count) {
+    for (uint32_t i = 0; i < c->diag_count; i++) {
+      sem_print_one_diag(c->diag_format, c->diags[i].code, c->diags[i].msg, c->diags[i].path, c->diags[i].line, c->diags[i].node_id,
+                         c->diags[i].tag);
+    }
+    return;
+  }
+  sem_print_one_diag(c->diag_format, c->diag.code, c->diag.msg, c->diag.path, c->diag.line, c->diag.node_id, c->diag.tag);
 }
 
 static void ctx_dispose(sirj_ctx_t* c) {
@@ -950,7 +986,10 @@ static bool lower_term_node(sirj_ctx_t* c, uint32_t term_id, term_info_t* out) {
     if (!parse_ref_id(json_obj_get(n->fields_obj, "scrut"), &scrut_id)) return false;
 
     const JsonValue* casesv = json_obj_get(n->fields_obj, "cases");
-    if (!json_is_array(casesv)) return false;
+    if (!json_is_array(casesv)) {
+      sirj_diag_setf(c, "sem.parse.term.switch.cases", c->cur_path, n->loc_line, term_id, n->tag, "term.switch.cases must be an array");
+      return false;
+    }
     const JsonArray* ca = &casesv->v.arr;
     if (ca->len > 64) return false;
 
@@ -963,7 +1002,11 @@ static bool lower_term_node(sirj_ctx_t* c, uint32_t term_id, term_info_t* out) {
     }
 
     for (size_t i = 0; i < ca->len; i++) {
-      if (!json_is_object(ca->items[i])) return false;
+      if (!json_is_object(ca->items[i])) {
+        sirj_diag_setf(c, "sem.parse.term.switch.case", c->cur_path, n->loc_line, term_id, n->tag, "term.switch.cases[%u] must be an object",
+                       (unsigned)i);
+        return false;
+      }
       const JsonValue* litv = json_obj_get(ca->items[i], "lit");
       const JsonValue* tov = json_obj_get(ca->items[i], "to");
       uint32_t lid = 0, bid = 0;
@@ -974,7 +1017,10 @@ static bool lower_term_node(sirj_ctx_t* c, uint32_t term_id, term_info_t* out) {
     }
 
     const JsonValue* defv = json_obj_get(n->fields_obj, "default");
-    if (!json_is_object(defv)) return false;
+    if (!json_is_object(defv)) {
+      sirj_diag_setf(c, "sem.parse.term.switch.default", c->cur_path, n->loc_line, term_id, n->tag, "term.switch.default must be an object");
+      return false;
+    }
     const JsonValue* defto = json_obj_get(defv, "to");
     uint32_t def_bid = 0;
     if (!parse_ref_id(defto, &def_bid)) return false;
@@ -1123,7 +1169,12 @@ static bool lower_fn_body(sirj_ctx_t* c, uint32_t fn_node_id, bool is_entry) {
               }
             }
 
-            if (dst_count != term.br_arg_count) return false;
+            if (dst_count != term.br_arg_count) {
+              sirj_diag_setf(c, "sem.cfg.br.args_mismatch", c->cur_path, bn->loc_line, sid, "term.br",
+                             "term.br args count mismatch: expected %u (target block params) got %u", (unsigned)dst_count,
+                             (unsigned)term.br_arg_count);
+              return false;
+            }
             sir_val_id_t* src_slots = NULL;
             if (dst_count) {
               if (!term.br_arg_nodes) return false;
@@ -1161,7 +1212,14 @@ static bool lower_fn_body(sirj_ctx_t* c, uint32_t fn_node_id, bool is_entry) {
               case_ip0 = (uint32_t*)arena_alloc(&c->arena, (size_t)ncase * sizeof(uint32_t));
               if (!case_lits || !case_ip0) return false;
               for (uint32_t ci = 0; ci < ncase; ci++) {
-                if (!parse_const_i32_value(c, term.switch_lits[ci], &case_lits[ci])) return false;
+                if (!parse_const_i32_value(c, term.switch_lits[ci], &case_lits[ci])) {
+                  const uint32_t lit_node = term.switch_lits[ci];
+                  const node_info_t* ln =
+                      (lit_node < c->node_cap && c->nodes[lit_node].present) ? &c->nodes[lit_node] : NULL;
+                  sirj_diag_setf(c, "sem.cfg.switch.case_lit", c->cur_path, ln ? ln->loc_line : bn->loc_line, lit_node,
+                                 ln ? ln->tag : "?", "term.switch case literal must be const.i32");
+                  return false;
+                }
                 case_ip0[ci] = 0;
               }
             }
@@ -1561,10 +1619,11 @@ static bool init_params_for_fn(sirj_ctx_t* c, uint32_t fn_node_id, uint32_t fn_t
 }
 
 int sem_run_sir_jsonl(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root) {
-  return sem_run_sir_jsonl_ex(path, caps, cap_count, fs_root, SEM_DIAG_TEXT);
+  return sem_run_sir_jsonl_ex(path, caps, cap_count, fs_root, SEM_DIAG_TEXT, false);
 }
 
-int sem_run_sir_jsonl_ex(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root, sem_diag_format_t diag_format) {
+int sem_run_sir_jsonl_ex(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root, sem_diag_format_t diag_format,
+                         bool diag_all) {
   if (!path) return 2;
 
   sirj_ctx_t c;
@@ -1572,6 +1631,7 @@ int sem_run_sir_jsonl_ex(const char* path, const sem_cap_t* caps, uint32_t cap_c
   arena_init(&c.arena);
   c.diag_format = diag_format;
   c.cur_path = path;
+  c.diag_all = diag_all;
 
   if (!parse_file(&c, path)) {
     if (!c.diag.set) sirj_diag_setf(&c, "sem.parse", path, 0, 0, NULL, "failed to parse: %s", path);

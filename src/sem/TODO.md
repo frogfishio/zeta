@@ -120,7 +120,7 @@ Scope notes:
 
 ## Tooling + tests (keeps us honest)
 
-- [ ] Add a `sem --print-support [--format text|json]` that reports supported mnemonics (SEM runner subset)
+- [x] Add a `sem --print-support [--json]` that reports supported mnemonics (SEM runner subset)
 - [ ] Add a “normative” SEM suite runner (single command)
   - [ ] Run: parse+validate+execute known-good fixtures
   - [ ] Include negative fixtures to lock diagnostics

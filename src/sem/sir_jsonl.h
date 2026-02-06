@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "sem_host.h"
 
@@ -14,4 +15,5 @@ typedef enum sem_diag_format {
 int sem_run_sir_jsonl(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root);
 
 // Same as sem_run_sir_jsonl, but with explicit diagnostics formatting.
-int sem_run_sir_jsonl_ex(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root, sem_diag_format_t diag_format);
+int sem_run_sir_jsonl_ex(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root, sem_diag_format_t diag_format,
+                         bool diag_all);

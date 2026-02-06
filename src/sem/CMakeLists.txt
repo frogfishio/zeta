@@ -187,3 +187,35 @@ target_link_libraries(sem_unit_run_term_unreachable PRIVATE sircore_hosted_zabi 
 target_compile_options(sem_unit_run_term_unreachable PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 add_test(NAME sem_run_term_unreachable COMMAND sem_unit_run_term_unreachable)
+
+add_executable(sem_unit_run_bad_cfg_br_args_mismatch
+  tests/test_run_bad_cfg_br_args_mismatch.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_bad_cfg_br_args_mismatch PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_bad_cfg_br_args_mismatch PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_bad_cfg_br_args_mismatch PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_bad_cfg_br_args_mismatch PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_bad_cfg_br_args_mismatch PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_bad_cfg_br_args_mismatch COMMAND sem_unit_run_bad_cfg_br_args_mismatch)
+
+add_executable(sem_unit_run_bad_cfg_switch_case_lit_not_const
+  tests/test_run_bad_cfg_switch_case_lit_not_const.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_bad_cfg_switch_case_lit_not_const PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_bad_cfg_switch_case_lit_not_const PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_bad_cfg_switch_case_lit_not_const PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_bad_cfg_switch_case_lit_not_const PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_bad_cfg_switch_case_lit_not_const PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_bad_cfg_switch_case_lit_not_const COMMAND sem_unit_run_bad_cfg_switch_case_lit_not_const)
