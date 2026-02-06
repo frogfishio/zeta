@@ -465,6 +465,50 @@ bool sir_mb_emit_ptr_offset(sir_module_builder_t* b, sir_func_id_t f, sir_val_id
   return emit_inst(b, f, i);
 }
 
+bool sir_mb_emit_ptr_add(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst, sir_val_id_t base, sir_val_id_t off) {
+  sir_inst_t i = {0};
+  i.k = SIR_INST_PTR_ADD;
+  i.result_count = 1;
+  i.results[0] = dst;
+  i.u.ptr_add.base = base;
+  i.u.ptr_add.off = off;
+  i.u.ptr_add.dst = dst;
+  return emit_inst(b, f, i);
+}
+
+bool sir_mb_emit_ptr_sub(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst, sir_val_id_t base, sir_val_id_t off) {
+  sir_inst_t i = {0};
+  i.k = SIR_INST_PTR_SUB;
+  i.result_count = 1;
+  i.results[0] = dst;
+  i.u.ptr_sub.base = base;
+  i.u.ptr_sub.off = off;
+  i.u.ptr_sub.dst = dst;
+  return emit_inst(b, f, i);
+}
+
+bool sir_mb_emit_ptr_cmp_eq(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst, sir_val_id_t a, sir_val_id_t b_) {
+  sir_inst_t i = {0};
+  i.k = SIR_INST_PTR_CMP_EQ;
+  i.result_count = 1;
+  i.results[0] = dst;
+  i.u.ptr_cmp.a = a;
+  i.u.ptr_cmp.b = b_;
+  i.u.ptr_cmp.dst = dst;
+  return emit_inst(b, f, i);
+}
+
+bool sir_mb_emit_ptr_cmp_ne(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst, sir_val_id_t a, sir_val_id_t b_) {
+  sir_inst_t i = {0};
+  i.k = SIR_INST_PTR_CMP_NE;
+  i.result_count = 1;
+  i.results[0] = dst;
+  i.u.ptr_cmp.a = a;
+  i.u.ptr_cmp.b = b_;
+  i.u.ptr_cmp.dst = dst;
+  return emit_inst(b, f, i);
+}
+
 bool sir_mb_emit_br_args(sir_module_builder_t* b, sir_func_id_t f, uint32_t target_ip, const sir_val_id_t* src_slots, const sir_val_id_t* dst_slots,
                          uint32_t arg_count, uint32_t* out_ip) {
   if (!b) return false;
@@ -1051,6 +1095,25 @@ bool sir_module_validate(const sir_module_t* m, char* err, size_t err_cap) {
             return false;
           }
           break;
+        case SIR_INST_PTR_ADD:
+          if (inst->u.ptr_add.dst >= vc || inst->u.ptr_add.base >= vc || inst->u.ptr_add.off >= vc) {
+            set_err(err, err_cap, "ptr_add operand out of range");
+            return false;
+          }
+          break;
+        case SIR_INST_PTR_SUB:
+          if (inst->u.ptr_sub.dst >= vc || inst->u.ptr_sub.base >= vc || inst->u.ptr_sub.off >= vc) {
+            set_err(err, err_cap, "ptr_sub operand out of range");
+            return false;
+          }
+          break;
+        case SIR_INST_PTR_CMP_EQ:
+        case SIR_INST_PTR_CMP_NE:
+          if (inst->u.ptr_cmp.dst >= vc || inst->u.ptr_cmp.a >= vc || inst->u.ptr_cmp.b >= vc) {
+            set_err(err, err_cap, "ptr_cmp operand out of range");
+            return false;
+          }
+          break;
         case SIR_INST_BR:
           if (inst->u.br.target_ip >= f->inst_count) {
             set_err(err, err_cap, "br target_ip out of range");
@@ -1631,6 +1694,79 @@ static int32_t exec_func(const sir_module_t* m, sem_guest_mem_t* mem, sir_host_t
         const uint64_t base = (uint64_t)bv.u.ptr;
         const uint64_t off = (uint64_t)idx * (uint64_t)i->u.ptr_offset.scale;
         vals[dst] = (sir_value_t){.kind = SIR_VAL_PTR, .u.ptr = (zi_ptr_t)(base + off)};
+        ip++;
+        break;
+      }
+      case SIR_INST_PTR_ADD: {
+        const sir_val_id_t base_id = i->u.ptr_add.base;
+        const sir_val_id_t off_id = i->u.ptr_add.off;
+        const sir_val_id_t dst = i->u.ptr_add.dst;
+        if (base_id >= f->value_count || off_id >= f->value_count || dst >= f->value_count) {
+          free(vals);
+          return ZI_E_BOUNDS;
+        }
+        const sir_value_t bv = vals[base_id];
+        const sir_value_t ov = vals[off_id];
+        if (bv.kind != SIR_VAL_PTR) {
+          free(vals);
+          return ZI_E_INVALID;
+        }
+        int64_t off = 0;
+        if (ov.kind == SIR_VAL_I64) off = ov.u.i64;
+        else if (ov.kind == SIR_VAL_I32) off = ov.u.i32;
+        else {
+          free(vals);
+          return ZI_E_INVALID;
+        }
+        const uint64_t base = (uint64_t)bv.u.ptr;
+        vals[dst] = (sir_value_t){.kind = SIR_VAL_PTR, .u.ptr = (zi_ptr_t)(base + (uint64_t)off)};
+        ip++;
+        break;
+      }
+      case SIR_INST_PTR_SUB: {
+        const sir_val_id_t base_id = i->u.ptr_sub.base;
+        const sir_val_id_t off_id = i->u.ptr_sub.off;
+        const sir_val_id_t dst = i->u.ptr_sub.dst;
+        if (base_id >= f->value_count || off_id >= f->value_count || dst >= f->value_count) {
+          free(vals);
+          return ZI_E_BOUNDS;
+        }
+        const sir_value_t bv = vals[base_id];
+        const sir_value_t ov = vals[off_id];
+        if (bv.kind != SIR_VAL_PTR) {
+          free(vals);
+          return ZI_E_INVALID;
+        }
+        int64_t off = 0;
+        if (ov.kind == SIR_VAL_I64) off = ov.u.i64;
+        else if (ov.kind == SIR_VAL_I32) off = ov.u.i32;
+        else {
+          free(vals);
+          return ZI_E_INVALID;
+        }
+        const uint64_t base = (uint64_t)bv.u.ptr;
+        vals[dst] = (sir_value_t){.kind = SIR_VAL_PTR, .u.ptr = (zi_ptr_t)(base - (uint64_t)off)};
+        ip++;
+        break;
+      }
+      case SIR_INST_PTR_CMP_EQ:
+      case SIR_INST_PTR_CMP_NE: {
+        const sir_val_id_t a = i->u.ptr_cmp.a;
+        const sir_val_id_t b = i->u.ptr_cmp.b;
+        const sir_val_id_t dst = i->u.ptr_cmp.dst;
+        if (a >= f->value_count || b >= f->value_count || dst >= f->value_count) {
+          free(vals);
+          return ZI_E_BOUNDS;
+        }
+        const sir_value_t av = vals[a];
+        const sir_value_t bv = vals[b];
+        if (av.kind != SIR_VAL_PTR || bv.kind != SIR_VAL_PTR) {
+          free(vals);
+          return ZI_E_INVALID;
+        }
+        const bool eq = (av.u.ptr == bv.u.ptr);
+        const uint8_t r = (i->k == SIR_INST_PTR_CMP_EQ) ? (uint8_t)eq : (uint8_t)(!eq);
+        vals[dst] = (sir_value_t){.kind = SIR_VAL_BOOL, .u.b = r};
         ip++;
         break;
       }

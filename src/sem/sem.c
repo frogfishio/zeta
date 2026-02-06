@@ -90,6 +90,10 @@ static void sem_print_support(FILE* out, bool json) {
       "binop.add",
       "i32.cmp.eq",
       "ptr.to_i64 (passthrough)",
+      "ptr.add",
+      "ptr.sub",
+      "ptr.cmp.eq",
+      "ptr.cmp.ne",
 
       // memory (MVP)
       "alloca.i8",

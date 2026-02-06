@@ -61,10 +61,10 @@ Scope notes:
 
 ### Pointers + memory (beyond stack slots)
 - [x] `load.ptr` / `store.ptr`
-- [ ] `ptr.add / ptr.sub`
+- [x] `ptr.add / ptr.sub`
 - [x] `ptr.offset`
 - [ ] `ptr.to_i64 / ptr.from_i64` (currently only `ptr.to_i64` passthrough in SEM)
-- [ ] `ptr.cmp.eq / ptr.cmp.ne`
+- [x] `ptr.cmp.eq / ptr.cmp.ne`
 - [ ] `ptr.sizeof` / `ptr.alignof` (at least for prims; later for structs)
 - [x] `mem.copy` (overlap: disallow/allow; disallow traps on overlap)
 - [x] `mem.fill`

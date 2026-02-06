@@ -315,3 +315,35 @@ target_link_libraries(sem_unit_run_global_array_repeat PRIVATE sircore_hosted_za
 target_compile_options(sem_unit_run_global_array_repeat PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 add_test(NAME sem_run_global_array_repeat COMMAND sem_unit_run_global_array_repeat)
+
+add_executable(sem_unit_run_sem_ptr_add_sub_cmp
+  tests/test_run_sem_ptr_add_sub_cmp.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_sem_ptr_add_sub_cmp PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_sem_ptr_add_sub_cmp PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_sem_ptr_add_sub_cmp PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_sem_ptr_add_sub_cmp PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_sem_ptr_add_sub_cmp PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_sem_ptr_add_sub_cmp COMMAND sem_unit_run_sem_ptr_add_sub_cmp)
+
+add_executable(sem_unit_run_sem_ptr_cmp_ne
+  tests/test_run_sem_ptr_cmp_ne.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_sem_ptr_cmp_ne PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_sem_ptr_cmp_ne PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_sem_ptr_cmp_ne PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_sem_ptr_cmp_ne PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_sem_ptr_cmp_ne PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_sem_ptr_cmp_ne COMMAND sem_unit_run_sem_ptr_cmp_ne)

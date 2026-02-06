@@ -1010,6 +1010,53 @@ static bool eval_ptr_offset(sirj_ctx_t* c, uint32_t node_id, const node_info_t* 
   return true;
 }
 
+static bool eval_ptr_addsub(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, bool is_sub, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 2) return false;
+  uint32_t base_id = 0, off_id = 0;
+  if (!parse_ref_id(av->v.arr.items[0], &base_id)) return false;
+  if (!parse_ref_id(av->v.arr.items[1], &off_id)) return false;
+  sir_val_id_t base_slot = 0, off_slot = 0;
+  val_kind_t bk = VK_INVALID, ok = VK_INVALID;
+  if (!eval_node(c, base_id, &base_slot, &bk)) return false;
+  if (!eval_node(c, off_id, &off_slot, &ok)) return false;
+  if (bk != VK_PTR) return false;
+  if (ok != VK_I64 && ok != VK_I32) return false;
+  const sir_val_id_t dst = alloc_slot(c, VK_PTR);
+  const bool ok_emit =
+      is_sub ? sir_mb_emit_ptr_sub(c->mb, c->fn, dst, base_slot, off_slot) : sir_mb_emit_ptr_add(c->mb, c->fn, dst, base_slot, off_slot);
+  if (!ok_emit) return false;
+  if (!set_node_val(c, node_id, dst, VK_PTR)) return false;
+  *out_slot = dst;
+  *out_kind = VK_PTR;
+  return true;
+}
+
+static bool eval_ptr_cmp(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, bool is_ne, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 2) return false;
+  uint32_t a_id = 0, b_id = 0;
+  if (!parse_ref_id(av->v.arr.items[0], &a_id)) return false;
+  if (!parse_ref_id(av->v.arr.items[1], &b_id)) return false;
+  sir_val_id_t a_slot = 0, b_slot = 0;
+  val_kind_t ak = VK_INVALID, bk = VK_INVALID;
+  if (!eval_node(c, a_id, &a_slot, &ak)) return false;
+  if (!eval_node(c, b_id, &b_slot, &bk)) return false;
+  if (ak != VK_PTR || bk != VK_PTR) return false;
+  const sir_val_id_t dst = alloc_slot(c, VK_BOOL);
+  const bool ok_emit =
+      is_ne ? sir_mb_emit_ptr_cmp_ne(c->mb, c->fn, dst, a_slot, b_slot) : sir_mb_emit_ptr_cmp_eq(c->mb, c->fn, dst, a_slot, b_slot);
+  if (!ok_emit) return false;
+  if (!set_node_val(c, node_id, dst, VK_BOOL)) return false;
+  *out_slot = dst;
+  *out_kind = VK_BOOL;
+  return true;
+}
+
 static bool resolve_internal_func_by_name(const sirj_ctx_t* c, const char* nm, sir_func_id_t* out) {
   if (!c || !nm || !out) return false;
   for (uint32_t i = 0; i < c->node_cap; i++) {
@@ -1139,6 +1186,10 @@ static bool eval_node(sirj_ctx_t* c, uint32_t node_id, sir_val_id_t* out_slot, v
   if (strcmp(n->tag, "name") == 0) return eval_name(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "ptr.sym") == 0) return eval_ptr_sym(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "ptr.offset") == 0) return eval_ptr_offset(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "ptr.add") == 0) return eval_ptr_addsub(c, node_id, n, false, out_slot, out_kind);
+  if (strcmp(n->tag, "ptr.sub") == 0) return eval_ptr_addsub(c, node_id, n, true, out_slot, out_kind);
+  if (strcmp(n->tag, "ptr.cmp.eq") == 0) return eval_ptr_cmp(c, node_id, n, false, out_slot, out_kind);
+  if (strcmp(n->tag, "ptr.cmp.ne") == 0) return eval_ptr_cmp(c, node_id, n, true, out_slot, out_kind);
   if (strcmp(n->tag, "ptr.to_i64") == 0) return eval_ptr_to_i64_passthrough(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "i32.add") == 0) return eval_i32_add_mnemonic(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "i32.cmp.eq") == 0) return eval_i32_cmp_eq(c, node_id, n, out_slot, out_kind);
