@@ -114,6 +114,14 @@ Not currently in scope: SIMD/vector types and atomic/eh/gc/coro packs.
   - `mem.copy overlap:"disallow"` emits a deterministic overlap check and traps on overlap.
 - `eff.fence` validates `mode`; `relaxed` is a no-op, other modes lower to an LLVM fence.
 
+### `ptr.sym` producer rule
+
+`ptr.sym` is “address of a known symbol” and must name a symbol declared in-module (so `sircc` can validate/typecheck deterministically).
+
+- For function symbols: emit a `fn` or `decl.fn` record with matching signature.
+- For global data: emit a `sym` record with `kind:"var"` or `kind:"const"`.
+- To call an external C function: prefer `decl.fn` + `call.indirect` (do not rely on unresolved `ptr.sym` names).
+
 ## Packs (node frontend)
 
 These feature gates are enabled via `meta.ext.features` (array of strings). If a gate is missing, `sircc` rejects gated node tags.

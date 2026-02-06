@@ -78,6 +78,7 @@ Example is also covered by `ctest` as `sircc_cinterop_export_add2`.
 Enable via `meta.ext.features`.
 
 - `agg:v1`: structured constants + globals (`const.*`, `sym(kind=var|const)`, `ptr.sym`)
+  - `ptr.sym` requires an in-module declaration: `fn`/`decl.fn` for functions, `sym(kind=var|const)` for globals
 - `simd:v1`: vector type + SIMD ops (`type.kind:"vec"`, `vec.*`, `load.vec`, `store.vec`)
 - `fun:v1`: `type.kind:"fun"`, `fun.sym`, `call.fun`, `fun.cmp.*`
 - `closure:v1`: `type.kind:"closure"`, `closure.make/sym/code/env`, `call.closure`, `closure.cmp.*`
