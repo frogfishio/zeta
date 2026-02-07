@@ -633,3 +633,10 @@ add_test(
     ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_write.sir.jsonl
     ${CMAKE_SOURCE_DIR}/src/sircc/examples/mem_copy_fill.sir.jsonl
 )
+
+add_test(
+  NAME sem_check_run_smoke_json
+  COMMAND $<TARGET_FILE:sem> --check --check-run --format json
+    ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_write.sir.jsonl
+    ${CMAKE_SOURCE_DIR}/src/sircc/examples/mem_copy_fill.sir.jsonl
+)

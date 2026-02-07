@@ -27,6 +27,11 @@ typedef struct dyn_cap {
   uint32_t meta_len;
 } dyn_cap_t;
 
+typedef enum sem_check_format {
+  SEM_CHECK_TEXT = 0,
+  SEM_CHECK_JSON = 1,
+} sem_check_format_t;
+
 static void sem_print_help(FILE* out) {
   fprintf(out,
           "sem — SIR emulator host frontend (MVP)\n"
@@ -39,7 +44,7 @@ static void sem_print_help(FILE* out) {
           "      [--cap-file-fs] [--cap-async-default] [--cap-sys-info]\n"
           "      [--fs-root PATH]\n"
           "      [--tape-out PATH] [--tape-in PATH] [--tape-lax]\n"
-          "  sem --check <input.sir.jsonl|dir>... [--check-run] [--diagnostics text|json] [--all]\n"
+          "  sem --check <input.sir.jsonl|dir>... [--check-run] [--format text|json] [--diagnostics text|json] [--all]\n"
           "  sem --cat GUEST_PATH --fs-root PATH\n"
           "  sem --sir-hello\n"
           "  sem --sir-module-hello\n"
@@ -53,6 +58,7 @@ static void sem_print_help(FILE* out) {
           "  --caps        Issue zi_ctl CAPS_LIST and print capabilities\n"
           "  --check       Batch-verify one or more inputs (files or dirs)\n"
           "  --check-run   For --check, run cases (not just verify)\n"
+          "  --format      For --check, emit results as: text (default) or json\n"
           "  --cat PATH    Read PATH via file/fs and write to stdout\n"
           "  --sir-hello   Run a tiny built-in sircore VM smoke program\n"
           "  --sir-module-hello  Run a tiny built-in sircore module smoke program\n"
@@ -105,27 +111,56 @@ static bool sem_has_suffix(const char* s, const char* suffix) {
   return memcmp(s + (n - m), suffix, m) == 0;
 }
 
-static int sem_do_check_one(const char* path, bool do_run, sem_diag_format_t diag_format, bool diag_all) {
+static void sem_emit_check_case(sem_check_format_t fmt, const char* mode, const char* path, bool ok, int tool_rc, int prog_rc) {
+  if (fmt != SEM_CHECK_JSON) {
+    if (mode && strcmp(mode, "run") == 0) {
+      if (ok)
+        fprintf(stdout, "OK   %s rc=%d\n", path, prog_rc);
+      else
+        fprintf(stdout, "FAIL %s\n", path);
+    } else {
+      if (ok)
+        fprintf(stdout, "OK   %s\n", path);
+      else
+        fprintf(stdout, "FAIL %s\n", path);
+    }
+    return;
+  }
+
+  // JSONL; one record per case. Keep it small and stable for CI.
+  fprintf(stdout, "{\"tool\":\"sem\",\"k\":\"check_case\",\"mode\":\"%s\",\"path\":\"", mode ? mode : "verify");
+  for (const char* p = path; p && *p; p++) {
+    const unsigned char ch = (unsigned char)*p;
+    if (ch == '\\' || ch == '"') {
+      fputc('\\', stdout);
+      fputc((int)ch, stdout);
+    } else if (ch >= 0x20) {
+      fputc((int)ch, stdout);
+    }
+  }
+  fprintf(stdout, "\",\"ok\":%s", ok ? "true" : "false");
+  if (!ok) fprintf(stdout, ",\"tool_rc\":%d", tool_rc);
+  if (mode && strcmp(mode, "run") == 0) {
+    if (ok) fprintf(stdout, ",\"rc\":%d", prog_rc);
+  }
+  fprintf(stdout, "}\n");
+}
+
+static int sem_do_check_one(const char* path, bool do_run, sem_check_format_t check_format, sem_diag_format_t diag_format, bool diag_all) {
   if (do_run) {
     int prog_rc = 0;
     const int tool_rc = sem_run_sir_jsonl_capture_ex(path, NULL, 0, NULL, diag_format, diag_all, &prog_rc);
-    if (tool_rc == 0)
-      fprintf(stdout, "OK   %s rc=%d\n", path, prog_rc);
-    else
-      fprintf(stdout, "FAIL %s\n", path);
+    sem_emit_check_case(check_format, "run", path, tool_rc == 0, tool_rc, prog_rc);
     return tool_rc;
   }
 
   const int rc = sem_verify_sir_jsonl_ex(path, diag_format, diag_all);
-
-  if (rc == 0)
-    fprintf(stdout, "OK   %s\n", path);
-  else
-    fprintf(stdout, "FAIL %s\n", path);
+  sem_emit_check_case(check_format, "verify", path, rc == 0, rc, 0);
   return rc;
 }
 
-static int sem_do_check_dir(const char* dir, bool do_run, sem_diag_format_t diag_format, bool diag_all, uint32_t* inout_ok, uint32_t* inout_fail) {
+static int sem_do_check_dir(const char* dir, bool do_run, sem_check_format_t check_format, sem_diag_format_t diag_format, bool diag_all,
+                            uint32_t* inout_ok, uint32_t* inout_fail) {
   if (!dir || !inout_ok || !inout_fail) return 2;
   DIR* d = opendir(dir);
   if (!d) {
@@ -149,7 +184,7 @@ static int sem_do_check_dir(const char* dir, bool do_run, sem_diag_format_t diag
     }
     if (!sem_path_is_file(full)) continue;
 
-    const int rc = sem_do_check_one(full, do_run, diag_format, diag_all);
+    const int rc = sem_do_check_one(full, do_run, check_format, diag_format, diag_all);
     if (rc == 0)
       (*inout_ok)++;
     else
@@ -769,6 +804,7 @@ int main(int argc, char** argv) {
   const char* tape_in = NULL;
   bool tape_strict = true;
   bool check_run = false;
+  sem_check_format_t check_format = SEM_CHECK_TEXT;
 
   dyn_cap_t dyn_caps[64];
   uint32_t dyn_n = 0;
@@ -797,6 +833,17 @@ int main(int argc, char** argv) {
     if (strcmp(a, "--check-run") == 0) {
       check_run = true;
       check_mode = true;
+      continue;
+    }
+    if (strcmp(a, "--format") == 0 && i + 1 < argc) {
+      const char* f = argv[++i];
+      if (strcmp(f, "text") == 0) check_format = SEM_CHECK_TEXT;
+      else if (strcmp(f, "json") == 0) check_format = SEM_CHECK_JSON;
+      else {
+        fprintf(stderr, "sem: bad --format value (expected text|json)\n");
+        sem_free_caps(dyn_caps, dyn_n);
+        return 2;
+      }
       continue;
     }
     if (strcmp(a, "--print-support") == 0) {
@@ -984,10 +1031,10 @@ int main(int argc, char** argv) {
       const char* p = check_paths[i];
       if (!p || p[0] == '\0') continue;
       if (sem_path_is_dir(p)) {
-        const int rc = sem_do_check_dir(p, check_run, diag_format, diag_all, &ok, &fail);
+        const int rc = sem_do_check_dir(p, check_run, check_format, diag_format, diag_all, &ok, &fail);
         if (rc != 0) tool_rc = rc;
       } else if (sem_path_is_file(p)) {
-        const int rc = sem_do_check_one(p, check_run, diag_format, diag_all);
+        const int rc = sem_do_check_one(p, check_run, check_format, diag_format, diag_all);
         if (rc == 0)
           ok++;
         else
@@ -998,7 +1045,11 @@ int main(int argc, char** argv) {
       }
     }
 
-    fprintf(stdout, "sem: --check: ok=%u fail=%u\n", (unsigned)ok, (unsigned)fail);
+    if (check_format == SEM_CHECK_JSON) {
+      fprintf(stdout, "{\"tool\":\"sem\",\"k\":\"check_summary\",\"ok\":%u,\"fail\":%u}\n", (unsigned)ok, (unsigned)fail);
+    } else {
+      fprintf(stdout, "sem: --check: ok=%u fail=%u\n", (unsigned)ok, (unsigned)fail);
+    }
     sem_free_caps(dyn_caps, dyn_n);
     if (tool_rc != 0) return tool_rc;
     return (fail == 0) ? 0 : 1;

@@ -26,8 +26,9 @@ $SIRCC ./dist/test/examples/sem_if_thunk_trap_not_taken.sir.jsonl -o /tmp/sem_if
 $SIRCC ./dist/test/examples/sem_match_sum_option_i32.sir.jsonl -o /tmp/sem_match_sum && /tmp/sem_match_sum; echo $?
 
 # SEM: emulator-friendly corpus (subset)
-$SEM --check ./dist/test/sem/examples          # verify-only
-$SEM --check --check-run ./dist/test/sem/run   # run (no tool failures)
+$SEM --check ./dist/test/sem/examples                          # verify-only
+$SEM --check --check-run ./dist/test/sem/run                   # run (no tool failures)
+$SEM --check --check-run --format json ./dist/test/sem/run     # machine-readable JSONL
 ```
 
 If you also built `sirc`, `dist/test/examples/` includes matching `.sir` sources for many examples:
