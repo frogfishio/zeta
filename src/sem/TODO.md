@@ -98,7 +98,7 @@ Work items:
 **Goal:** SEM becomes a first-class automated testing platform (record/replay, determinism, robust harness outputs).
 
 Acceptance:
-- [ ] Stable machine-readable summary output for batch runs (one JSON record per case + a final summary)
+- [x] Stable machine-readable summary output for batch runs (one JSON record per case + a final summary)
 - [ ] A recommended “CI recipe” in docs (caps policy, fs sandboxing, tapes)
 
 Work items:
@@ -106,8 +106,9 @@ Work items:
   - [ ] Document tape schema + determinism contract
   - [ ] Add `--tape-out` / `--tape-in` examples to `dist/doc/` and `dist/test/`
 - [ ] Harness UX
-  - [ ] `sem --check` supports `--format text|json` (like `sircc --check`)
-  - [ ] Add `--list` mode (discover `*.sir.jsonl` cases without running)
+  - [x] `sem --check` supports `--format text|json` (like `sircc --check`)
+  - [x] Add `--list` mode (discover `*.sir.jsonl` cases without running)
+  - [x] `--list`/`--check` warn+skip non-`.sir.jsonl` file inputs
 - [ ] Instrumentation hooks (using `sircore` events)
   - [ ] coverage (step coverage / node coverage)
   - [ ] trace filters (by fn / node / op)
@@ -123,11 +124,12 @@ Work items:
   - [x] Optional: collect and emit multiple diagnostics (`--all`) (best-effort)
 - [ ] Tighten validation (SEM-side) with clear messages
   - [ ] Wrong mnemonic payload shape (missing fields, wrong types)
-  - [ ] Wrong arity/type for op arguments
+  - [x] Wrong arity/type for common op arguments (i32.* casts/binops/unops)
+  - [x] Wrong addr shape/type for load/store (`addr` must be a ref to `ptr`)
   - [ ] CFG invariants (terminator last, all blocks reachable optional mode, etc.)
-- [ ] Document “what’s a string” for SEM execution
-  - [ ] Specify `cstr` in SEM: byte sequence semantics (UTF-8-by-convention) + null-termination policy (if any)
-  - [ ] Decide whether SEM treats strings as `(ptr,len)` or `ptr` to NUL-terminated bytes for host calls
+- [x] Document “what’s a string” for SEM execution
+  - [x] Specify `cstr` in SEM: byte sequence semantics (UTF-8-by-convention) + null-termination policy (none implicit)
+  - [x] Decide whether SEM treats strings as `(ptr,len)` or `ptr` to NUL-terminated bytes for host calls (current: `ptr` to bytes; len is separate)
 
 ## P1 (close the “base v1.0” gap): core mnemonics commonly emitted by compilers
 

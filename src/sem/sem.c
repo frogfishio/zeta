@@ -32,6 +32,11 @@ typedef enum sem_check_format {
   SEM_CHECK_JSON = 1,
 } sem_check_format_t;
 
+typedef enum sem_list_format {
+  SEM_LIST_TEXT = 0,
+  SEM_LIST_JSON = 1,
+} sem_list_format_t;
+
 static void sem_print_help(FILE* out) {
   fprintf(out,
           "sem — SIR emulator host frontend (MVP)\n"
@@ -44,6 +49,7 @@ static void sem_print_help(FILE* out) {
           "      [--cap-file-fs] [--cap-async-default] [--cap-sys-info]\n"
           "      [--fs-root PATH]\n"
           "      [--tape-out PATH] [--tape-in PATH] [--tape-lax]\n"
+          "  sem --list <input.sir.jsonl|dir>... [--format text|json]\n"
           "  sem --check <input.sir.jsonl|dir>... [--check-run] [--format text|json] [--diagnostics text|json] [--all]\n"
           "  sem --cat GUEST_PATH --fs-root PATH\n"
           "  sem --sir-hello\n"
@@ -56,9 +62,10 @@ static void sem_print_help(FILE* out) {
           "  --version     Show version information (from ./VERSION)\n"
           "  --print-support  Print the supported SIR subset for `sem --run`\n"
           "  --caps        Issue zi_ctl CAPS_LIST and print capabilities\n"
+          "  --list        List `*.sir.jsonl` inputs without running\n"
           "  --check       Batch-verify one or more inputs (files or dirs)\n"
           "  --check-run   For --check, run cases (not just verify)\n"
-          "  --format      For --check, emit results as: text (default) or json\n"
+          "  --format      For --check, emit results as: text (default) or json (JSON is written to stderr)\n"
           "  --cat PATH    Read PATH via file/fs and write to stdout\n"
           "  --sir-hello   Run a tiny built-in sircore VM smoke program\n"
           "  --sir-module-hello  Run a tiny built-in sircore module smoke program\n"
@@ -111,45 +118,100 @@ static bool sem_has_suffix(const char* s, const char* suffix) {
   return memcmp(s + (n - m), suffix, m) == 0;
 }
 
+static bool sem_is_sir_jsonl_path(const char* path) {
+  return sem_has_suffix(path, ".sir.jsonl");
+}
+
+static int sem_do_list_one(const char* path, sem_list_format_t fmt) {
+  if (!path || !path[0]) return 2;
+  if (sem_path_is_file(path)) {
+    if (!sem_is_sir_jsonl_path(path)) {
+      fprintf(stderr, "sem: --list: skipping non-.sir.jsonl file: %s\n", path);
+      return 0;
+    }
+    if (fmt == SEM_LIST_JSON) {
+      fprintf(stdout, "{\"tool\":\"sem\",\"k\":\"list_case\",\"path\":\"%s\"}\n", path);
+    } else {
+      fprintf(stdout, "%s\n", path);
+    }
+    return 0;
+  }
+  if (!sem_path_is_dir(path)) {
+    fprintf(stderr, "sem: --list: not a file/dir: %s\n", path);
+    return 2;
+  }
+
+  DIR* d = opendir(path);
+  if (!d) {
+    fprintf(stderr, "sem: --list: failed to open dir: %s\n", path);
+    return 2;
+  }
+  struct dirent* ent = NULL;
+  while ((ent = readdir(d)) != NULL) {
+    const char* nm = ent->d_name;
+    if (!nm || nm[0] == '\0') continue;
+    if (strcmp(nm, ".") == 0 || strcmp(nm, "..") == 0) continue;
+    if (!sem_is_sir_jsonl_path(nm)) continue;
+
+    char full[1024];
+    const int n = snprintf(full, sizeof(full), "%s/%s", path, nm);
+    if (n <= 0 || (size_t)n >= sizeof(full)) {
+      fprintf(stderr, "sem: --list: path too long: %s/%s\n", path, nm);
+      closedir(d);
+      return 2;
+    }
+    if (!sem_path_is_file(full)) continue;
+    if (fmt == SEM_LIST_JSON) {
+      fprintf(stdout, "{\"tool\":\"sem\",\"k\":\"list_case\",\"path\":\"%s\"}\n", full);
+    } else {
+      fprintf(stdout, "%s\n", full);
+    }
+  }
+  closedir(d);
+  return 0;
+}
+
 static void sem_emit_check_case(sem_check_format_t fmt, const char* mode, const char* path, bool ok, int tool_rc, int prog_rc) {
+  FILE* out = (fmt == SEM_CHECK_JSON) ? stderr : stdout;
   if (fmt != SEM_CHECK_JSON) {
     if (mode && strcmp(mode, "run") == 0) {
       if (ok)
-        fprintf(stdout, "OK   %s rc=%d\n", path, prog_rc);
+        fprintf(out, "OK   %s rc=%d\n", path, prog_rc);
       else
-        fprintf(stdout, "FAIL %s\n", path);
+        fprintf(out, "FAIL %s\n", path);
     } else {
       if (ok)
-        fprintf(stdout, "OK   %s\n", path);
+        fprintf(out, "OK   %s\n", path);
       else
-        fprintf(stdout, "FAIL %s\n", path);
+        fprintf(out, "FAIL %s\n", path);
     }
     return;
   }
 
   // JSONL; one record per case. Keep it small and stable for CI.
-  fprintf(stdout, "{\"tool\":\"sem\",\"k\":\"check_case\",\"mode\":\"%s\",\"path\":\"", mode ? mode : "verify");
+  fprintf(out, "{\"tool\":\"sem\",\"k\":\"check_case\",\"mode\":\"%s\",\"path\":\"", mode ? mode : "verify");
   for (const char* p = path; p && *p; p++) {
     const unsigned char ch = (unsigned char)*p;
     if (ch == '\\' || ch == '"') {
-      fputc('\\', stdout);
-      fputc((int)ch, stdout);
+      fputc('\\', out);
+      fputc((int)ch, out);
     } else if (ch >= 0x20) {
-      fputc((int)ch, stdout);
+      fputc((int)ch, out);
     }
   }
-  fprintf(stdout, "\",\"ok\":%s", ok ? "true" : "false");
-  if (!ok) fprintf(stdout, ",\"tool_rc\":%d", tool_rc);
+  fprintf(out, "\",\"ok\":%s", ok ? "true" : "false");
+  if (!ok) fprintf(out, ",\"tool_rc\":%d", tool_rc);
   if (mode && strcmp(mode, "run") == 0) {
-    if (ok) fprintf(stdout, ",\"rc\":%d", prog_rc);
+    if (ok) fprintf(out, ",\"rc\":%d", prog_rc);
   }
-  fprintf(stdout, "}\n");
+  fprintf(out, "}\n");
 }
 
-static int sem_do_check_one(const char* path, bool do_run, sem_check_format_t check_format, sem_diag_format_t diag_format, bool diag_all) {
+static int sem_do_check_one(const char* path, bool do_run, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root,
+                            sem_check_format_t check_format, sem_diag_format_t diag_format, bool diag_all) {
   if (do_run) {
     int prog_rc = 0;
-    const int tool_rc = sem_run_sir_jsonl_capture_ex(path, NULL, 0, NULL, diag_format, diag_all, &prog_rc);
+    const int tool_rc = sem_run_sir_jsonl_capture_ex(path, caps, cap_count, fs_root, diag_format, diag_all, &prog_rc);
     sem_emit_check_case(check_format, "run", path, tool_rc == 0, tool_rc, prog_rc);
     return tool_rc;
   }
@@ -159,8 +221,9 @@ static int sem_do_check_one(const char* path, bool do_run, sem_check_format_t ch
   return rc;
 }
 
-static int sem_do_check_dir(const char* dir, bool do_run, sem_check_format_t check_format, sem_diag_format_t diag_format, bool diag_all,
-                            uint32_t* inout_ok, uint32_t* inout_fail) {
+static int sem_do_check_dir(const char* dir, bool do_run, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root,
+                            sem_check_format_t check_format, sem_diag_format_t diag_format, bool diag_all, uint32_t* inout_ok,
+                            uint32_t* inout_fail) {
   if (!dir || !inout_ok || !inout_fail) return 2;
   DIR* d = opendir(dir);
   if (!d) {
@@ -173,7 +236,7 @@ static int sem_do_check_dir(const char* dir, bool do_run, sem_check_format_t che
     const char* nm = ent->d_name;
     if (!nm || nm[0] == '\0') continue;
     if (strcmp(nm, ".") == 0 || strcmp(nm, "..") == 0) continue;
-    if (!sem_has_suffix(nm, ".sir.jsonl")) continue;
+    if (!sem_is_sir_jsonl_path(nm)) continue;
 
     char full[1024];
     const int n = snprintf(full, sizeof(full), "%s/%s", dir, nm);
@@ -184,7 +247,7 @@ static int sem_do_check_dir(const char* dir, bool do_run, sem_check_format_t che
     }
     if (!sem_path_is_file(full)) continue;
 
-    const int rc = sem_do_check_one(full, do_run, check_format, diag_format, diag_all);
+    const int rc = sem_do_check_one(full, do_run, caps, cap_count, fs_root, check_format, diag_format, diag_all);
     if (rc == 0)
       (*inout_ok)++;
     else
@@ -798,6 +861,10 @@ int main(int argc, char** argv) {
   const char** check_paths = NULL;
   uint32_t check_path_count = 0;
   bool check_mode = false;
+  const char* list_paths_buf[256];
+  const char** list_paths = NULL;
+  uint32_t list_path_count = 0;
+  bool list_mode = false;
   sem_diag_format_t diag_format = SEM_DIAG_TEXT;
   bool diag_all = false;
   const char* tape_out = NULL;
@@ -805,6 +872,8 @@ int main(int argc, char** argv) {
   bool tape_strict = true;
   bool check_run = false;
   sem_check_format_t check_format = SEM_CHECK_TEXT;
+  sem_list_format_t list_format = SEM_LIST_TEXT;
+  const char* format_opt = NULL;
 
   dyn_cap_t dyn_caps[64];
   uint32_t dyn_n = 0;
@@ -826,6 +895,10 @@ int main(int argc, char** argv) {
       want_caps = true;
       continue;
     }
+    if (strcmp(a, "--list") == 0) {
+      list_mode = true;
+      continue;
+    }
     if (strcmp(a, "--check") == 0) {
       check_mode = true;
       continue;
@@ -836,14 +909,7 @@ int main(int argc, char** argv) {
       continue;
     }
     if (strcmp(a, "--format") == 0 && i + 1 < argc) {
-      const char* f = argv[++i];
-      if (strcmp(f, "text") == 0) check_format = SEM_CHECK_TEXT;
-      else if (strcmp(f, "json") == 0) check_format = SEM_CHECK_JSON;
-      else {
-        fprintf(stderr, "sem: bad --format value (expected text|json)\n");
-        sem_free_caps(dyn_caps, dyn_n);
-        return 2;
-      }
+      format_opt = argv[++i];
       continue;
     }
     if (strcmp(a, "--print-support") == 0) {
@@ -948,6 +1014,15 @@ int main(int argc, char** argv) {
       check_paths_buf[check_path_count++] = a;
       continue;
     }
+    if (list_mode && a[0] != '-') {
+      if (list_path_count >= (uint32_t)(sizeof(list_paths_buf) / sizeof(list_paths_buf[0]))) {
+        fprintf(stderr, "sem: --list: too many paths\n");
+        sem_free_caps(dyn_caps, dyn_n);
+        return 2;
+      }
+      list_paths_buf[list_path_count++] = a;
+      continue;
+    }
 
     fprintf(stderr, "sem: unknown argument: %s\n", a);
     sem_print_help(stderr);
@@ -956,6 +1031,21 @@ int main(int argc, char** argv) {
   }
 
   if (check_path_count) check_paths = check_paths_buf;
+  if (list_path_count) list_paths = list_paths_buf;
+
+  if (format_opt && format_opt[0]) {
+    if (strcmp(format_opt, "text") == 0) {
+      check_format = SEM_CHECK_TEXT;
+      list_format = SEM_LIST_TEXT;
+    } else if (strcmp(format_opt, "json") == 0) {
+      check_format = SEM_CHECK_JSON;
+      list_format = SEM_LIST_JSON;
+    } else {
+      fprintf(stderr, "sem: bad --format value (expected text|json)\n");
+      sem_free_caps(dyn_caps, dyn_n);
+      return 2;
+    }
+  }
 
   if (want_support) {
     sem_print_support(stdout, json);
@@ -968,14 +1058,24 @@ int main(int argc, char** argv) {
     sem_free_caps(dyn_caps, dyn_n);
     return 2;
   }
+  if (list_path_count && check_path_count) {
+    fprintf(stderr, "sem: choose either --list or --check\n");
+    sem_free_caps(dyn_caps, dyn_n);
+    return 2;
+  }
 
   if (check_mode && check_path_count == 0) {
     fprintf(stderr, "sem: --check: expected at least one file/dir path\n");
     sem_free_caps(dyn_caps, dyn_n);
     return 2;
   }
+  if (list_mode && list_path_count == 0) {
+    fprintf(stderr, "sem: --list: expected at least one file/dir path\n");
+    sem_free_caps(dyn_caps, dyn_n);
+    return 2;
+  }
 
-  if (!want_caps && !cat_path && !sir_hello && !sir_module_hello && !run_path && !verify_path && !check_path_count) {
+  if (!want_caps && !cat_path && !sir_hello && !sir_module_hello && !run_path && !verify_path && !check_path_count && !list_path_count) {
     sem_print_help(stdout);
     sem_free_caps(dyn_caps, dyn_n);
     return 0;
@@ -1005,6 +1105,17 @@ int main(int argc, char** argv) {
     sem_free_caps(dyn_caps, dyn_n);
     return rc;
   }
+  if (list_path_count) {
+    int tool_rc = 0;
+    for (uint32_t i = 0; i < list_path_count; i++) {
+      const char* p = list_paths[i];
+      if (!p || p[0] == '\0') continue;
+      const int rc = sem_do_list_one(p, list_format);
+      if (rc != 0) tool_rc = rc;
+    }
+    sem_free_caps(dyn_caps, dyn_n);
+    return tool_rc;
+  }
   if (sir_hello) {
     sem_free_caps(dyn_caps, dyn_n);
     return sem_do_sir_hello();
@@ -1031,10 +1142,14 @@ int main(int argc, char** argv) {
       const char* p = check_paths[i];
       if (!p || p[0] == '\0') continue;
       if (sem_path_is_dir(p)) {
-        const int rc = sem_do_check_dir(p, check_run, check_format, diag_format, diag_all, &ok, &fail);
+        const int rc = sem_do_check_dir(p, check_run, caps, cap_n, fs_root, check_format, diag_format, diag_all, &ok, &fail);
         if (rc != 0) tool_rc = rc;
       } else if (sem_path_is_file(p)) {
-        const int rc = sem_do_check_one(p, check_run, check_format, diag_format, diag_all);
+        if (!sem_is_sir_jsonl_path(p)) {
+          fprintf(stderr, "sem: --check: skipping non-.sir.jsonl file: %s\n", p);
+          continue;
+        }
+        const int rc = sem_do_check_one(p, check_run, caps, cap_n, fs_root, check_format, diag_format, diag_all);
         if (rc == 0)
           ok++;
         else
@@ -1046,7 +1161,7 @@ int main(int argc, char** argv) {
     }
 
     if (check_format == SEM_CHECK_JSON) {
-      fprintf(stdout, "{\"tool\":\"sem\",\"k\":\"check_summary\",\"ok\":%u,\"fail\":%u}\n", (unsigned)ok, (unsigned)fail);
+      fprintf(stderr, "{\"tool\":\"sem\",\"k\":\"check_summary\",\"ok\":%u,\"fail\":%u}\n", (unsigned)ok, (unsigned)fail);
     } else {
       fprintf(stdout, "sem: --check: ok=%u fail=%u\n", (unsigned)ok, (unsigned)fail);
     }

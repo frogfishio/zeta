@@ -754,19 +754,31 @@ static bool eval_alloca_mnemonic(sirj_ctx_t* c, uint32_t node_id, const node_inf
   return true;
 }
 
-static bool eval_store_mnemonic(sirj_ctx_t* c, const node_info_t* n, sir_inst_kind_t k) {
+static bool eval_store_mnemonic(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_inst_kind_t k) {
   if (!c || !n) return false;
-  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) {
+    sirj_diag_setf(c, "sem.parse.store.fields", c->cur_path, n->loc_line, node_id, n->tag, "%s missing/invalid fields object", n->tag);
+    return false;
+  }
   uint32_t addr_id = 0, val_id = 0;
-  if (!parse_ref_id(json_obj_get(n->fields_obj, "addr"), &addr_id)) return false;
-  if (!parse_ref_id(json_obj_get(n->fields_obj, "value"), &val_id)) return false;
+  if (!parse_ref_id(json_obj_get(n->fields_obj, "addr"), &addr_id)) {
+    sirj_diag_setf(c, "sem.parse.store.addr", c->cur_path, n->loc_line, node_id, n->tag, "%s addr must be a ref", n->tag);
+    return false;
+  }
+  if (!parse_ref_id(json_obj_get(n->fields_obj, "value"), &val_id)) {
+    sirj_diag_setf(c, "sem.parse.store.value", c->cur_path, n->loc_line, node_id, n->tag, "%s value must be a ref", n->tag);
+    return false;
+  }
   uint32_t align = 1;
   (void)json_get_u32(json_obj_get(n->fields_obj, "align"), &align);
   sir_val_id_t addr_slot = 0, val_slot = 0;
   val_kind_t ak = VK_INVALID, vk = VK_INVALID;
   if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
   if (!eval_node(c, val_id, &val_slot, &vk)) return false;
-  if (ak != VK_PTR) return false;
+  if (ak != VK_PTR) {
+    sirj_diag_setf(c, "sem.store.addr_type", c->cur_path, n->loc_line, node_id, n->tag, "%s addr must be ptr", n->tag);
+    return false;
+  }
 
   if (k == SIR_INST_STORE_I8) return sir_mb_emit_store_i8(c->mb, c->fn, addr_slot, val_slot, align);
   if (k == SIR_INST_STORE_I32) return sir_mb_emit_store_i32(c->mb, c->fn, addr_slot, val_slot, align);
@@ -849,15 +861,24 @@ static bool eval_mem_fill_stmt(sirj_ctx_t* c, uint32_t node_id, const node_info_
 static bool eval_load_mnemonic(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_inst_kind_t k, val_kind_t outk, sir_val_id_t* out_slot,
                                val_kind_t* out_kind) {
   if (!c || !n || !out_slot || !out_kind) return false;
-  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) {
+    sirj_diag_setf(c, "sem.parse.load.fields", c->cur_path, n->loc_line, node_id, n->tag, "%s missing/invalid fields object", n->tag);
+    return false;
+  }
   uint32_t addr_id = 0;
-  if (!parse_ref_id(json_obj_get(n->fields_obj, "addr"), &addr_id)) return false;
+  if (!parse_ref_id(json_obj_get(n->fields_obj, "addr"), &addr_id)) {
+    sirj_diag_setf(c, "sem.parse.load.addr", c->cur_path, n->loc_line, node_id, n->tag, "%s addr must be a ref", n->tag);
+    return false;
+  }
   uint32_t align = 1;
   (void)json_get_u32(json_obj_get(n->fields_obj, "align"), &align);
   sir_val_id_t addr_slot = 0;
   val_kind_t ak = VK_INVALID;
   if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
-  if (ak != VK_PTR) return false;
+  if (ak != VK_PTR) {
+    sirj_diag_setf(c, "sem.load.addr_type", c->cur_path, n->loc_line, node_id, n->tag, "%s addr must be ptr", n->tag);
+    return false;
+  }
   const sir_val_id_t dst = alloc_slot(c, outk);
   bool ok = false;
   if (k == SIR_INST_LOAD_I8) ok = sir_mb_emit_load_i8(c->mb, c->fn, dst, addr_slot, align);
@@ -909,17 +930,32 @@ static bool eval_name(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir
 
 static bool eval_i32_add_mnemonic(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
   if (!c || !n || !out_slot || !out_kind) return false;
-  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) {
+    sirj_diag_setf(c, "sem.parse.i32.add.fields", c->cur_path, n->loc_line, node_id, n->tag, "i32.add missing/invalid fields object");
+    return false;
+  }
   const JsonValue* av = json_obj_get(n->fields_obj, "args");
-  if (!json_is_array(av) || av->v.arr.len != 2) return false;
+  if (!json_is_array(av) || av->v.arr.len != 2) {
+    sirj_diag_setf(c, "sem.parse.i32.add.args", c->cur_path, n->loc_line, node_id, n->tag, "i32.add args must be [a, b]");
+    return false;
+  }
   uint32_t a_id = 0, b_id = 0;
-  if (!parse_ref_id(av->v.arr.items[0], &a_id)) return false;
-  if (!parse_ref_id(av->v.arr.items[1], &b_id)) return false;
+  if (!parse_ref_id(av->v.arr.items[0], &a_id)) {
+    sirj_diag_setf(c, "sem.parse.i32.add.arg", c->cur_path, n->loc_line, node_id, n->tag, "i32.add arg 0 must be a ref");
+    return false;
+  }
+  if (!parse_ref_id(av->v.arr.items[1], &b_id)) {
+    sirj_diag_setf(c, "sem.parse.i32.add.arg", c->cur_path, n->loc_line, node_id, n->tag, "i32.add arg 1 must be a ref");
+    return false;
+  }
   sir_val_id_t a_slot = 0, b_slot = 0;
   val_kind_t ak = VK_INVALID, bk = VK_INVALID;
   if (!eval_node(c, a_id, &a_slot, &ak)) return false;
   if (!eval_node(c, b_id, &b_slot, &bk)) return false;
-  if (ak != VK_I32 || bk != VK_I32) return false;
+  if (ak != VK_I32 || bk != VK_I32) {
+    sirj_diag_setf(c, "sem.i32.add.arg_type", c->cur_path, n->loc_line, node_id, n->tag, "i32.add args must be i32");
+    return false;
+  }
   const sir_val_id_t dst = alloc_slot(c, VK_I32);
   if (!sir_mb_emit_i32_add(c->mb, c->fn, dst, a_slot, b_slot)) return false;
   if (!set_node_val(c, node_id, dst, VK_I32)) return false;
@@ -931,17 +967,32 @@ static bool eval_i32_add_mnemonic(sirj_ctx_t* c, uint32_t node_id, const node_in
 static bool eval_i32_bin_mnemonic(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_inst_kind_t k, sir_val_id_t* out_slot,
                                   val_kind_t* out_kind) {
   if (!c || !n || !out_slot || !out_kind) return false;
-  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) {
+    sirj_diag_setf(c, "sem.parse.i32.bin.fields", c->cur_path, n->loc_line, node_id, n->tag, "%s missing/invalid fields object", n->tag);
+    return false;
+  }
   const JsonValue* av = json_obj_get(n->fields_obj, "args");
-  if (!json_is_array(av) || av->v.arr.len != 2) return false;
+  if (!json_is_array(av) || av->v.arr.len != 2) {
+    sirj_diag_setf(c, "sem.parse.i32.bin.args", c->cur_path, n->loc_line, node_id, n->tag, "%s args must be [a, b]", n->tag);
+    return false;
+  }
   uint32_t a_id = 0, b_id = 0;
-  if (!parse_ref_id(av->v.arr.items[0], &a_id)) return false;
-  if (!parse_ref_id(av->v.arr.items[1], &b_id)) return false;
+  if (!parse_ref_id(av->v.arr.items[0], &a_id)) {
+    sirj_diag_setf(c, "sem.parse.i32.bin.arg", c->cur_path, n->loc_line, node_id, n->tag, "%s arg 0 must be a ref", n->tag);
+    return false;
+  }
+  if (!parse_ref_id(av->v.arr.items[1], &b_id)) {
+    sirj_diag_setf(c, "sem.parse.i32.bin.arg", c->cur_path, n->loc_line, node_id, n->tag, "%s arg 1 must be a ref", n->tag);
+    return false;
+  }
   sir_val_id_t a_slot = 0, b_slot = 0;
   val_kind_t ak = VK_INVALID, bk = VK_INVALID;
   if (!eval_node(c, a_id, &a_slot, &ak)) return false;
   if (!eval_node(c, b_id, &b_slot, &bk)) return false;
-  if (ak != VK_I32 || bk != VK_I32) return false;
+  if (ak != VK_I32 || bk != VK_I32) {
+    sirj_diag_setf(c, "sem.i32.bin.arg_type", c->cur_path, n->loc_line, node_id, n->tag, "%s args must be i32", n->tag);
+    return false;
+  }
   const sir_val_id_t dst = alloc_slot(c, VK_I32);
   bool ok = false;
   switch (k) {
@@ -996,15 +1047,27 @@ static bool eval_i32_bin_mnemonic(sirj_ctx_t* c, uint32_t node_id, const node_in
 
 static bool eval_i32_zext_i8(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
   if (!c || !n || !out_slot || !out_kind) return false;
-  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) {
+    sirj_diag_setf(c, "sem.parse.i32.zext.i8.fields", c->cur_path, n->loc_line, node_id, n->tag, "i32.zext.i8 missing/invalid fields object");
+    return false;
+  }
   const JsonValue* av = json_obj_get(n->fields_obj, "args");
-  if (!json_is_array(av) || av->v.arr.len != 1) return false;
+  if (!json_is_array(av) || av->v.arr.len != 1) {
+    sirj_diag_setf(c, "sem.parse.i32.zext.i8.args", c->cur_path, n->loc_line, node_id, n->tag, "i32.zext.i8 args must be [x]");
+    return false;
+  }
   uint32_t x_id = 0;
-  if (!parse_ref_id(av->v.arr.items[0], &x_id)) return false;
+  if (!parse_ref_id(av->v.arr.items[0], &x_id)) {
+    sirj_diag_setf(c, "sem.parse.i32.zext.i8.arg", c->cur_path, n->loc_line, node_id, n->tag, "i32.zext.i8 arg 0 must be a ref");
+    return false;
+  }
   sir_val_id_t x_slot = 0;
   val_kind_t xk = VK_INVALID;
   if (!eval_node(c, x_id, &x_slot, &xk)) return false;
-  if (xk != VK_I8) return false;
+  if (xk != VK_I8) {
+    sirj_diag_setf(c, "sem.i32.zext.i8.arg_type", c->cur_path, n->loc_line, node_id, n->tag, "i32.zext.i8 arg must be i8");
+    return false;
+  }
   const sir_val_id_t dst = alloc_slot(c, VK_I32);
   if (!sir_mb_emit_i32_zext_i8(c->mb, c->fn, dst, x_slot)) return false;
   if (!set_node_val(c, node_id, dst, VK_I32)) return false;
@@ -1015,15 +1078,27 @@ static bool eval_i32_zext_i8(sirj_ctx_t* c, uint32_t node_id, const node_info_t*
 
 static bool eval_i64_zext_i32(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
   if (!c || !n || !out_slot || !out_kind) return false;
-  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) {
+    sirj_diag_setf(c, "sem.parse.i64.zext.i32.fields", c->cur_path, n->loc_line, node_id, n->tag, "i64.zext.i32 missing/invalid fields object");
+    return false;
+  }
   const JsonValue* av = json_obj_get(n->fields_obj, "args");
-  if (!json_is_array(av) || av->v.arr.len != 1) return false;
+  if (!json_is_array(av) || av->v.arr.len != 1) {
+    sirj_diag_setf(c, "sem.parse.i64.zext.i32.args", c->cur_path, n->loc_line, node_id, n->tag, "i64.zext.i32 args must be [x]");
+    return false;
+  }
   uint32_t x_id = 0;
-  if (!parse_ref_id(av->v.arr.items[0], &x_id)) return false;
+  if (!parse_ref_id(av->v.arr.items[0], &x_id)) {
+    sirj_diag_setf(c, "sem.parse.i64.zext.i32.arg", c->cur_path, n->loc_line, node_id, n->tag, "i64.zext.i32 arg 0 must be a ref");
+    return false;
+  }
   sir_val_id_t x_slot = 0;
   val_kind_t xk = VK_INVALID;
   if (!eval_node(c, x_id, &x_slot, &xk)) return false;
-  if (xk != VK_I32) return false;
+  if (xk != VK_I32) {
+    sirj_diag_setf(c, "sem.i64.zext.i32.arg_type", c->cur_path, n->loc_line, node_id, n->tag, "i64.zext.i32 arg must be i32");
+    return false;
+  }
   const sir_val_id_t dst = alloc_slot(c, VK_I64);
   if (!sir_mb_emit_i64_zext_i32(c->mb, c->fn, dst, x_slot)) return false;
   if (!set_node_val(c, node_id, dst, VK_I64)) return false;
@@ -1035,15 +1110,27 @@ static bool eval_i64_zext_i32(sirj_ctx_t* c, uint32_t node_id, const node_info_t
 static bool eval_i32_un_mnemonic(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_inst_kind_t k, sir_val_id_t* out_slot,
                                  val_kind_t* out_kind) {
   if (!c || !n || !out_slot || !out_kind) return false;
-  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) {
+    sirj_diag_setf(c, "sem.parse.i32.un.fields", c->cur_path, n->loc_line, node_id, n->tag, "%s missing/invalid fields object", n->tag);
+    return false;
+  }
   const JsonValue* av = json_obj_get(n->fields_obj, "args");
-  if (!json_is_array(av) || av->v.arr.len != 1) return false;
+  if (!json_is_array(av) || av->v.arr.len != 1) {
+    sirj_diag_setf(c, "sem.parse.i32.un.args", c->cur_path, n->loc_line, node_id, n->tag, "%s args must be [x]", n->tag);
+    return false;
+  }
   uint32_t x_id = 0;
-  if (!parse_ref_id(av->v.arr.items[0], &x_id)) return false;
+  if (!parse_ref_id(av->v.arr.items[0], &x_id)) {
+    sirj_diag_setf(c, "sem.parse.i32.un.arg", c->cur_path, n->loc_line, node_id, n->tag, "%s arg 0 must be a ref", n->tag);
+    return false;
+  }
   sir_val_id_t x_slot = 0;
   val_kind_t xk = VK_INVALID;
   if (!eval_node(c, x_id, &x_slot, &xk)) return false;
-  if (xk != VK_I32) return false;
+  if (xk != VK_I32) {
+    sirj_diag_setf(c, "sem.i32.un.arg_type", c->cur_path, n->loc_line, node_id, n->tag, "%s arg must be i32", n->tag);
+    return false;
+  }
   const sir_val_id_t dst = alloc_slot(c, VK_I32);
   bool ok = false;
   if (k == SIR_INST_I32_NOT) ok = sir_mb_emit_i32_not(c->mb, c->fn, dst, x_slot);
@@ -1058,15 +1145,27 @@ static bool eval_i32_un_mnemonic(sirj_ctx_t* c, uint32_t node_id, const node_inf
 
 static bool eval_i32_trunc_i64(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
   if (!c || !n || !out_slot || !out_kind) return false;
-  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) {
+    sirj_diag_setf(c, "sem.parse.i32.trunc.i64.fields", c->cur_path, n->loc_line, node_id, n->tag, "i32.trunc.i64 missing/invalid fields object");
+    return false;
+  }
   const JsonValue* av = json_obj_get(n->fields_obj, "args");
-  if (!json_is_array(av) || av->v.arr.len != 1) return false;
+  if (!json_is_array(av) || av->v.arr.len != 1) {
+    sirj_diag_setf(c, "sem.parse.i32.trunc.i64.args", c->cur_path, n->loc_line, node_id, n->tag, "i32.trunc.i64 args must be [x]");
+    return false;
+  }
   uint32_t x_id = 0;
-  if (!parse_ref_id(av->v.arr.items[0], &x_id)) return false;
+  if (!parse_ref_id(av->v.arr.items[0], &x_id)) {
+    sirj_diag_setf(c, "sem.parse.i32.trunc.i64.arg", c->cur_path, n->loc_line, node_id, n->tag, "i32.trunc.i64 arg 0 must be a ref");
+    return false;
+  }
   sir_val_id_t x_slot = 0;
   val_kind_t xk = VK_INVALID;
   if (!eval_node(c, x_id, &x_slot, &xk)) return false;
-  if (xk != VK_I64) return false;
+  if (xk != VK_I64) {
+    sirj_diag_setf(c, "sem.i32.trunc.i64.arg_type", c->cur_path, n->loc_line, node_id, n->tag, "i32.trunc.i64 arg must be i64");
+    return false;
+  }
   const sir_val_id_t dst = alloc_slot(c, VK_I32);
   if (!sir_mb_emit_i32_trunc_i64(c->mb, c->fn, dst, x_slot)) return false;
   if (!set_node_val(c, node_id, dst, VK_I32)) return false;
@@ -1767,10 +1866,10 @@ static bool exec_stmt(sirj_ctx_t* c, uint32_t stmt_id, bool* out_did_return, sir
     return true;
   }
 
-  if (strcmp(n->tag, "store.i8") == 0) return eval_store_mnemonic(c, n, SIR_INST_STORE_I8);
-  if (strcmp(n->tag, "store.i32") == 0) return eval_store_mnemonic(c, n, SIR_INST_STORE_I32);
-  if (strcmp(n->tag, "store.i64") == 0) return eval_store_mnemonic(c, n, SIR_INST_STORE_I64);
-  if (strcmp(n->tag, "store.ptr") == 0) return eval_store_mnemonic(c, n, SIR_INST_STORE_PTR);
+  if (strcmp(n->tag, "store.i8") == 0) return eval_store_mnemonic(c, stmt_id, n, SIR_INST_STORE_I8);
+  if (strcmp(n->tag, "store.i32") == 0) return eval_store_mnemonic(c, stmt_id, n, SIR_INST_STORE_I32);
+  if (strcmp(n->tag, "store.i64") == 0) return eval_store_mnemonic(c, stmt_id, n, SIR_INST_STORE_I64);
+  if (strcmp(n->tag, "store.ptr") == 0) return eval_store_mnemonic(c, stmt_id, n, SIR_INST_STORE_PTR);
   if (strcmp(n->tag, "mem.copy") == 0) return eval_mem_copy_stmt(c, stmt_id, n);
   if (strcmp(n->tag, "mem.fill") == 0) return eval_mem_fill_stmt(c, stmt_id, n);
   if (strcmp(n->tag, "call.indirect") == 0) {

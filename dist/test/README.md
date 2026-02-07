@@ -28,7 +28,8 @@ $SIRCC ./dist/test/examples/sem_match_sum_option_i32.sir.jsonl -o /tmp/sem_match
 # SEM: emulator-friendly corpus (subset)
 $SEM --check ./dist/test/sem/examples                          # verify-only
 $SEM --check --check-run ./dist/test/sem/run                   # run (no tool failures)
-$SEM --check --check-run --format json ./dist/test/sem/run     # machine-readable JSONL
+$SEM --check --check-run --format json ./dist/test/sem/run     # machine-readable JSONL (on stderr)
+$SEM --list ./dist/test/sem/run                                # list cases without running
 ```
 
 If you also built `sirc`, `dist/test/examples/` includes matching `.sir` sources for many examples:
