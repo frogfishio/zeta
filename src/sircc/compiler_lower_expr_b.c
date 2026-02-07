@@ -230,8 +230,8 @@ bool lower_expr_part_b(FunctionCtx* f, int64_t node_id, NodeRec* n, LLVMValueRef
         SymRec* s = find_sym_by_name(f->p, name);
         if (!s || !s->kind || (strcmp(s->kind, "var") != 0 && strcmp(s->kind, "const") != 0)) {
           err_codef(f->p, "sircc.ptr.sym.unknown",
-                    "sircc: ptr.sym references unknown function or global '%s' (to call an external C function, emit decl.fn with the signature; "
-                    "ptr.sym requires an in-module declaration)",
+                    "sircc: ptr.sym references unknown symbol '%s' (producer rule: ptr.sym must name an in-module declaration: "
+                    "fn/decl.fn for functions, or sym(kind=var|const) for globals; extern calls should use decl.fn + call.indirect)",
                     name);
           goto done;
         }

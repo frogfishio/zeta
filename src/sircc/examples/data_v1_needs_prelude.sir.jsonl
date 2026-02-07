@@ -1,0 +1,8 @@
+{"ir":"sir-v1.0","k":"meta","unit":"data_v1_needs_prelude","ext":{"features":["data:v1"]}}
+
+{"ir":"sir-v1.0","k":"type","id":"t_i32","kind":"prim","prim":"i32"}
+{"ir":"sir-v1.0","k":"type","id":"t_main","kind":"fn","params":[],"ret":"t_i32"}
+{"ir":"sir-v1.0","k":"node","id":"c0","tag":"const.i32","type_ref":"t_i32","fields":{"value":0}}
+{"ir":"sir-v1.0","k":"node","id":"ret0","tag":"term.ret","fields":{"value":{"t":"ref","id":"c0"}}}
+{"ir":"sir-v1.0","k":"node","id":"b0","tag":"block","fields":{"stmts":[{"t":"ref","id":"ret0"}]}}
+{"ir":"sir-v1.0","k":"node","id":"fn:main","tag":"fn","type_ref":"t_main","fields":{"name":"main","linkage":"public","params":[],"body":{"t":"ref","id":"b0"}}}

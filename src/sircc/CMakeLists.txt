@@ -389,6 +389,12 @@ add_test(
 )
 
 add_test(
+  NAME sircc_verify_data_v1_ok_with_prelude
+  COMMAND sircc --prelude ${CMAKE_CURRENT_LIST_DIR}/examples/data_v1_types_only.sir.jsonl --verify-only
+    ${CMAKE_CURRENT_LIST_DIR}/examples/data_v1_needs_prelude.sir.jsonl
+)
+
+add_test(
   NAME sircc_lower_hl_sem_if_thunk_to_cfg
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>

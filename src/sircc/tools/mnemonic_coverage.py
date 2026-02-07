@@ -34,6 +34,11 @@ def strip_tags(s: str) -> str:
     s = " ".join(s.split())
     return s.strip()
 
+def strip_parens_notes(s: str) -> str:
+    # Some mnemonic cells include prose notes like "(and i16/i32/i64.*)".
+    # Those slashes are not mnemonic separators; drop parenthesized notes before tokenizing.
+    return re.sub(r"\([^)]*\)", "", s).strip()
+
 
 def extract_pack_from_heading(heading_text: str) -> str | None:
     # Headings are like: "SIMD / vector types and operations (simd:v1)"
@@ -88,14 +93,35 @@ def parse_spec_mnemonics(mnemonics_html: str) -> list[SpecMnemonic]:
         attrs = (m.group(1) + m.group(2)).lower()
         if "colspan" in attrs:
             continue  # section header rows
-        text = strip_tags(m.group(3))
+        text = strip_parens_notes(strip_tags(m.group(3)))
         if not text:
             continue
-        # Split combined rows like: "i8.add / i16.add / i32.add / i64.add"
-        for part in text.split("/"):
-            part = part.strip()
-            if not part:
+        # Split combined rows like:
+        # - "i8.add / i16.add / i32.add / i64.add"
+        # - "atomic.load.i8/i16/i32/i64"
+        # - "ptr.cmp.eq/ne"
+        #
+        # Some rows use a shared-prefix shorthand (no repeated "atomic.load.") which we must expand.
+        parts = [p.strip() for p in text.split("/") if p.strip()]
+        if not parts:
+            continue
+        prefix: str | None = None
+        expanded: list[str] = []
+        for i, part in enumerate(parts):
+            if "." in part:
+                expanded.append(part)
+                # If the next part is a shorthand suffix (no dots), treat this as establishing a prefix.
+                if i + 1 < len(parts) and "." not in parts[i + 1]:
+                    prefix = part.rsplit(".", 1)[0] + "."
+                else:
+                    prefix = None
                 continue
+            if prefix:
+                expanded.append(prefix + part)
+            else:
+                expanded.append(part)
+
+        for part in expanded:
             # Filter out any junk that isn't a mnemonic-like token.
             if not re.match(r"^[A-Za-z][A-Za-z0-9_.]*$", part):
                 continue
@@ -123,6 +149,41 @@ def infer_implemented_mnemonics(csrc: str) -> set[str]:
     # Exact tag handlers.
     for tag in re.findall(r'strcmp\(\s*n->tag\s*,\s*"([A-Za-z0-9_.]+)"\s*\)\s*==\s*0', csrc):
         impl.add(tag)
+
+    # Prefix + op handlers (pattern used by packs like fun/closure/adt):
+    #   if (strncmp(n->tag, "closure.", 8) == 0) { const char* op = n->tag + 8; if (strcmp(op, "make") == 0) ... }
+    # Infer implemented mnemonics as "<prefix><op>" for any strcmp(op, "...") in the same scope window.
+    for pm in re.finditer(r'strncmp\(\s*n->tag\s*,\s*"([A-Za-z0-9_.]+)"\s*,\s*(\d+)\s*\)\s*==\s*0', csrc):
+        prefix = pm.group(1)
+        n = int(pm.group(2))
+        if len(prefix) != n:
+            continue
+        # Scan forward a bounded window to find a matching "op" slice and its cases.
+        window = csrc[pm.end() : pm.end() + 60000]
+        m_op = re.search(rf'const\s+char\s*\*\s*op\s*=\s*n->tag\s*\+\s*{n}\s*;', window)
+        if not m_op:
+            continue
+        # Collect strcmp(op, "<suffix>") occurrences after the op definition.
+        tail = window[m_op.end() :]
+        for suf in re.findall(r'strcmp\(\s*op\s*,\s*"([A-Za-z0-9_.]+)"\s*\)\s*==\s*0', tail):
+            impl.add(prefix + suf)
+
+    # Prefix + cc handlers for vec.cmp.<cc>:
+    #   if (strncmp(n->tag, "vec.cmp.", 8) == 0) { const char* cc = n->tag + 8; if (strcmp(cc, "eq") == 0) ... }
+    for pm in re.finditer(r'strncmp\(\s*n->tag\s*,\s*"([A-Za-z0-9_.]+)"\s*,\s*(\d+)\s*\)\s*==\s*0', csrc):
+        prefix = pm.group(1)
+        n = int(pm.group(2))
+        if len(prefix) != n:
+            continue
+        if not prefix.endswith("."):
+            continue
+        window = csrc[pm.end() : pm.end() + 60000]
+        m_cc = re.search(rf'const\s+char\s*\*\s*cc\s*=\s*n->tag\s*\+\s*{n}\s*;', window)
+        if not m_cc:
+            continue
+        tail = window[m_cc.end() :]
+        for cc in re.findall(r'strcmp\(\s*cc\s*,\s*"([A-Za-z0-9_.]+)"\s*\)\s*==\s*0', tail):
+            impl.add(prefix + cc)
 
     prims = extract_prims_from_compiler(csrc)
 

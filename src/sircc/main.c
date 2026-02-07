@@ -20,7 +20,9 @@ static void usage(FILE* out) {
           "Usage:\n"
           "  sircc <input.sir.jsonl> -o <output> [--emit-llvm|--emit-obj|--emit-zasm] [--clang <path>] [--target-triple <triple>]\n"
           "  sircc <input.sir.jsonl> -o <output.zasm.jsonl> --emit-zasm [--emit-zasm-map <map.jsonl>]\n"
+          "  sircc [--prelude <prelude.sir.jsonl>]... <input.sir.jsonl> ...\n"
           "  sircc --verify-only <input.sir.jsonl>\n"
+          "  sircc --verify-strict --verify-only <input.sir.jsonl>\n"
           "  sircc --lower-hl --emit-sir-core <output.sir.jsonl> <input.sir.jsonl>\n"
           "  sircc --dump-records --verify-only <input.sir.jsonl>\n"
           "  sircc --print-target [--target-triple <triple>]\n"
@@ -56,9 +58,13 @@ int main(int argc, char** argv) {
   const char* format = "text";
   const char* runtime = "libc";
   const char* zabi25_root = NULL;
+  const char* prelude_paths[32];
+  size_t prelude_paths_len = 0;
 
   SirccOptions opt = {
       .argv0 = (argc > 0) ? argv[0] : NULL,
+      .prelude_paths = NULL,
+      .prelude_paths_len = 0,
       .input_path = NULL,
       .output_path = NULL,
       .emit = SIRCC_EMIT_EXE,
@@ -70,6 +76,7 @@ int main(int argc, char** argv) {
       .lower_hl = false,
       .emit_sir_core_path = NULL,
       .verify_only = false,
+      .verify_strict = false,
       .dump_records = false,
       .print_target = false,
       .verbose = false,
@@ -101,6 +108,22 @@ int main(int argc, char** argv) {
     }
     if (strcmp(a, "--verify-only") == 0) {
       opt.verify_only = true;
+      continue;
+    }
+    if (strcmp(a, "--verify-strict") == 0) {
+      opt.verify_strict = true;
+      continue;
+    }
+    if (strcmp(a, "--prelude") == 0) {
+      if (i + 1 >= argc) {
+        usage(stderr);
+        return SIRCC_EXIT_USAGE;
+      }
+      if (prelude_paths_len >= (sizeof(prelude_paths) / sizeof(prelude_paths[0]))) {
+        fprintf(stderr, "sircc: too many --prelude files (max=%zu)\n", sizeof(prelude_paths) / sizeof(prelude_paths[0]));
+        return SIRCC_EXIT_USAGE;
+      }
+      prelude_paths[prelude_paths_len++] = argv[++i];
       continue;
     }
     if (strcmp(a, "--lower-hl") == 0) {
@@ -325,6 +348,11 @@ int main(int argc, char** argv) {
     opt.zabi25_root = zabi25_root;
   } else {
     opt.runtime = SIRCC_RUNTIME_LIBC;
+  }
+
+  if (prelude_paths_len) {
+    opt.prelude_paths = prelude_paths;
+    opt.prelude_paths_len = prelude_paths_len;
   }
 
   if (print_support) {

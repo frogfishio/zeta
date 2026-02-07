@@ -802,50 +802,29 @@ static bool parse_node_record(SirProgram* p, JsonValue* obj) {
   return true;
 }
 
-bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_path) {
-  p->cur_path = input_path;
-  p->cur_line = 0;
-  FILE* f = fopen(input_path, "rb");
+static bool parse_program_file(SirProgram* p, const SirccOptions* opt, const char* path, size_t max_line_bytes, size_t max_records,
+                               size_t* records, char** line, size_t* cap, size_t* len) {
+  if (!p || !path || !records || !line || !cap || !len) return false;
+  FILE* f = fopen(path, "rb");
   if (!f) {
     err_codef(p, "sircc.io.open_failed", "sircc: failed to open: %s", strerror(errno));
     return false;
   }
 
-  char* line = NULL;
-  size_t cap = 0;
-  size_t len = 0;
   size_t line_no = 0;
-
-  // Safety limits to keep JSONL ingestion robust under adversarial inputs.
-  // These defaults are intentionally high; override via env vars if needed:
-  //   SIRCC_MAX_LINE_BYTES, SIRCC_MAX_RECORDS.
-  size_t max_line_bytes = 16u * 1024u * 1024u; // 16 MiB per JSONL record line
-  uint64_t max_records_u64 = 5ull * 1000ull * 1000ull; // 5,000,000 records
-  uint64_t max_line_u64 = 0;
-  if (parse_env_u64("SIRCC_MAX_LINE_BYTES", &max_line_u64)) {
-    if (max_line_u64 > (uint64_t)SIZE_MAX) max_line_bytes = SIZE_MAX;
-    else max_line_bytes = (size_t)max_line_u64;
-  }
-  (void)parse_env_u64("SIRCC_MAX_RECORDS", &max_records_u64);
-  if (max_line_bytes == 0) max_line_bytes = 16u * 1024u * 1024u;
-  if (max_records_u64 == 0) max_records_u64 = 5ull * 1000ull * 1000ull;
-  size_t max_records = (max_records_u64 > (uint64_t)SIZE_MAX) ? SIZE_MAX : (size_t)max_records_u64;
-  size_t records = 0;
-
   bool too_long = false;
-  while (read_line(f, &line, &cap, &len, max_line_bytes, &too_long)) {
+  while (read_line(f, line, cap, len, max_line_bytes, &too_long)) {
     line_no++;
-    if (len == 0 || is_blank_line(line)) continue;
-    records++;
-    if (max_records && records > max_records) {
+    if (*len == 0 || is_blank_line(*line)) continue;
+    (*records)++;
+    if (max_records && *records > max_records) {
       err_codef(p, "sircc.limit.records",
                 "sircc: input exceeded record limit (%zu) (override via SIRCC_MAX_RECORDS)", max_records);
-      free(line);
       fclose(f);
       return false;
     }
 
-    p->cur_path = input_path;
+    p->cur_path = path;
     p->cur_line = line_no;
     p->cur_kind = NULL;
     p->cur_rec_id = -1;
@@ -857,14 +836,12 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
 
     JsonError jerr = {0};
     JsonValue* root = NULL;
-    if (!json_parse(&p->arena, line, &root, &jerr)) {
+    if (!json_parse(&p->arena, *line, &root, &jerr)) {
       err_codef(p, "sircc.json.parse_error", "sircc: JSON parse error at column %zu: %s", jerr.offset + 1, jerr.msg ? jerr.msg : "unknown");
-      free(line);
       fclose(f);
       return false;
     }
     if (!must_obj(p, root, "record")) {
-      free(line);
       fclose(f);
       return false;
     }
@@ -872,7 +849,6 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
     const char* ir = must_string(p, json_obj_get(root, "ir"), "record.ir");
     const char* k = must_string(p, json_obj_get(root, "k"), "record.k");
     if (!ir || !k) {
-      free(line);
       fclose(f);
       return false;
     }
@@ -889,7 +865,6 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
     if (src_ref) {
       int64_t sid = -1;
       if (!sir_intern_id(p, SIR_ID_SRC, src_ref, &sid, "src_ref")) {
-        free(line);
         fclose(f);
         return false;
       }
@@ -910,14 +885,12 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
 
     if (strcmp(ir, "sir-v1.0") != 0) {
       err_codef(p, "sircc.schema.ir.unsupported", "sircc: unsupported ir '%s' (expected sir-v1.0)", ir);
-      free(line);
       fclose(f);
       return false;
     }
 
     if (strcmp(k, "meta") == 0) {
       if (!parse_meta_record(p, opt, root)) {
-        free(line);
         fclose(f);
         return false;
       }
@@ -926,7 +899,6 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
     }
     if (strcmp(k, "src") == 0) {
       if (!parse_src_record(p, root)) {
-        free(line);
         fclose(f);
         return false;
       }
@@ -935,7 +907,6 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
     }
     if (strcmp(k, "diag") == 0) {
       if (!parse_diag_record(p, root)) {
-        free(line);
         fclose(f);
         return false;
       }
@@ -944,7 +915,6 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
     }
     if (strcmp(k, "sym") == 0) {
       if (!parse_sym_record(p, root)) {
-        free(line);
         fclose(f);
         return false;
       }
@@ -953,7 +923,6 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
     }
     if (strcmp(k, "type") == 0) {
       if (!parse_type_record(p, root)) {
-        free(line);
         fclose(f);
         return false;
       }
@@ -962,7 +931,6 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
     }
     if (strcmp(k, "node") == 0) {
       if (!parse_node_record(p, root)) {
-        free(line);
         fclose(f);
         return false;
       }
@@ -971,7 +939,6 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
     }
     if (strcmp(k, "ext") == 0) {
       if (!parse_ext_record(p, root)) {
-        free(line);
         fclose(f);
         return false;
       }
@@ -980,7 +947,6 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
     }
     if (strcmp(k, "label") == 0) {
       if (!parse_label_record(p, root)) {
-        free(line);
         fclose(f);
         return false;
       }
@@ -989,7 +955,6 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
     }
     if (strcmp(k, "instr") == 0) {
       if (!parse_instr_record(p, opt, root)) {
-        free(line);
         fclose(f);
         return false;
       }
@@ -997,7 +962,6 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
     }
     if (strcmp(k, "dir") == 0) {
       if (!parse_dir_record(p, root)) {
-        free(line);
         fclose(f);
         return false;
       }
@@ -1006,20 +970,59 @@ bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_pat
     }
 
     err_codef(p, "sircc.schema.record_kind.unknown", "sircc: unknown record kind '%s'", k);
-    free(line);
     fclose(f);
     return false;
   }
+  fclose(f);
   if (too_long) {
     err_codef(p, "sircc.limit.line_too_long",
               "sircc: JSONL line exceeded limit (%zu bytes) (override via SIRCC_MAX_LINE_BYTES)", max_line_bytes);
+    return false;
+  }
+  return true;
+}
+
+bool parse_program(SirProgram* p, const SirccOptions* opt, const char* input_path) {
+  p->cur_path = input_path;
+  p->cur_line = 0;
+
+  char* line = NULL;
+  size_t cap = 0;
+  size_t len = 0;
+
+  // Safety limits to keep JSONL ingestion robust under adversarial inputs.
+  // These defaults are intentionally high; override via env vars if needed:
+  //   SIRCC_MAX_LINE_BYTES, SIRCC_MAX_RECORDS.
+  size_t max_line_bytes = 16u * 1024u * 1024u; // 16 MiB per JSONL record line
+  uint64_t max_records_u64 = 5ull * 1000ull * 1000ull; // 5,000,000 records
+  uint64_t max_line_u64 = 0;
+  if (parse_env_u64("SIRCC_MAX_LINE_BYTES", &max_line_u64)) {
+    if (max_line_u64 > (uint64_t)SIZE_MAX) max_line_bytes = SIZE_MAX;
+    else max_line_bytes = (size_t)max_line_u64;
+  }
+  (void)parse_env_u64("SIRCC_MAX_RECORDS", &max_records_u64);
+  if (max_line_bytes == 0) max_line_bytes = 16u * 1024u * 1024u;
+  if (max_records_u64 == 0) max_records_u64 = 5ull * 1000ull * 1000ull;
+  size_t max_records = (max_records_u64 > (uint64_t)SIZE_MAX) ? SIZE_MAX : (size_t)max_records_u64;
+  size_t records = 0;
+
+  if (opt && opt->prelude_paths && opt->prelude_paths_len) {
+    for (size_t i = 0; i < opt->prelude_paths_len; i++) {
+      const char* path = opt->prelude_paths[i];
+      if (!path || !*path) continue;
+      if (!parse_program_file(p, opt, path, max_line_bytes, max_records, &records, &line, &cap, &len)) {
+        free(line);
+        return false;
+      }
+    }
+  }
+
+  if (!parse_program_file(p, opt, input_path, max_line_bytes, max_records, &records, &line, &cap, &len)) {
     free(line);
-    fclose(f);
     return false;
   }
 
   free(line);
-  fclose(f);
 
   for (size_t i = 0; i < p->pending_features_len; i++) {
     const PendingFeatureUse* u = &p->pending_features[i];

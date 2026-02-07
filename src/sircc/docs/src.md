@@ -45,6 +45,8 @@ If you also built `sirc`, you can do the full pipeline from `.sir`:
 ```text
 sircc <input.sir.jsonl> -o <output> [--emit-llvm|--emit-obj|--emit-zasm] [--clang <path>] [--target-triple <triple>]
 sircc --verify-only <input.sir.jsonl>
+sircc --verify-strict --verify-only <input.sir.jsonl>
+sircc [--prelude <prelude.sir.jsonl>]... --verify-only <input.sir.jsonl>
 sircc --dump-records --verify-only <input.sir.jsonl>
 sircc --print-target [--target-triple <triple>]
 sircc --print-support [--format text|json] [--full]
@@ -68,6 +70,8 @@ Notes:
 - `--diagnostics json` emits errors as `diag` JSONL records (useful for tooling)
 - `--diag-context N` prints the offending JSONL record plus `N` surrounding lines (also included as `context` in JSON diagnostics)
 - `--print-support` prints which SIR mnemonics are implemented vs missing (from the normative `mnemonics.html` table)
+- `--prelude P` parses `P` before the main input (useful for shared type/decl bundles; duplicates are still rejected)
+- `--verify-strict` tightens a few “best-effort” validation rules into hard errors (useful for integrator pipelines)
 - `--check` runs a small “try immediately” suite over `dist/test/examples` (or a custom `--examples-dir`)
 - `--runtime zabi25` links against the zABI 2.5 host runtime (default root is autodetected; override via `--zabi25-root` or `SIRCC_ZABI25_ROOT`)
   - zABI mode expects you to export an entrypoint named `zir_main` (the host shim provides `main()` and calls `zir_main()` after installing the zABI host).
@@ -90,7 +94,7 @@ This section describes the core value model and execution semantics `sircc` impl
   - `type.kind:"fn"` (direct/indirect calls)
   - `type.kind:"fun"` / `type.kind:"closure"` (via `fun:v1` / `closure:v1`; both are treated as opaque values)
 
-Not currently in scope: SIMD/vector types and atomic/eh/gc/coro packs.
+Not currently in scope: atomics/eh/gc/coro packs.
 
 ### Integer semantics
 
@@ -121,6 +125,7 @@ Not currently in scope: SIMD/vector types and atomic/eh/gc/coro packs.
 - For function symbols: emit a `fn` or `decl.fn` record with matching signature.
 - For global data: emit a `sym` record with `kind:"var"` or `kind:"const"`.
 - To call an external C function: prefer `decl.fn` + `call.indirect` (do not rely on unresolved `ptr.sym` names).
+- Ordering does **not** matter: declarations may appear before or after uses (forward refs are allowed), but emitting decls first tends to improve diagnostics.
 
 ## Packs (node frontend)
 

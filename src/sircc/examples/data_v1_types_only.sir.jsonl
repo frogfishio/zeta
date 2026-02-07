@@ -1,0 +1,7 @@
+{"ir":"sir-v1.0","k":"type","id":"t_i8","kind":"prim","prim":"i8"}
+{"ir":"sir-v1.0","k":"type","id":"t_i64","kind":"prim","prim":"i64"}
+{"ir":"sir-v1.0","k":"type","id":"t_p_i8","kind":"ptr","of":"t_i8"}
+
+{"ir":"sir-v1.0","k":"type","id":"t_bytes","kind":"struct","name":"bytes","fields":[{"name":"data","type_ref":"t_p_i8"},{"name":"len","type_ref":"t_i64"}]}
+{"ir":"sir-v1.0","k":"type","id":"t_string_utf8","kind":"struct","name":"string.utf8","fields":[{"name":"data","type_ref":"t_p_i8"},{"name":"len","type_ref":"t_i64"}]}
+{"ir":"sir-v1.0","k":"type","id":"t_cstr","kind":"ptr","name":"cstr","of":"t_i8"}

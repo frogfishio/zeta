@@ -4,6 +4,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 
 typedef enum SirccEmitKind {
   SIRCC_EMIT_EXE = 0,
@@ -38,6 +39,8 @@ typedef enum SirccRuntimeKind {
 
 typedef struct SirccOptions {
   const char* argv0; // optional; used for best-effort path inference
+  const char* const* prelude_paths; // optional; JSONL files parsed before input_path
+  size_t prelude_paths_len;
   const char* input_path;
   const char* output_path;
   SirccEmitKind emit;
@@ -49,6 +52,7 @@ typedef struct SirccOptions {
   bool lower_hl;            // run SIR-HL→Core legalization and exit (no codegen)
   const char* emit_sir_core_path; // required when lower_hl=true
   bool verify_only;
+  bool verify_strict; // tighten best-effort validation rules
   bool dump_records;
   bool print_target;
   bool verbose;

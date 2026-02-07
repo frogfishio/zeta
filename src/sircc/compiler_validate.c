@@ -52,8 +52,8 @@ static bool validate_ptr_sym_node(SirProgram* p, NodeRec* n) {
   if (s && s->kind && (strcmp(s->kind, "var") == 0 || strcmp(s->kind, "const") == 0)) goto ok;
 
   err_codef(p, "sircc.ptr.sym.unknown",
-            "sircc: ptr.sym references unknown function or global '%s' (to call an external C function, emit decl.fn with the signature; "
-            "ptr.sym requires an in-module declaration)",
+            "sircc: ptr.sym references unknown symbol '%s' (producer rule: ptr.sym must name an in-module declaration: "
+            "fn/decl.fn for functions, or sym(kind=var|const) for globals; extern calls should use decl.fn + call.indirect)",
             name);
   goto bad;
 
@@ -448,9 +448,23 @@ static bool validate_closure_node(SirProgram* p, NodeRec* n) {
       goto bad;
     }
     NodeRec* c = get_node(p, cid);
-    if (!c || c->type_ref == 0) goto ok; // best-effort
+    if (!c || c->type_ref == 0) {
+      if (p->opt && p->opt->verify_strict) {
+        err_codef(p, "sircc.closure.access.callee_missing_type",
+                  "sircc: %s node %lld callee must have closure type_ref under --verify-strict", n->tag, (long long)n->id);
+        goto bad;
+      }
+      goto ok; // best-effort
+    }
     TypeRec* cty = get_type(p, c->type_ref);
-    if (!cty || cty->kind != TYPE_CLOSURE) goto ok; // best-effort
+    if (!cty || cty->kind != TYPE_CLOSURE) {
+      if (p->opt && p->opt->verify_strict) {
+        err_codef(p, "sircc.closure.access.callee_type_bad",
+                  "sircc: %s node %lld callee must be a closure under --verify-strict", n->tag, (long long)n->id);
+        goto bad;
+      }
+      goto ok; // best-effort
+    }
     if (strcmp(op, "env") == 0) {
       if (n->type_ref && n->type_ref != cty->env_ty) {
         err_codef(p, "sircc.closure.env.type_mismatch", "sircc: closure.env result type_ref mismatch");
