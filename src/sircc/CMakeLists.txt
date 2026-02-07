@@ -375,12 +375,36 @@ add_test(
 )
 
 add_test(
-  NAME sircc_lower_hl_sem_if_thunk_rejected
+  NAME sircc_lower_hl_sem_if_thunk_to_cfg
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>
-    -DARGS=--diagnostics\\;json\\;--lower-hl\\;--emit-sir-core\\;${CMAKE_CURRENT_BINARY_DIR}/sem_if_thunk.core.sir.jsonl\\;${CMAKE_CURRENT_LIST_DIR}/examples/sem_if_thunk_trap_not_taken.sir.jsonl
-    "-DEXPECT=\\\"code\\\":\\\"sircc.lower_hl.sem.if.thunk_unsupported\\\""
-    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
+    -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/sem_if_thunk_trap_not_taken.sir.jsonl
+    -DOUT=${CMAKE_CURRENT_BINARY_DIR}/sem_if_thunk.core.sir.jsonl
+    -DCONTAINS=\\\"tag\\\":\\\"term.cbr\\\"\\;\\\"tag\\\":\\\"bparam\\\"\\;\\\"tag\\\":\\\"call.fun\\\"
+    -DNOT_CONTAINS=\\\"tag\\\":\\\"sem.if\\\"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/lower_hl_emit_core_and_verify.cmake
+)
+
+add_test(
+  NAME sircc_lower_hl_sem_and_sc_thunk_to_cfg
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/sem_and_sc_thunk_trap_not_taken.sir.jsonl
+    -DOUT=${CMAKE_CURRENT_BINARY_DIR}/sem_and_sc_thunk.core.sir.jsonl
+    -DCONTAINS=\\\"tag\\\":\\\"term.cbr\\\"\\;\\\"tag\\\":\\\"bparam\\\"
+    -DNOT_CONTAINS=\\\"tag\\\":\\\"sem.and_sc\\\"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/lower_hl_emit_core_and_verify.cmake
+)
+
+add_test(
+  NAME sircc_lower_hl_sem_or_sc_thunk_to_cfg
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/sem_or_sc_thunk_trap_not_taken.sir.jsonl
+    -DOUT=${CMAKE_CURRENT_BINARY_DIR}/sem_or_sc_thunk.core.sir.jsonl
+    -DCONTAINS=\\\"tag\\\":\\\"term.cbr\\\"\\;\\\"tag\\\":\\\"bparam\\\"
+    -DNOT_CONTAINS=\\\"tag\\\":\\\"sem.or_sc\\\"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/lower_hl_emit_core_and_verify.cmake
 )
 
 add_test(
