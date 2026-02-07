@@ -178,8 +178,8 @@ term_stmt
 
 term_args_opt
   : /* empty */               { $$ = NULL; }
-  | ',' nl_star T_ARGS ':' '[' nl_star args_opt nl_star ']'
-                              { $$ = $7; }
+  | nl_star T_ARGS ':' '[' nl_star args_opt nl_star ']'
+                              { $$ = $6; }
   ;
 
 term_br_stmt

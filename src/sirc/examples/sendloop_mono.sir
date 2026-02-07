@@ -9,62 +9,62 @@ fn zir_main() -> i64 public
   block entry
     let buf0: ptr = alloca.i64()
     let buf1: ptr = alloca.i64()
-    term.br to loop, args:[0:i32, buf0, buf1]
+    term.br to loop args:[0:i32, buf0, buf1]
   end
 
   block loop(i:i32, buf0:ptr, buf1:ptr)
     term.cbr cond:i32.cmp.ult(i, 128:i32),
-      then:dispatch, args:[i, buf0, buf1],
-      else:exit, args:[buf0]
+      then:dispatch args:[i, buf0, buf1],
+      else:exit args:[buf0]
   end
 
   block dispatch(i:i32, buf0:ptr, buf1:ptr)
     ;; Monomorphic: always case0 (but keep the same CFG “shape” as the uniform test).
     let tag: i32 = 0:i32
     term.cbr cond:i32.cmp.eq(tag, 0:i32),
-      then:case0, args:[i, buf0, buf1],
-      else:dispatch1, args:[i, buf0, buf1, tag]
+      then:case0 args:[i, buf0, buf1],
+      else:dispatch1 args:[i, buf0, buf1, tag]
   end
 
   block dispatch1(i:i32, buf0:ptr, buf1:ptr, tag:i32)
     term.cbr cond:i32.cmp.eq(tag, 1:i32),
-      then:case1, args:[i, buf0, buf1],
-      else:dispatch2, args:[i, buf0, buf1, tag]
+      then:case1 args:[i, buf0, buf1],
+      else:dispatch2 args:[i, buf0, buf1, tag]
   end
 
   block dispatch2(i:i32, buf0:ptr, buf1:ptr, tag:i32)
     term.cbr cond:i32.cmp.eq(tag, 2:i32),
-      then:case2, args:[i, buf0, buf1],
-      else:case3, args:[i, buf0, buf1]
+      then:case2 args:[i, buf0, buf1],
+      else:case3 args:[i, buf0, buf1]
   end
 
   block case0(i:i32, buf0:ptr, buf1:ptr)
     mem.fill(buf0, 65:i8, 1:i64) flags alignDst 8
     mem.copy(buf1, buf0, 1:i64) flags alignDst 8 flags alignSrc 8 flags overlap disallow
-    term.br to cont, args:[i, buf0, buf1]
+    term.br to cont args:[i, buf0, buf1]
   end
 
   block case1(i:i32, buf0:ptr, buf1:ptr)
     mem.fill(buf0, 66:i8, 2:i64) flags alignDst 8
     mem.copy(buf1, buf0, 2:i64) flags alignDst 8 flags alignSrc 8 flags overlap disallow
-    term.br to cont, args:[i, buf0, buf1]
+    term.br to cont args:[i, buf0, buf1]
   end
 
   block case2(i:i32, buf0:ptr, buf1:ptr)
     mem.fill(buf0, 67:i8, 4:i64) flags alignDst 8
     mem.copy(buf1, buf0, 4:i64) flags alignDst 8 flags alignSrc 8 flags overlap disallow
-    term.br to cont, args:[i, buf0, buf1]
+    term.br to cont args:[i, buf0, buf1]
   end
 
   block case3(i:i32, buf0:ptr, buf1:ptr)
     mem.fill(buf0, 68:i8, 8:i64) flags alignDst 8
     mem.copy(buf1, buf0, 8:i64) flags alignDst 8 flags alignSrc 8 flags overlap disallow
-    term.br to cont, args:[i, buf0, buf1]
+    term.br to cont args:[i, buf0, buf1]
   end
 
   block cont(i:i32, buf0:ptr, buf1:ptr)
     let i2: i32 = i32.add(i, 1:i32)
-    term.br to loop, args:[i2, buf0, buf1]
+    term.br to loop args:[i2, buf0, buf1]
   end
 
   block exit(buf0:ptr)

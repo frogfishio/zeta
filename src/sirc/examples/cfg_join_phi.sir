@@ -7,15 +7,14 @@ fn main(x:i32) -> i32 public
   end
 
   block then_blk
-    term.br to join, args:[111:i32]
+    term.br to join args:[111:i32]
   end
 
   block else_blk
-    term.br to join, args:[222:i32]
+    term.br to join args:[222:i32]
   end
 
   block join(r:i32)
     term.ret value:r
   end
 end
-
