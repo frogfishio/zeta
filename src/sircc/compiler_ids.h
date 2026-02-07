@@ -39,8 +39,10 @@ void sir_idmaps_free(struct SirProgram* p);
 
 bool sir_intern_id(struct SirProgram* p, SirIdKind kind, const JsonValue* v, int64_t* out_id, const char* ctx);
 
+// If `internal_id` originated from a string id, returns that string. Otherwise returns NULL.
+const char* sir_id_str_for_internal(struct SirProgram* p, SirIdKind kind, int64_t internal_id);
+
 // Parse/validate common ref forms.
 bool parse_node_ref_id(struct SirProgram* p, const JsonValue* v, int64_t* out_id);
 bool parse_type_ref_id(struct SirProgram* p, const JsonValue* v, int64_t* out_id);
 bool parse_sym_ref_id(struct SirProgram* p, const JsonValue* v, int64_t* out_id);
-

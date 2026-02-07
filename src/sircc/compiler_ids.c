@@ -152,6 +152,20 @@ void sir_idmaps_free(SirProgram* p) {
   idmap_free(&p->node_ids);
 }
 
+const char* sir_id_str_for_internal(SirProgram* p, SirIdKind kind, int64_t internal_id) {
+  if (!p || internal_id == 0) return NULL;
+  SirIdMap* m = map_for(p, kind);
+  if (!m || !m->entries || m->cap == 0) return NULL;
+  for (size_t i = 0; i < m->cap; i++) {
+    const SirIdMapEntry* e = &m->entries[i];
+    if (!e->used) continue;
+    if (!e->is_str) continue;
+    if (e->val != internal_id) continue;
+    return e->skey;
+  }
+  return NULL;
+}
+
 bool sir_intern_id(SirProgram* p, SirIdKind kind, const JsonValue* v, int64_t* out_id, const char* ctx) {
   if (!p || !out_id) return false;
   if (!v) {

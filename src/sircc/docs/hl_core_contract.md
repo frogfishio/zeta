@@ -142,7 +142,7 @@ MIR still owns language semantics, but it stops owning the “portable lowering 
 - [x] Full: implement `sem.and_sc` / `sem.or_sc` lowering → CFG with short-circuit (required for thunk branches)
 - [x] Implement `sem.match_sum` lowering → `adt.tag` + `term.switch` + join args
 - [x] Hoist nested `sem.*` used as operands (use-position) into `let` so lowering is uniform
-- [ ] Emit stable derived ids (`"sircc:lower:..."`) so producers can diff outputs
+- [x] Emit stable derived ids (`"sircc:lower:..."`) so producers can diff outputs
 - [ ] Add golden tests:
   - [ ] input = sem intent
   - [ ] output = core CFG
