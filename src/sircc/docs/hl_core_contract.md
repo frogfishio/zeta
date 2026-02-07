@@ -118,6 +118,84 @@ MIR still owns language semantics, but it stops owning the “portable lowering 
 
 ## Implementation plan (grouped, prioritized)
 
+## AST → SIR “compiler kit” must-haves (avoid split-personality lowering)
+
+This checklist is the “hard contract” work needed to switch from MIR to **AST → SIR (HL/Core) → sircc** without frontends reinventing semantics/ABI/layout piecemeal.
+
+### P0 — Blockers (must be verifier-enforced)
+
+- [ ] Define and freeze the blessed subsets:
+  - [ ] One blessed **SIR-HL** surface subset (what AST emitters may generate)
+  - [ ] One blessed **SIR-Core** executable subset (what backends/codegen accept)
+  - [x] Provide a single gateway: `sircc --lower-hl --emit-sir-core` (HL → Core) and treat Core as the only stable codegen boundary
+  - [ ] Expand `--verify-strict` into “no best-effort”: forbid ambiguous omissions (require types/sigs where inference is fragile)
+
+- [ ] Target + layout contract (frontends must not guess):
+  - [x] `--require-pinned-triple` and `--require-target-contract` for determinism
+  - [ ] Document exactly what is **layout-defined** vs **opaque** (e.g. `fun`, `closure`, `sum`)
+  - [ ] ABI rules must be explicit (no ambient host defaults): byref params, aggregate passing/return, calling convention assumptions
+
+- [ ] Interop contract (imports + exports), documented and diagnostic-first:
+  - [x] Imports: `decl.fn` + `call.indirect` pattern; `ptr.sym` producer rule enforced + actionable diagnostic
+  - [x] Ordering clarified: forward refs allowed (decls before uses recommended for diagnostics)
+  - [ ] Exports: document required fields/rules (`fn.name`, `linkage:"public"`, signature stability, C ABI expectations)
+  - [ ] Decide/encode varargs + byref + aggregate ABI strategy (profile or pack, but one canonical answer)
+
+- [ ] Baseline data story (encoding + interop) as a pack (no handwaving):
+  - [x] `data:v1` enforced by verifier (`bytes`, `string.utf8`, `cstr`)
+  - [ ] Decide how encoding is declared (module-wide `meta.ext.*` vs per-type) and freeze the rule
+  - [ ] Define required explicit conversions (e.g. `string.utf8` ⇄ `cstr`) as library/host calls (no implicit magic)
+
+- [ ] Globals + constants that real languages need (no per-frontend folklore):
+  - [x] Structured constants / aggregate initializers (arrays/structs) and global data symbols (`sym(kind=var|const)`)
+  - [ ] Ensure sums/ADTs have a deterministic global-init story (if supported by the pack)
+  - [ ] Add strict verifier checks so “string literals” and other common payloads cannot be represented multiple incompatible ways
+
+- [ ] Semantic “intent” constructs so AST emitters stay dumb:
+  - [x] `sem:v1` deterministic desugaring (`sem.if`, `sem.and_sc`, `sem.or_sc`, `sem.match_sum`)
+  - [ ] Fill intent gaps needed by most languages (examples: `sem.loop`, `sem.break`, `sem.continue`, `sem.defer`) or explicitly declare them frontend-owned
+
+- [ ] Strict integration modes:
+  - [x] `--verify-strict` exists
+  - [ ] Add a `--lower-strict` (or tie to `--verify-strict`) so HL→Core lowering also rejects ambiguous shapes early
+  - [ ] Make “strict” the recommended mode for integrators (documented defaults)
+
+### P1 — Efficient emission (reduce boilerplate; keep emitters uniform)
+
+- [x] Official preludes as “compiler kit batteries”:
+  - [x] `--prelude <file>` and `--prelude-builtin data_v1|zabi25_min`
+  - [x] Bundle preludes into `dist/lib/sircc/prelude`
+  - [ ] Expand builtin preludes set (`core_types`, `c_abi`, etc.) and keep them versioned
+
+- [ ] Canonical lowering cookbook for AST emitters:
+  - [ ] “If AST has X, emit these SIR shapes” (vars, address-taken locals, short-circuit, switch, calls, VAR params, records/arrays)
+  - [ ] Include “don’t do this” anti-patterns that cause split-personality lowering
+
+- [ ] Module/link story (one consistent resolution model):
+  - [ ] Decide whether a SIR “module” is always a single JSONL stream, or needs a formal import mechanism
+  - [ ] Document name-resolution + collision rules (symbols/types) and how they interact with preludes
+
+- [ ] Diagnostics as a first-class integration surface:
+  - [ ] Stable diagnostic taxonomy (`code`) for producer errors; ensure diagnostics include actionable producer rules
+  - [ ] Add “did you mean” suggestions for the most common mistakes (extern, type_ref mismatches, missing feature gates)
+
+### P2 — Inevitable widening (prevent future frontends from inventing ad-hoc semantics)
+
+- [ ] Unsigned integer types with defined semantics:
+  - [ ] Add `u8/u16/u32/u64` (or a principled alternative) and comparison/shift/div rules
+  - [ ] Specify C interop mapping explicitly (ABI profile)
+
+- [ ] Feature packs with frozen shapes (even if not implemented yet):
+  - [ ] `atomics:v1` (ordering + RMW/CAS)
+  - [ ] `eh:v1` (invoke/throw/resume/lpads)
+  - [ ] `coro:v1` (start/resume/drop)
+  - [ ] `gc:v1` (roots, barriers, safepoints)
+  - [ ] Rule: if not implemented, verifier should still be able to “recognize and gate” (so producers don’t invent their own)
+
+- [ ] Optimization boundary policy (avoid “emitters optimize differently”):
+  - [ ] Decide whether AST emitters should emit already-canonical Core, or richer HL and rely on sircc to canonicalize
+  - [ ] Add canonicalization passes where it removes degrees of freedom (prevents fingerprints and semantic drift)
+
 ### P0 — Make the contract real (tooling surface)
 
 - [ ] Add a legalizer entrypoint:
