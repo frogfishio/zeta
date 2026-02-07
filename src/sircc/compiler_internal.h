@@ -161,6 +161,7 @@ typedef struct SirProgram {
   bool feat_eh_v1;
   bool feat_gc_v1;
   bool feat_sem_v1;
+  bool feat_data_v1;
 
   // Input IDs may be integers or strings; we intern them into dense internal ids
   // to keep storage compact while allowing stable, non-brittle identifiers.

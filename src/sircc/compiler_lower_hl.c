@@ -2890,6 +2890,11 @@ static void emit_features(FILE* out, const SirProgram* p) {
     json_write_escaped(out, "sem:v1");
     first = false;
   }
+  if (p->feat_data_v1) {
+    if (!first) fputc(',', out);
+    json_write_escaped(out, "data:v1");
+    first = false;
+  }
   fputc(']', out);
 }
 

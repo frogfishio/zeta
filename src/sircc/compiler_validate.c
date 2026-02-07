@@ -9,6 +9,7 @@
 #include <string.h>
 
 static bool validate_cfg_fn(SirProgram* p, NodeRec* fn);
+static bool validate_data_pack(SirProgram* p);
 
 static bool is_prim_named(SirProgram* p, int64_t type_id, const char* prim) {
   if (!p || !prim || type_id == 0) return false;
@@ -1314,6 +1315,10 @@ bool validate_program(SirProgram* p) {
     }
   }
 
+  if (p->feat_data_v1) {
+    if (!validate_data_pack(p)) return false;
+  }
+
   for (size_t i = 0; i < p->nodes_cap; i++) {
     NodeRec* n = p->nodes[i];
     if (!n) continue;
@@ -1399,6 +1404,137 @@ bool validate_program(SirProgram* p) {
       if (!n) continue;
       if (!validate_sem_node(p, n)) return false;
     }
+  }
+
+  return true;
+}
+
+static TypeRec* find_type_by_name_kind(SirProgram* p, const char* name, TypeKind want_kind) {
+  if (!p || !name || !*name) return NULL;
+  TypeRec* found = NULL;
+  for (size_t i = 0; i < p->types_cap; i++) {
+    TypeRec* t = p->types ? p->types[i] : NULL;
+    if (!t) continue;
+    if (t->kind != want_kind) continue;
+    if (!t->name) continue;
+    if (strcmp(t->name, name) != 0) continue;
+    if (found) return (TypeRec*)(uintptr_t)1; // sentinel for duplicate
+    found = t;
+  }
+  return found;
+}
+
+static bool is_prim(SirProgram* p, int64_t type_id, const char* prim) { return is_prim_named(p, type_id, prim); }
+
+static bool is_ptr_to_prim(SirProgram* p, int64_t type_id, const char* prim) {
+  if (!p || type_id == 0 || !prim) return false;
+  TypeRec* t = get_type(p, type_id);
+  if (!t || t->kind != TYPE_PTR) return false;
+  return is_prim(p, t->of, prim);
+}
+
+static bool validate_data_bytes_like(SirProgram* p, const TypeRec* t, const char* name) {
+  if (!p || !t || !name) return false;
+  SirDiagSaved saved = sir_diag_push(p, "type", t->id, "data:v1");
+
+  const char* code_prefix = NULL;
+  if (strcmp(name, "bytes") == 0) code_prefix = "sircc.data_v1.bytes";
+  else if (strcmp(name, "string.utf8") == 0) code_prefix = "sircc.data_v1.string.utf8";
+  else code_prefix = "sircc.data_v1";
+
+  if (t->kind != TYPE_STRUCT) {
+    err_codef(p, "sircc.data_v1.type.kind", "sircc: data:v1 requires type '%s' to be a struct", name);
+    goto bad;
+  }
+  if (!t->name || strcmp(t->name, name) != 0) {
+    err_codef(p, "sircc.data_v1.type.name", "sircc: internal error: validate_data_bytes_like called for wrong type");
+    goto bad;
+  }
+  if (t->field_len != 2) {
+    char code[128];
+    (void)snprintf(code, sizeof(code), "%s.fields.len", code_prefix);
+    err_codef(p, code, "sircc: data:v1 type '%s' must have exactly 2 fields: {data, len}", name);
+    goto bad;
+  }
+  if (!t->fields[0].name || strcmp(t->fields[0].name, "data") != 0) {
+    char code[128];
+    (void)snprintf(code, sizeof(code), "%s.field0", code_prefix);
+    err_codef(p, code, "sircc: data:v1 type '%s' field[0] must be named 'data'", name);
+    goto bad;
+  }
+  if (!is_ptr_to_prim(p, t->fields[0].type_ref, "i8")) {
+    char code[128];
+    (void)snprintf(code, sizeof(code), "%s.data_ty", code_prefix);
+    err_codef(p, code, "sircc: data:v1 type '%s' field 'data' must be ptr to i8", name);
+    goto bad;
+  }
+  if (!t->fields[1].name || strcmp(t->fields[1].name, "len") != 0) {
+    char code[128];
+    (void)snprintf(code, sizeof(code), "%s.field1", code_prefix);
+    err_codef(p, code, "sircc: data:v1 type '%s' field[1] must be named 'len'", name);
+    goto bad;
+  }
+  if (!is_prim(p, t->fields[1].type_ref, "i64")) {
+    char code[128];
+    (void)snprintf(code, sizeof(code), "%s.len_ty", code_prefix);
+    err_codef(p, code, "sircc: data:v1 type '%s' field 'len' must be i64", name);
+    goto bad;
+  }
+
+  sir_diag_pop(p, saved);
+  return true;
+bad:
+  sir_diag_pop(p, saved);
+  return false;
+}
+
+static bool validate_data_pack(SirProgram* p) {
+  if (!p) return false;
+
+  // Canonical baseline data story:
+  // - bytes:      struct { data: ptr(i8), len: i64 }
+  // - string.utf8 struct { data: ptr(i8), len: i64 }  (encoding: UTF-8, not NUL-terminated)
+  // - cstr:       ptr(i8)  (NUL-terminated by convention, for C interop)
+
+  TypeRec* bytes = find_type_by_name_kind(p, "bytes", TYPE_STRUCT);
+  if (bytes == (TypeRec*)(uintptr_t)1) {
+    err_codef(p, "sircc.data_v1.type.duplicate", "sircc: data:v1 requires exactly one struct type named 'bytes'");
+    return false;
+  }
+  if (!bytes) {
+    err_codef(p, "sircc.data_v1.type.missing", "sircc: data:v1 requires a struct type named 'bytes'");
+    return false;
+  }
+  if (!validate_data_bytes_like(p, bytes, "bytes")) return false;
+
+  TypeRec* str = find_type_by_name_kind(p, "string.utf8", TYPE_STRUCT);
+  if (str == (TypeRec*)(uintptr_t)1) {
+    err_codef(p, "sircc.data_v1.type.duplicate", "sircc: data:v1 requires exactly one struct type named 'string.utf8'");
+    return false;
+  }
+  if (!str) {
+    err_codef(p, "sircc.data_v1.type.missing", "sircc: data:v1 requires a struct type named 'string.utf8'");
+    return false;
+  }
+  if (!validate_data_bytes_like(p, str, "string.utf8")) return false;
+
+  TypeRec* cstr = find_type_by_name_kind(p, "cstr", TYPE_PTR);
+  if (cstr == (TypeRec*)(uintptr_t)1) {
+    err_codef(p, "sircc.data_v1.type.duplicate", "sircc: data:v1 requires exactly one ptr type named 'cstr'");
+    return false;
+  }
+  if (!cstr) {
+    err_codef(p, "sircc.data_v1.type.missing", "sircc: data:v1 requires a ptr type named 'cstr' (ptr to i8)");
+    return false;
+  }
+  {
+    SirDiagSaved saved = sir_diag_push(p, "type", cstr->id, "data:v1");
+    if (!is_ptr_to_prim(p, cstr->id, "i8")) {
+      err_codef(p, "sircc.data_v1.cstr.ty", "sircc: data:v1 type 'cstr' must be ptr to i8");
+      sir_diag_pop(p, saved);
+      return false;
+    }
+    sir_diag_pop(p, saved);
   }
 
   return true;

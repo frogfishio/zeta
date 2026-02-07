@@ -375,6 +375,20 @@ add_test(
 )
 
 add_test(
+  NAME sircc_verify_data_v1_ok
+  COMMAND sircc --verify-only ${CMAKE_CURRENT_LIST_DIR}/examples/data_v1_ok.sir.jsonl
+)
+
+add_test(
+  NAME sircc_diag_bad_data_v1_string_wrong_fields
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DARGS=--diagnostics\\;json\\;--verify-only\\;${CMAKE_CURRENT_LIST_DIR}/examples/bad_data_v1_string_wrong_fields.sir.jsonl
+    "-DEXPECT=\\\"code\\\":\\\"sircc.data_v1.string.utf8.field0\\\""
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stderr_contains.cmake
+)
+
+add_test(
   NAME sircc_lower_hl_sem_if_thunk_to_cfg
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>

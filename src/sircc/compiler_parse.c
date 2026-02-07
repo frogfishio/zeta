@@ -206,6 +206,7 @@ static void enable_feature(SirProgram* p, const char* name) {
   else if (strcmp(name, "eh:v1") == 0) p->feat_eh_v1 = true;
   else if (strcmp(name, "gc:v1") == 0) p->feat_gc_v1 = true;
   else if (strcmp(name, "sem:v1") == 0) p->feat_sem_v1 = true;
+  else if (strcmp(name, "data:v1") == 0) p->feat_data_v1 = true;
 }
 
 static const char* required_feature_for_mnemonic(const char* m) {
@@ -245,6 +246,7 @@ static bool has_feature(SirProgram* p, const char* name) {
   if (strcmp(name, "eh:v1") == 0) return p->feat_eh_v1;
   if (strcmp(name, "gc:v1") == 0) return p->feat_gc_v1;
   if (strcmp(name, "sem:v1") == 0) return p->feat_sem_v1;
+  if (strcmp(name, "data:v1") == 0) return p->feat_data_v1;
   return false;
 }
 
