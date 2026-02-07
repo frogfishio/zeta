@@ -81,6 +81,10 @@ Emit a `fn` with:
 
 Example is also covered by `ctest` as `sircc_cinterop_export_add2`.
 
+Notes:
+- `sircc` currently relies on the platform ABI as implemented by LLVM. There is no explicit calling-convention field in SIR yet.
+- `sircc` currently supports `fn` linkage values: `"local"` and `"public"`.
+
 ## Packs used by MIR
 
 Enable via `meta.ext.features`.

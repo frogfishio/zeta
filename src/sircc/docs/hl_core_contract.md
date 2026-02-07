@@ -91,6 +91,8 @@ This output becomes:
 Note: the current MVP implementation only lowers the “pure/val” cases of `sem:v1` (see P1), and will reject thunk-based `sem:*` nodes with a diagnostic.
 Note: the current implementation supports thunk-based `sem:v1` lowering (CFG desugaring) and will also hoist nested `sem.*` used in expression positions into `let` bindings during lowering, so `sem.*` can appear under other expression nodes.
 
+Normal compilation also runs the same HL→Core lowering in-memory before codegen (when `sem:v1` is enabled), so `--lower-hl` is a *debuggable* view of what the compiler will do anyway (not a separate semantics).
+
 ### Backward compatibility
 
 - SIR-Core is backward compatible within a major version (v1.x).
@@ -128,11 +130,12 @@ This checklist is the “hard contract” work needed to switch from MIR to **AS
   - [ ] One blessed **SIR-HL** surface subset (what AST emitters may generate)
   - [ ] One blessed **SIR-Core** executable subset (what backends/codegen accept)
   - [x] Provide a single gateway: `sircc --lower-hl --emit-sir-core` (HL → Core) and treat Core as the only stable codegen boundary
+  - [x] Normal compilation runs HL→Core lowering in-memory (so `--lower-hl` is a debuggable view of the same semantics)
   - [ ] Expand `--verify-strict` into “no best-effort”: forbid ambiguous omissions (require types/sigs where inference is fragile)
 
 - [ ] Target + layout contract (frontends must not guess):
   - [x] `--require-pinned-triple` and `--require-target-contract` for determinism
-  - [ ] Document exactly what is **layout-defined** vs **opaque** (e.g. `fun`, `closure`, `sum`)
+  - [x] Document exactly what is **layout-defined** vs **opaque** (e.g. `fun`, `closure`, `sum`)
   - [ ] ABI rules must be explicit (no ambient host defaults): byref params, aggregate passing/return, calling convention assumptions
 
 - [ ] Interop contract (imports + exports), documented and diagnostic-first:
@@ -143,7 +146,7 @@ This checklist is the “hard contract” work needed to switch from MIR to **AS
 
 - [ ] Baseline data story (encoding + interop) as a pack (no handwaving):
   - [x] `data:v1` enforced by verifier (`bytes`, `string.utf8`, `cstr`)
-  - [ ] Decide how encoding is declared (module-wide `meta.ext.*` vs per-type) and freeze the rule
+  - [x] Decide how encoding is declared and freeze the rule (under `data:v1`, encoding is carried by canonical type names like `string.utf8`)
   - [ ] Define required explicit conversions (e.g. `string.utf8` ⇄ `cstr`) as library/host calls (no implicit magic)
 
 - [ ] Globals + constants that real languages need (no per-frontend folklore):

@@ -94,6 +94,13 @@ int sircc_compile(const SirccOptions* opt) {
     goto done;
   }
 
+  // Avoid "split personality" lowering: normal codegen runs the same HL→Core
+  // pipeline as `sircc --lower-hl --emit-sir-core`, just without emitting.
+  if (p.feat_sem_v1) {
+    ok = lower_hl_in_place(&p);
+    if (!ok) goto done;
+  }
+
   if (opt->emit == SIRCC_EMIT_ZASM_IR) {
     if (!use_triple) {
       owned_triple = LLVMGetDefaultTargetTriple();

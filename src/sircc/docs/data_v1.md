@@ -31,7 +31,7 @@ An owned or borrowed byte slice.
 A UTF-8 string slice.
 
 - `string.utf8 = struct { data: ptr(i8), len: i64 }`
-- Bytes are UTF-8 by convention.
+- Bytes are UTF-8 by convention. Under `data:v1`, the encoding is carried by the type name (`string.utf8`) and is not separately tagged in `meta`.
 - Not NUL-terminated; embedded `0` bytes are allowed.
 
 ### `cstr`

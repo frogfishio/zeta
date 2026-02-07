@@ -95,9 +95,37 @@ This section describes the core value model and execution semantics `sircc` impl
   - `type.kind:"sum"` (via `adt:v1`)
 - Callables:
   - `type.kind:"fn"` (direct/indirect calls)
-  - `type.kind:"fun"` / `type.kind:"closure"` (via `fun:v1` / `closure:v1`; both are treated as opaque values)
+  - `type.kind:"fun"` / `type.kind:"closure"` (via `fun:v1` / `closure:v1`; both are treated as opaque values at the SIR level)
 
 Not currently in scope: atomics/eh/gc/coro packs.
+
+### Layout-defined vs opaque types
+
+Some SIR types have a **defined in-memory representation** under `sircc` (subject to the selected target’s ABI/layout); others are treated as **opaque** and may not be subjected to arbitrary pointer/integer casts.
+
+**Layout-defined**
+
+- `type.kind:"struct"`: lowered to an LLVM struct type with target ABI layout.
+- `type.kind:"array"`: lowered to an LLVM array type.
+- `type.kind:"sum"` (`adt:v1`): lowered to an LLVM struct:
+  - `{ i32 tag; [pad] i8; [payload_size] i8 }`
+  - where `payload_size = max(sizeof(variant_payload))` and `pad` is chosen so the payload start offset is aligned to `payload_align = max(alignof(variant_payload))`.
+  - This makes the tag offset fixed (0) and the payload offset deterministic.
+- `type.kind:"closure"` (`closure:v1`): lowered to an LLVM struct `{ code_ptr, env }` where:
+  - `code_ptr` is a function pointer of the **derived signature** `(env, callSig.params...) -> callSig.ret`
+  - `env` is the lowered LLVM type of `type.env`
+- `type.kind:"fun"` (`fun:v1`): lowered to an LLVM function pointer of the declared `type.sig` function type.
+
+**Opaque (frontends must not “peek”)**
+
+- `fun` and `closure` values are **opaque** at the SIR level: do not use `ptr.*` arithmetic/casts on values of these types. Use `fun.*` / `call.fun` and `closure.*` / `call.closure`.
+
+### ABI note (current state)
+
+`sircc` currently relies on the platform ABI as implemented by LLVM for function calls. A future “ABI profile” may formalize by-ref params and aggregate calling conventions, but for now:
+
+- Prefer passing aggregates by pointer.
+- Prefer returning scalars (`i32/i64/bool/ptr`) unless you control both sides and validate the ABI end-to-end.
 
 ### Integer semantics
 

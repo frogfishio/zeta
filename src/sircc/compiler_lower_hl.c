@@ -3082,7 +3082,7 @@ static bool emit_nodes(FILE* out, SirProgram* p) {
 bool lower_hl_and_emit_sir_core(SirProgram* p, const char* out_path) {
   if (!p || !out_path || !out_path[0]) return false;
 
-  if (!lower_sem_nodes(p)) return false;
+  if (!lower_hl_in_place(p)) return false;
 
   FILE* out = fopen(out_path, "wb");
   if (!out) {
@@ -3097,4 +3097,12 @@ bool lower_hl_and_emit_sir_core(SirProgram* p, const char* out_path) {
   ok = ok && emit_nodes(out, p);
   fclose(out);
   return ok;
+}
+
+bool lower_hl_in_place(SirProgram* p) {
+  if (!p) return false;
+  // Currently, SIR-HL is the `sem:v1` intent family.
+  // Future HL constructs should also be lowered here so normal codegen and
+  // `--lower-hl` share the same pipeline.
+  return lower_sem_nodes(p);
 }
