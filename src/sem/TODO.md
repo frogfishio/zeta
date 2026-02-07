@@ -1,11 +1,14 @@
-# SEM (`sem --run`) roadmap (tracked against `schema/sir/v1.0/mnemonics.html`)
+# SEM roadmap (execution parity + CI harness)
 
-This file tracks what SEM can *execute today* and what’s next, grouped by ROI.
+This file tracks what SEM can *execute today* and what’s next, grouped into explicit stages.
 
 Scope notes:
-- SEM is a **SIR JSONL frontend + lowering layer**. It parses `.sir.jsonl` and builds a structured module for `sircore`.
-- `sircore` should remain **format-agnostic** (no JSONL); SEM owns parsing/IO.
-- The checkboxes below are about SEM end-to-end support: parse → lower → validate → run.
+- `sem` is a **SIR JSONL frontend + lowering layer**. It parses `.sir.jsonl` and builds a structured module for `sircore`.
+- `sircore` remains **format-agnostic** (no JSONL); SEM owns parsing/IO and user-facing diagnostics.
+- All checkboxes below are **end-to-end**: parse → lower → validate → run (unless marked verify-only).
+
+Design goal:
+- “Meet the contract and it runs”: if a producer emits SIR within the blessed compiler-kit subset, it should execute under `sem` deterministically with actionable failures.
 
 ## Status snapshot (today)
 
@@ -16,6 +19,98 @@ Scope notes:
 - [x] Memory MVP: `alloca.i8/i32/i64`, `load.i8/i32/i64`, `store.i8/i32/i64`
 - [x] Calls MVP: `call.indirect` with callee `decl.fn` (extern) or `ptr.sym` (in-module by name)
 - [x] Values MVP: `const.i8/i32/i64/bool`, `cstr`, `name`, `i32.add`, `binop.add`, `i32.cmp.eq`
+
+---
+
+## Staged parity roadmap (what it takes)
+
+### Stage A — dist corpus parity (CI-ready)
+
+**Goal:** `sem --check dist/test/examples` passes the same normative corpus shipped in `dist/` (or we explicitly split the corpus into “compile-only” vs “run in sem”).
+
+Acceptance:
+- [ ] `cmake --build build --target dist` produces `dist/` and then:
+  - [ ] `./dist/bin/<os>/sircc --check` passes
+  - [ ] `./dist/bin/<os>/sem --check ./dist/test/examples` passes (no missing-file / unsupported-subset surprises)
+
+Work items:
+- [ ] Fix `sem --check` CLI flag parsing (so `--diagnostics json --all` works as flags, not paths)
+- [ ] Add missing “glue” integer ops used by the dist examples
+  - [ ] `i32.zext.i8` (blocks `mem_copy_fill`)
+  - [ ] `i64.zext.i32` / `i32.trunc.i64` parity as needed by examples/frontends
+- [ ] Add commonly-used trap/sat variants present in shipped examples
+  - [ ] `i32.div.s.trap` (blocks `sem_if_thunk_trap_not_taken`)
+- [ ] Decide how Stage A handles examples that are *intentionally* beyond SEM (if any)
+  - [ ] Either add support, or move them out of `dist/test/examples`, or add a manifest that marks `sircc-only` vs `sem-runnable`
+
+### Stage B — SIR-Core execution parity (compiler-kit Core)
+
+**Goal:** SEM can execute essentially the same “SIR-Core compiler kit” surface that integrators will emit early on, with deterministic traps and stable diagnostics.
+
+Acceptance:
+- [ ] Document a blessed “SEM-runnable Core subset” (and keep it aligned with `sem --print-support`)
+- [ ] Add a small set of “Core runnable” examples that cover: CFG joins, memory, ptr math, extern calls, globals
+
+Work items:
+- [ ] Core types parity (execution)
+  - [ ] `type.kind:"prim"`: `i8/i16/i32/i64/bool/i1/f32/f64/void` (execution rules, not just parsing)
+  - [ ] `type.kind:"ptr"` treated consistently (typed ptr, but no host pointers)
+  - [ ] `type.kind:"array"` basics (size/stride) for `ptr.offset` and init data
+  - [ ] `type.kind:"struct"` (enough for by-pointer access; no “peek” contracts)
+- [ ] Core memory parity (execution)
+  - [ ] `load.i16` / `store.i16`
+  - [ ] `load.f32` / `store.f32`
+  - [ ] `load.f64` / `store.f64`
+  - [ ] Alignment rules and deterministic misalignment traps match the `sircc` contract
+- [ ] Core calls parity (execution)
+  - [ ] `call` (direct call) if required by producers (or document “use call.indirect only”)
+- [ ] Diagnostics parity (developer UX)
+  - [ ] When unsupported: emit “what to do instead” hints (e.g. for extern calls, point to `decl.fn`)
+  - [ ] Ensure `--diagnostics json` includes stable fields for CI parsing (code/path/line/node/tag)
+
+### Stage C — Pack parity (closes “split personality” for integrators)
+
+**Goal:** Integrators can use packs for real frontends and still run tests under SEM before compiling with sircc.
+
+Acceptance:
+- [ ] For each pack: add a positive + negative fixture pair and run them in `sem --check`
+
+Work items:
+- [ ] `adt:v1` execution parity
+  - [ ] `adt.make`, `adt.tag`, `adt.is`, `adt.get`
+  - [ ] Match the normative layout/semantics contract used by `sircc`
+- [ ] `fun:v1` execution parity
+  - [ ] `fun.sym`, `fun.cmp.eq`, `fun.cmp.ne`
+  - [ ] `call.fun`
+- [ ] `closure:v1` execution parity
+  - [ ] `closure.make`, `closure.env`, `closure.code`
+  - [ ] `closure.cmp.eq`, `closure.cmp.ne`
+  - [ ] `call.closure`
+- [ ] `sem:v1` parity (avoid IR drift)
+  - [ ] Decide: implement lowering rules in SEM vs share the lowering implementation with `sircc`
+  - [ ] Support at least the blessed intent set: `sem.if`, `sem.cond`, `sem.and_sc`, `sem.or_sc`, `sem.switch`, `sem.match_sum`, `sem.while`, `sem.break`, `sem.continue`, `sem.defer`, `sem.scope`
+
+### Stage D — CI-grade emulator “superpowers” (optional, makes SEM a platform)
+
+**Goal:** SEM becomes a first-class automated testing platform (record/replay, determinism, robust harness outputs).
+
+Acceptance:
+- [ ] Stable machine-readable summary output for batch runs (one JSON record per case + a final summary)
+- [ ] A recommended “CI recipe” in docs (caps policy, fs sandboxing, tapes)
+
+Work items:
+- [ ] Record/replay as a standard workflow
+  - [ ] Document tape schema + determinism contract
+  - [ ] Add `--tape-out` / `--tape-in` examples to `dist/doc/` and `dist/test/`
+- [ ] Harness UX
+  - [ ] `sem --check` supports `--format text|json` (like `sircc --check`)
+  - [ ] Add `--list` mode (discover `*.sir.jsonl` cases without running)
+- [ ] Instrumentation hooks (using `sircore` events)
+  - [ ] coverage (step coverage / node coverage)
+  - [ ] trace filters (by fn / node / op)
+  - [ ] replayable crash minimization hooks (longer-term)
+
+---
 
 ## P0 (ship-grade DX): make failures actionable
 
