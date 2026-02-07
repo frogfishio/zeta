@@ -8,6 +8,9 @@ This repo’s “shipable bundle” is produced by the build target `dist`, whic
 - `dist/bin/<os>/sirc` (optional: `.sir` → `.sir.jsonl`, when built with `-DSIR_ENABLE_SIRC=ON`)
 - `dist/test/` (a small normative example set you can run immediately)
 
+Producer docs:
+- `src/sircc/docs/compiler_kit_cheatsheet.md` (SIR vocabulary dictionary for integrators)
+
 ## Quickstart
 
 Build the bundle:
