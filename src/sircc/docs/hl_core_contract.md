@@ -152,7 +152,10 @@ This checklist is the “hard contract” work needed to switch from MIR to **AS
   - [ ] One blessed **SIR-Core** executable subset (what backends/codegen accept)
   - [x] Provide a single gateway: `sircc --lower-hl --emit-sir-core` (HL → Core) and treat Core as the only stable codegen boundary
   - [x] Normal compilation runs HL→Core lowering in-memory (so `--lower-hl` is a debuggable view of the same semantics)
-  - [ ] Expand `--verify-strict` into “no best-effort”: forbid ambiguous omissions (require types/sigs where inference is fragile)
+  - [x] Expand `--verify-strict` into “no best-effort” (examples implemented):
+    - require explicit `fn.fields.linkage`
+    - require callee+arg `type_ref` for `call.indirect` (and validate against `fields.sig`)
+    - require explicit ptr `type_ref` for `ptr.from_i64`
 
 - [ ] Target + layout contract (frontends must not guess):
   - [x] `--require-pinned-triple` and `--require-target-contract` for determinism

@@ -51,7 +51,7 @@ typedef struct SirccOptions {
   const char* zasm_map_path; // optional; when emitting zasm, write a sidecar id map JSONL
   bool lower_hl;            // run SIR-HL→Core legalization and exit (no codegen)
   const char* emit_sir_core_path; // required when lower_hl=true
-  bool lower_strict; // tighten HL→Core lowering rules (recommended for integrators)
+  bool lower_strict; // tighten lowering/verification rules (implies verify_strict)
   bool verify_only;
   bool verify_strict; // tighten best-effort validation rules
   bool dump_records;

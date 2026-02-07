@@ -267,6 +267,142 @@ ok:
   return true;
 }
 
+static bool validate_call_indirect_node(SirProgram* p, NodeRec* n) {
+  if (!p || !n) return false;
+  if (strcmp(n->tag, "call.indirect") != 0) return true;
+
+  SirDiagSaved saved = sir_diag_push_node(p, n);
+
+  if (!n->fields) {
+    err_codef(p, "sircc.call.indirect.fields.missing", "sircc: call.indirect node %lld missing fields", (long long)n->id);
+    goto bad;
+  }
+
+  int64_t sig_id = 0;
+  if (!parse_type_ref_id(p, json_obj_get(n->fields, "sig"), &sig_id)) {
+    err_codef(p, "sircc.call.indirect.sig.missing", "sircc: call.indirect node %lld missing fields.sig (fn type ref)", (long long)n->id);
+    goto bad;
+  }
+  TypeRec* sig = get_type(p, sig_id);
+  if (!sig || sig->kind != TYPE_FN) {
+    err_codef(p, "sircc.call.indirect.sig.bad", "sircc: call.indirect node %lld fields.sig must reference a fn type", (long long)n->id);
+    goto bad;
+  }
+
+  JsonValue* args = json_obj_get(n->fields, "args");
+  if (!args || args->type != JSON_ARRAY || args->v.arr.len < 1) {
+    err_codef(p, "sircc.call.indirect.args.bad", "sircc: call.indirect node %lld requires args:[callee_ptr, ...]", (long long)n->id);
+    goto bad;
+  }
+
+  int64_t callee_id = 0;
+  if (!parse_node_ref_id(p, args->v.arr.items[0], &callee_id)) {
+    err_codef(p, "sircc.call.indirect.callee.ref_bad", "sircc: call.indirect node %lld args[0] must be callee ref", (long long)n->id);
+    goto bad;
+  }
+  NodeRec* callee_n = get_node(p, callee_id);
+  if (!callee_n) {
+    err_codef(p, "sircc.call.indirect.callee.unknown", "sircc: call.indirect node %lld callee ref %lld unknown", (long long)n->id,
+              (long long)callee_id);
+    goto bad;
+  }
+
+  if (callee_n->type_ref == 0) {
+    if (p->opt && p->opt->verify_strict) {
+      err_codef(p, "sircc.call.indirect.callee_missing_type",
+                "sircc: call.indirect node %lld callee must have type_ref under --verify-strict", (long long)n->id);
+      goto bad;
+    }
+  } else {
+    TypeRec* cty = get_type(p, callee_n->type_ref);
+    if (cty && (cty->kind == TYPE_FUN || cty->kind == TYPE_CLOSURE)) {
+      err_codef(p, "sircc.call.indirect.callee.opaque",
+                "sircc: call.indirect callee is an opaque %s value (use call.%s)", (cty->kind == TYPE_CLOSURE) ? "closure" : "fun",
+                (cty->kind == TYPE_CLOSURE) ? "closure" : "fun");
+      goto bad;
+    }
+    // Producer rule for extern imports: decl.fn carries a fn signature. Ensure it matches fields.sig.
+    if (strcmp(callee_n->tag, "decl.fn") == 0 && callee_n->type_ref != sig_id) {
+      err_codef(p, "sircc.call.indirect.decl.sig_mismatch",
+                "sircc: call.indirect node %lld callee decl.fn signature mismatch (decl=%lld, call.sig=%lld)", (long long)n->id,
+                (long long)callee_n->type_ref, (long long)sig_id);
+      goto bad;
+    }
+  }
+
+  size_t argc = args->v.arr.len - 1;
+  if (!sig->varargs && argc != sig->param_len) {
+    err_codef(p, "sircc.call.indirect.argc_mismatch", "sircc: call.indirect arg count mismatch (got %zu, want %zu)", argc, sig->param_len);
+    goto bad;
+  }
+  if (argc < sig->param_len) {
+    err_codef(p, "sircc.call.indirect.argc_missing", "sircc: call.indirect missing required args (got %zu, want >= %zu)", argc, sig->param_len);
+    goto bad;
+  }
+
+  for (size_t i = 0; i < sig->param_len; i++) {
+    int64_t aid = 0;
+    if (!parse_node_ref_id(p, args->v.arr.items[i + 1], &aid)) {
+      err_codef(p, "sircc.call.indirect.arg_ref_bad", "sircc: call.indirect node %lld arg[%zu] must be node ref", (long long)n->id, i);
+      goto bad;
+    }
+    NodeRec* an = get_node(p, aid);
+    if (!an || an->type_ref == 0) {
+      if (p->opt && p->opt->verify_strict) {
+        err_codef(p, "sircc.call.indirect.arg_type_missing", "sircc: call.indirect arg[%zu] missing type_ref under --verify-strict", i);
+        goto bad;
+      }
+      continue;
+    }
+    int64_t want = sig->params[i];
+    int64_t got = an->type_ref;
+    if (want == got) continue;
+    if (is_ptr_type_id(p, want) && is_ptr_type_id(p, got)) continue; // pointer bitcast allowed
+    err_codef(p, "sircc.call.indirect.arg_type_mismatch", "sircc: call.indirect arg[%zu] type mismatch (want=%lld, got=%lld)", i,
+              (long long)want, (long long)got);
+    goto bad;
+  }
+
+  if (n->type_ref && n->type_ref != sig->ret) {
+    err_codef(p, "sircc.call.indirect.ret_type_mismatch", "sircc: call.indirect return type mismatch (want=%lld, got=%lld)", (long long)n->type_ref,
+              (long long)sig->ret);
+    goto bad;
+  }
+
+  goto ok;
+bad:
+  sir_diag_pop(p, saved);
+  return false;
+ok:
+  sir_diag_pop(p, saved);
+  return true;
+}
+
+static bool validate_ptr_cast_node(SirProgram* p, NodeRec* n) {
+  if (!p || !n) return false;
+  if (strcmp(n->tag, "ptr.from_i64") != 0) return true;
+
+  if (p->opt && p->opt->verify_strict) {
+    SirDiagSaved saved = sir_diag_push_node(p, n);
+    if (n->type_ref == 0) {
+      err_codef(p, "sircc.ptr.from_i64.type_ref.missing",
+                "sircc: ptr.from_i64 node %lld missing type_ref under --verify-strict", (long long)n->id);
+      sir_diag_pop(p, saved);
+      return false;
+    }
+    TypeRec* t = get_type(p, n->type_ref);
+    if (!t || t->kind != TYPE_PTR) {
+      err_codef(p, "sircc.ptr.from_i64.type_ref.bad",
+                "sircc: ptr.from_i64 node %lld type_ref must be a ptr type under --verify-strict", (long long)n->id);
+      sir_diag_pop(p, saved);
+      return false;
+    }
+    sir_diag_pop(p, saved);
+  }
+
+  return true;
+}
+
 static bool validate_closure_node(SirProgram* p, NodeRec* n) {
   if (!p || !n) return false;
   if (!p->feat_closure_v1) return true;
@@ -1418,6 +1554,8 @@ bool validate_program(SirProgram* p) {
     NodeRec* n = p->nodes[i];
     if (!n) continue;
     if (!validate_ptr_sym_node(p, n)) return false;
+    if (!validate_ptr_cast_node(p, n)) return false;
+    if (!validate_call_indirect_node(p, n)) return false;
   }
 
   // fun/closure/adt/sem semantic checks (close the "verify-only vs lowering" delta).

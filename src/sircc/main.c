@@ -135,7 +135,7 @@ static void usage(FILE* out) {
           "\n"
           "Lowering:\n"
           "  --lower-hl         Lower supported SIR-HL into Core SIR (no codegen)\n"
-          "  --lower-strict     Tighten lowering rules (implies --verify-strict)\n"
+          "  --lower-strict     Tighten lowering/verification rules (implies --verify-strict)\n"
           "  --emit-sir-core P  Write lowered Core SIR JSONL to P (requires --lower-hl)\n"
           "\n"
           "License: GPLv3+\n"

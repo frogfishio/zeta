@@ -494,6 +494,14 @@ bool lower_expr_part_b(FunctionCtx* f, int64_t node_id, NodeRec* n, LLVMValueRef
         err_codef(f->p, "sircc.ptr.from_i64.operand.type_bad", "sircc: ptr.from_i64 requires i64 operand");
         goto done;
       }
+      if (n->type_ref) {
+        LLVMTypeRef want = lower_type(f->p, f->ctx, n->type_ref);
+        if (!want || LLVMGetTypeKind(want) != LLVMPointerTypeKind) {
+          err_codef(f->p, "sircc.ptr.from_i64.type_ref.bad", "sircc: ptr.from_i64 node %lld type_ref must be a ptr type", (long long)node_id);
+          goto done;
+        }
+        pty = want;
+      }
       LLVMValueRef bits = LLVMBuildTruncOrBitCast(f->builder, x, ip, "i64.ptrbits");
       out = LLVMBuildIntToPtr(f->builder, bits, pty, "ptr");
       goto done;
