@@ -9,7 +9,7 @@
 typedef enum {
   SIRCC_SUPPORT_TEXT = 0,
   SIRCC_SUPPORT_JSON,
+  SIRCC_SUPPORT_HTML,
 } SirccSupportFormat;
 
 bool sircc_print_support(FILE* out, SirccSupportFormat fmt, bool full);
-

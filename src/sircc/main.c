@@ -124,7 +124,7 @@ static void usage(FILE* out) {
           "  sircc --lower-hl --emit-sir-core <output.sir.jsonl> <input.sir.jsonl>\n"
           "  sircc --dump-records --verify-only <input.sir.jsonl>\n"
           "  sircc --print-target [--target-triple <triple>]\n"
-          "  sircc --print-support [--format text|json] [--full]\n"
+          "  sircc --print-support [--format text|json|html] [--full]\n"
           "  sircc --check [--dist-root <path>|--examples-dir <path>] [--format text|json]\n"
           "  sircc [--runtime libc|zabi25] [--zabi25-root <path>] ...\n"
           "  sircc [--diagnostics text|json] [--color auto|always|never] [--diag-context N] [--verbose] [--strip]\n"
@@ -337,7 +337,7 @@ int main(int argc, char** argv) {
         return SIRCC_EXIT_USAGE;
       }
       const char* v = argv[++i];
-      if (!parse_enum_value(v, "text", "json", NULL)) {
+      if (!parse_enum_value(v, "text", "json", "html")) {
         fprintf(stderr, "sircc: invalid --format value: %s\n", v);
         return SIRCC_EXIT_USAGE;
       }
@@ -492,11 +492,17 @@ int main(int argc, char** argv) {
   }
 
   if (print_support) {
-    SirccSupportFormat sf = streq(format, "json") ? SIRCC_SUPPORT_JSON : SIRCC_SUPPORT_TEXT;
+    SirccSupportFormat sf = SIRCC_SUPPORT_TEXT;
+    if (streq(format, "json")) sf = SIRCC_SUPPORT_JSON;
+    else if (streq(format, "html")) sf = SIRCC_SUPPORT_HTML;
     return sircc_print_support(stdout, sf, support_full) ? 0 : SIRCC_EXIT_INTERNAL;
   }
 
   if (check) {
+    if (streq(format, "html")) {
+      fprintf(stderr, "sircc: --check does not support --format html (use text|json)\n");
+      return SIRCC_EXIT_USAGE;
+    }
     SirccCheckOptions chk = {
         .argv0 = opt.argv0,
         .dist_root = dist_root,
@@ -504,6 +510,11 @@ int main(int argc, char** argv) {
         .format = streq(format, "json") ? SIRCC_CHECK_JSON : SIRCC_CHECK_TEXT,
     };
     return sircc_run_check(stdout, &opt, &chk);
+  }
+
+  if (streq(format, "html")) {
+    fprintf(stderr, "sircc: --format html is only valid with --print-support\n");
+    return SIRCC_EXIT_USAGE;
   }
 
   if (!opt.input_path) {

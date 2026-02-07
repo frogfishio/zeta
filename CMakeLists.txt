@@ -72,6 +72,16 @@ add_custom_target(dist_sircc
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/docs/diagnostics.md ${SIR_DIST_DOC}/diagnostics.md
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/docs/hl_core_contract.md ${SIR_DIST_DOC}/hl_core_contract.md
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/docs/test.md ${SIR_DIST_TEST}/README.md
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DOUT=${SIR_DIST_DOC}/support.html
+    "-DARGS_STR=--print-support --format html --full"
+    -P ${CMAKE_SOURCE_DIR}/src/sircc/tests/run_and_write_stdout.cmake
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DOUT=${SIR_DIST_DOC}/support.json
+    "-DARGS_STR=--print-support --format json --full"
+    -P ${CMAKE_SOURCE_DIR}/src/sircc/tests/run_and_write_stdout.cmake
 
   # preludes (compiler kit boilerplate)
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/src/sircc/prelude ${SIR_DIST_PRELUDE}

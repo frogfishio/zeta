@@ -55,7 +55,7 @@ sircc [--prelude <prelude.sir.jsonl>]... --verify-only <input.sir.jsonl>
 sircc [--prelude-builtin data_v1|zabi25_min]... --verify-only <input.sir.jsonl>
 sircc --dump-records --verify-only <input.sir.jsonl>
 sircc --print-target [--target-triple <triple>]
-sircc --print-support [--format text|json] [--full]
+sircc --print-support [--format text|json|html] [--full]
 sircc --check [--dist-root <path>|--examples-dir <path>] [--format text|json]
 sircc [--runtime libc|zabi25] [--zabi25-root <path>] ...
 sircc [--diagnostics text|json] [--color auto|always|never] [--diag-context N] [--verbose] [--strip] ...

@@ -895,6 +895,16 @@ add_test(
 )
 
 add_test(
+  NAME sircc_print_support_html
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    "-DARGS=--print-support;--format;html"
+    "-DEXPECT=<table"
+    "-DEXPECT2=sircc support"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stdout_contains.cmake
+)
+
+add_test(
   NAME sircc_diag_json_includes_context
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>
