@@ -85,6 +85,12 @@ Validate + lower (but do not execute) a `.sir.jsonl` file (useful for verifier-o
 sem --verify src/sircc/examples/ptr_layout.sir.jsonl
 ```
 
+Batch-verify a small suite (files and/or directories; directories are scanned for `*.sir.jsonl`):
+
+```
+sem --check src/sircc/examples/hello_zabi25_write.sir.jsonl src/sircc/examples/ptr_layout.sir.jsonl
+```
+
 The current `--run` MVP supports (growing over time):
 
 - types:

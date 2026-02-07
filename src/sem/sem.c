@@ -12,6 +12,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
+#include <sys/stat.h>
 
 #ifndef SIR_VERSION
 #define SIR_VERSION "0.0.0"
@@ -37,6 +39,7 @@ static void sem_print_help(FILE* out) {
           "      [--cap-file-fs] [--cap-async-default] [--cap-sys-info]\n"
           "      [--fs-root PATH]\n"
           "      [--tape-out PATH] [--tape-in PATH] [--tape-lax]\n"
+          "  sem --check <input.sir.jsonl|dir>... [--diagnostics text|json] [--all]\n"
           "  sem --cat GUEST_PATH --fs-root PATH\n"
           "  sem --sir-hello\n"
           "  sem --sir-module-hello\n"
@@ -48,6 +51,7 @@ static void sem_print_help(FILE* out) {
           "  --version     Show version information (from ./VERSION)\n"
           "  --print-support  Print the supported SIR subset for `sem --run`\n"
           "  --caps        Issue zi_ctl CAPS_LIST and print capabilities\n"
+          "  --check       Batch-verify one or more inputs (files or dirs)\n"
           "  --cat PATH    Read PATH via file/fs and write to stdout\n"
           "  --sir-hello   Run a tiny built-in sircore VM smoke program\n"
           "  --sir-module-hello  Run a tiny built-in sircore module smoke program\n"
@@ -76,6 +80,73 @@ static void sem_print_help(FILE* out) {
 
 static void sem_print_version(FILE* out) {
   fprintf(out, "sem %s\n", SIR_VERSION);
+}
+
+static bool sem_path_is_dir(const char* path) {
+  if (!path || !path[0]) return false;
+  struct stat st;
+  if (stat(path, &st) != 0) return false;
+  return S_ISDIR(st.st_mode);
+}
+
+static bool sem_path_is_file(const char* path) {
+  if (!path || !path[0]) return false;
+  struct stat st;
+  if (stat(path, &st) != 0) return false;
+  return S_ISREG(st.st_mode);
+}
+
+static bool sem_has_suffix(const char* s, const char* suffix) {
+  if (!s || !suffix) return false;
+  const size_t n = strlen(s);
+  const size_t m = strlen(suffix);
+  if (m > n) return false;
+  return memcmp(s + (n - m), suffix, m) == 0;
+}
+
+static int sem_do_check_one(const char* path, sem_diag_format_t diag_format, bool diag_all) {
+  const int rc = sem_verify_sir_jsonl_ex(path, diag_format, diag_all);
+  if (rc == 0) {
+    fprintf(stdout, "OK   %s\n", path);
+  } else {
+    fprintf(stdout, "FAIL %s\n", path);
+  }
+  return rc;
+}
+
+static int sem_do_check_dir(const char* dir, sem_diag_format_t diag_format, bool diag_all, uint32_t* inout_ok, uint32_t* inout_fail) {
+  if (!dir || !inout_ok || !inout_fail) return 2;
+  DIR* d = opendir(dir);
+  if (!d) {
+    fprintf(stderr, "sem: --check: failed to open dir: %s\n", dir);
+    return 2;
+  }
+
+  struct dirent* ent = NULL;
+  while ((ent = readdir(d)) != NULL) {
+    const char* nm = ent->d_name;
+    if (!nm || nm[0] == '\0') continue;
+    if (strcmp(nm, ".") == 0 || strcmp(nm, "..") == 0) continue;
+    if (!sem_has_suffix(nm, ".sir.jsonl")) continue;
+
+    char full[1024];
+    const int n = snprintf(full, sizeof(full), "%s/%s", dir, nm);
+    if (n <= 0 || (size_t)n >= sizeof(full)) {
+      fprintf(stderr, "sem: --check: path too long: %s/%s\n", dir, nm);
+      closedir(d);
+      return 2;
+    }
+    if (!sem_path_is_file(full)) continue;
+
+    const int rc = sem_do_check_one(full, diag_format, diag_all);
+    if (rc == 0)
+      (*inout_ok)++;
+    else
+      (*inout_fail)++;
+  }
+
+  closedir(d);
+  return 0;
 }
 
 static void sem_print_support(FILE* out, bool json) {
@@ -674,6 +745,8 @@ int main(int argc, char** argv) {
   bool sir_module_hello = false;
   const char* run_path = NULL;
   const char* verify_path = NULL;
+  const char** check_paths = NULL;
+  uint32_t check_path_count = 0;
   sem_diag_format_t diag_format = SEM_DIAG_TEXT;
   bool diag_all = false;
   const char* tape_out = NULL;
@@ -699,6 +772,12 @@ int main(int argc, char** argv) {
     if (strcmp(a, "--caps") == 0) {
       want_caps = true;
       continue;
+    }
+    if (strcmp(a, "--check") == 0) {
+      // Collect remaining args as paths (files or dirs).
+      check_paths = (const char**)&argv[i + 1];
+      check_path_count = (uint32_t)(argc - (i + 1));
+      break;
     }
     if (strcmp(a, "--print-support") == 0) {
       want_support = true;
@@ -811,7 +890,7 @@ int main(int argc, char** argv) {
     return 2;
   }
 
-  if (!want_caps && !cat_path && !sir_hello && !sir_module_hello && !run_path && !verify_path) {
+  if (!want_caps && !cat_path && !sir_hello && !sir_module_hello && !run_path && !verify_path && !check_path_count) {
     sem_print_help(stdout);
     sem_free_caps(dyn_caps, dyn_n);
     return 0;
@@ -858,6 +937,33 @@ int main(int argc, char** argv) {
     const int rc = sem_verify_sir_jsonl_ex(verify_path, diag_format, diag_all);
     sem_free_caps(dyn_caps, dyn_n);
     return rc;
+  }
+  if (check_path_count) {
+    uint32_t ok = 0, fail = 0;
+    int tool_rc = 0;
+
+    for (uint32_t i = 0; i < check_path_count; i++) {
+      const char* p = check_paths[i];
+      if (!p || p[0] == '\0') continue;
+      if (sem_path_is_dir(p)) {
+        const int rc = sem_do_check_dir(p, diag_format, diag_all, &ok, &fail);
+        if (rc != 0) tool_rc = rc;
+      } else if (sem_path_is_file(p)) {
+        const int rc = sem_do_check_one(p, diag_format, diag_all);
+        if (rc == 0)
+          ok++;
+        else
+          fail++;
+      } else {
+        fprintf(stderr, "sem: --check: not a file/dir: %s\n", p);
+        tool_rc = 2;
+      }
+    }
+
+    fprintf(stdout, "sem: --check: ok=%u fail=%u\n", (unsigned)ok, (unsigned)fail);
+    sem_free_caps(dyn_caps, dyn_n);
+    if (tool_rc != 0) return tool_rc;
+    return (fail == 0) ? 0 : 1;
   }
 
   sem_host_t host;

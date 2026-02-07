@@ -571,3 +571,10 @@ target_link_libraries(sem_unit_verify_bad_ptr_offset_void PRIVATE sircore_hosted
 target_compile_options(sem_unit_verify_bad_ptr_offset_void PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 add_test(NAME sem_verify_bad_ptr_offset_void COMMAND sem_unit_verify_bad_ptr_offset_void)
+
+add_test(
+  NAME sem_check_smoke
+  COMMAND $<TARGET_FILE:sem> --check
+    ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_write.sir.jsonl
+    ${CMAKE_SOURCE_DIR}/src/sircc/examples/ptr_layout.sir.jsonl
+)
