@@ -1216,9 +1216,15 @@ static bool eval_ptr_size_alignof(sirj_ctx_t* c, uint32_t node_id, const node_in
   if (!c || !n || !out_slot || !out_kind) return false;
   if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
   uint32_t ty_id = 0;
-  if (!parse_ref_id(json_obj_get(n->fields_obj, "ty"), &ty_id)) return false;
+  if (!parse_ref_id(json_obj_get(n->fields_obj, "ty"), &ty_id)) {
+    sirj_diag_setf(c, "sem.ptr.layout.bad_ty", c->cur_path, n->loc_line, node_id, n->tag, "missing/invalid ty ref");
+    return false;
+  }
   uint32_t size = 0, align = 0;
-  if (!type_layout(c, ty_id, &size, &align)) return false;
+  if (!type_layout(c, ty_id, &size, &align)) {
+    sirj_diag_setf(c, "sem.ptr.layout.bad_ty", c->cur_path, n->loc_line, node_id, n->tag, "unsupported ty id: %u", (unsigned)ty_id);
+    return false;
+  }
   if (want_sizeof) {
     const sir_val_id_t dst = alloc_slot(c, VK_I64);
     if (!sir_mb_emit_const_i64(c->mb, c->fn, dst, (int64_t)size)) return false;
@@ -1286,9 +1292,19 @@ static bool eval_ptr_offset(sirj_ctx_t* c, uint32_t node_id, const node_info_t* 
   if (!c || !n || !out_slot || !out_kind) return false;
   if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
   uint32_t ty_id = 0;
-  if (!parse_ref_id(json_obj_get(n->fields_obj, "ty"), &ty_id)) return false;
+  if (!parse_ref_id(json_obj_get(n->fields_obj, "ty"), &ty_id)) {
+    sirj_diag_setf(c, "sem.ptr.offset.bad_ty", c->cur_path, n->loc_line, node_id, n->tag, "missing/invalid ty ref");
+    return false;
+  }
   uint32_t scale = 0, align = 0;
-  if (!type_layout(c, ty_id, &scale, &align)) return false;
+  if (!type_layout(c, ty_id, &scale, &align)) {
+    sirj_diag_setf(c, "sem.ptr.offset.bad_ty", c->cur_path, n->loc_line, node_id, n->tag, "unsupported ty id: %u", (unsigned)ty_id);
+    return false;
+  }
+  if (scale == 0) {
+    sirj_diag_setf(c, "sem.ptr.offset.void", c->cur_path, n->loc_line, node_id, n->tag, "ptr.offset element type has size 0");
+    return false;
+  }
   (void)align;
   const JsonValue* av = json_obj_get(n->fields_obj, "args");
   if (!json_is_array(av) || av->v.arr.len != 2) return false;
@@ -1299,8 +1315,14 @@ static bool eval_ptr_offset(sirj_ctx_t* c, uint32_t node_id, const node_info_t* 
   val_kind_t bk = VK_INVALID, ik = VK_INVALID;
   if (!eval_node(c, base_id, &base_slot, &bk)) return false;
   if (!eval_node(c, idx_id, &idx_slot, &ik)) return false;
-  if (bk != VK_PTR) return false;
-  if (ik != VK_I64 && ik != VK_I32) return false;
+  if (bk != VK_PTR) {
+    sirj_diag_setf(c, "sem.ptr.offset.base_type", c->cur_path, n->loc_line, node_id, n->tag, "ptr.offset base must be ptr");
+    return false;
+  }
+  if (ik != VK_I64 && ik != VK_I32) {
+    sirj_diag_setf(c, "sem.ptr.offset.index_type", c->cur_path, n->loc_line, node_id, n->tag, "ptr.offset index must be i32 or i64");
+    return false;
+  }
   const sir_val_id_t dst = alloc_slot(c, VK_PTR);
   if (!sir_mb_emit_ptr_offset(c->mb, c->fn, dst, base_slot, idx_slot, scale)) return false;
   if (!set_node_val(c, node_id, dst, VK_PTR)) return false;
@@ -1312,11 +1334,21 @@ static bool eval_ptr_offset(sirj_ctx_t* c, uint32_t node_id, const node_info_t* 
 static bool eval_select(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
   if (!c || !n || !out_slot || !out_kind) return false;
   if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
-  if (n->type_ref == 0) return false;
-  if (n->type_ref >= c->type_cap || !c->types[n->type_ref].present || c->types[n->type_ref].is_fn) return false;
+  if (n->type_ref == 0) {
+    sirj_diag_setf(c, "sem.select.missing_type", c->cur_path, n->loc_line, node_id, n->tag, "select missing type_ref");
+    return false;
+  }
+  if (n->type_ref >= c->type_cap || !c->types[n->type_ref].present || c->types[n->type_ref].is_fn) {
+    sirj_diag_setf(c, "sem.select.bad_type", c->cur_path, n->loc_line, node_id, n->tag, "select has invalid type_ref=%u",
+                   (unsigned)n->type_ref);
+    return false;
+  }
 
   val_kind_t tk = VK_INVALID;
   switch (c->types[n->type_ref].prim) {
+    case SIR_PRIM_VOID:
+      sirj_diag_setf(c, "sem.select.void", c->cur_path, n->loc_line, node_id, n->tag, "select cannot produce void");
+      return false;
     case SIR_PRIM_I32:
       tk = VK_I32;
       break;
@@ -1330,6 +1362,7 @@ static bool eval_select(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, s
       tk = VK_BOOL;
       break;
     default:
+      sirj_diag_setf(c, "sem.select.bad_type", c->cur_path, n->loc_line, node_id, n->tag, "select has unsupported type");
       return false;
   }
 
@@ -1421,40 +1454,77 @@ static bool resolve_internal_func_by_name(const sirj_ctx_t* c, const char* nm, s
 
 static bool eval_call_indirect(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
   if (!c || !n || !out_slot || !out_kind) return false;
-  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) {
+    sirj_diag_setf(c, "sem.call.bad_fields", c->cur_path, n->loc_line, node_id, n->tag, "call.indirect missing fields");
+    return false;
+  }
   const JsonValue* av = json_obj_get(n->fields_obj, "args");
-  if (!json_is_array(av) || av->v.arr.len < 1) return false;
+  if (!json_is_array(av) || av->v.arr.len < 1) {
+    sirj_diag_setf(c, "sem.call.bad_args", c->cur_path, n->loc_line, node_id, n->tag, "call.indirect missing args");
+    return false;
+  }
 
   uint32_t callee_id = 0;
-  if (!parse_ref_id(av->v.arr.items[0], &callee_id)) return false;
+  if (!parse_ref_id(av->v.arr.items[0], &callee_id)) {
+    sirj_diag_setf(c, "sem.call.bad_callee", c->cur_path, n->loc_line, node_id, n->tag, "call.indirect callee is not a ref");
+    return false;
+  }
 
   sir_sym_id_t callee_sym = 0;
   sir_func_id_t callee_fn = 0;
-  if (callee_id >= c->node_cap || !c->nodes[callee_id].present) return false;
+  if (callee_id >= c->node_cap || !c->nodes[callee_id].present) {
+    sirj_diag_setf(c, "sem.call.bad_callee", c->cur_path, n->loc_line, node_id, n->tag, "call.indirect callee ref missing");
+    return false;
+  }
   const node_info_t* cn = &c->nodes[callee_id];
   if (cn->tag && strcmp(cn->tag, "decl.fn") == 0) {
-    if (!resolve_decl_fn_sym(c, callee_id, &callee_sym)) return false;
+    if (!resolve_decl_fn_sym(c, callee_id, &callee_sym)) {
+      sirj_diag_setf(c, "sem.call.bad_decl_fn", c->cur_path, n->loc_line, node_id, n->tag, "call.indirect callee decl.fn invalid");
+      return false;
+    }
   } else if (cn->tag && strcmp(cn->tag, "ptr.sym") == 0) {
-    if (!cn->fields_obj || cn->fields_obj->type != JSON_OBJECT) return false;
+    if (!cn->fields_obj || cn->fields_obj->type != JSON_OBJECT) {
+      sirj_diag_setf(c, "sem.call.bad_ptrsym", c->cur_path, n->loc_line, node_id, n->tag, "call.indirect callee ptr.sym invalid");
+      return false;
+    }
     const char* nm = json_get_string(json_obj_get(cn->fields_obj, "name"));
-    if (!nm) return false;
+    if (!nm) {
+      sirj_diag_setf(c, "sem.call.bad_ptrsym", c->cur_path, n->loc_line, node_id, n->tag, "call.indirect callee ptr.sym missing name");
+      return false;
+    }
     if (!resolve_internal_func_by_name(c, nm, &callee_fn)) {
+      sirj_diag_setf(c, "sem.call.ptrsym_not_fn", c->cur_path, n->loc_line, node_id, n->tag, "ptr.sym does not resolve to an in-module fn: %s",
+                     nm);
       return false;
     }
   } else {
+    sirj_diag_setf(c, "sem.call.bad_callee_tag", c->cur_path, n->loc_line, node_id, n->tag, "call.indirect callee must be decl.fn or ptr.sym");
     return false;
   }
 
   sir_val_id_t args_slots[16];
+  val_kind_t args_kinds[16];
   const uint32_t argc = (uint32_t)(av->v.arr.len - 1);
-  if (argc > (uint32_t)(sizeof(args_slots) / sizeof(args_slots[0]))) return false;
+  if (argc > (uint32_t)(sizeof(args_slots) / sizeof(args_slots[0]))) {
+    sirj_diag_setf(c, "sem.call.too_many_args", c->cur_path, n->loc_line, node_id, n->tag, "call.indirect too many args");
+    return false;
+  }
 
   for (uint32_t i = 0; i < argc; i++) {
     uint32_t arg_node_id = 0;
-    if (!parse_ref_id(av->v.arr.items[i + 1], &arg_node_id)) return false;
+    if (!parse_ref_id(av->v.arr.items[i + 1], &arg_node_id)) {
+      sirj_diag_setf(c, "sem.call.bad_arg", c->cur_path, n->loc_line, node_id, n->tag, "call.indirect arg %u is not a ref", (unsigned)i);
+      return false;
+    }
     val_kind_t ak = VK_INVALID;
-    if (!eval_node(c, arg_node_id, &args_slots[i], &ak)) return false;
-    (void)ak;
+    if (!eval_node(c, arg_node_id, &args_slots[i], &ak)) {
+      if (!c->diag.set) {
+        sirj_diag_setf(c, "sem.call.bad_arg", c->cur_path, n->loc_line, node_id, n->tag, "call.indirect failed to evaluate arg %u",
+                       (unsigned)i);
+      }
+      return false;
+    }
+    args_kinds[i] = ak;
   }
 
   // Determine return arity from the callee signature.
@@ -1464,11 +1534,52 @@ static bool eval_call_indirect(sirj_ctx_t* c, uint32_t node_id, const node_info_
   const JsonValue* sigv = json_obj_get(n->fields_obj, "sig");
   if (sigv) {
     if (!parse_ref_id(sigv, &sig_tid)) {
+      sirj_diag_setf(c, "sem.call.bad_sig", c->cur_path, n->loc_line, node_id, n->tag, "call.indirect bad sig ref");
       return false;
     }
   }
   uint32_t ret_tid = 0;
   if (sig_tid && sig_tid < c->type_cap && c->types[sig_tid].present && c->types[sig_tid].is_fn) {
+    // If we have a signature, validate argument count and primitive-by-primitive types.
+    const type_info_t* sti = &c->types[sig_tid];
+    if (sti->param_count != argc) {
+      sirj_diag_setf(c, "sem.call.argc_mismatch", c->cur_path, n->loc_line, node_id, n->tag, "call.indirect argc mismatch (got %u expected %u)",
+                     (unsigned)argc, (unsigned)sti->param_count);
+      return false;
+    }
+    for (uint32_t i = 0; i < argc; i++) {
+      const uint32_t pid = sti->params[i];
+      if (pid == 0 || pid >= c->type_cap || !c->types[pid].present || c->types[pid].is_fn) {
+        sirj_diag_setf(c, "sem.call.bad_sig", c->cur_path, n->loc_line, node_id, n->tag, "call.indirect sig has invalid param type");
+        return false;
+      }
+      val_kind_t expect = VK_INVALID;
+      switch (c->types[pid].prim) {
+        case SIR_PRIM_I8:
+          expect = VK_I8;
+          break;
+        case SIR_PRIM_I32:
+          expect = VK_I32;
+          break;
+        case SIR_PRIM_I64:
+          expect = VK_I64;
+          break;
+        case SIR_PRIM_PTR:
+          expect = VK_PTR;
+          break;
+        case SIR_PRIM_BOOL:
+          expect = VK_BOOL;
+          break;
+        default:
+          sirj_diag_setf(c, "sem.call.bad_sig", c->cur_path, n->loc_line, node_id, n->tag, "call.indirect sig has unsupported param type");
+          return false;
+      }
+      if (args_kinds[i] != expect) {
+        sirj_diag_setf(c, "sem.call.arg_type_mismatch", c->cur_path, n->loc_line, node_id, n->tag,
+                       "call.indirect arg %u type mismatch", (unsigned)i);
+        return false;
+      }
+    }
     ret_tid = c->types[sig_tid].ret;
   }
 
@@ -1478,13 +1589,19 @@ static bool eval_call_indirect(sirj_ctx_t* c, uint32_t node_id, const node_info_
   if (ret_tid != 0) {
     if (ret_tid >= c->type_cap || !c->types[ret_tid].present || c->types[ret_tid].is_fn) return false;
     const sir_prim_type_t rp = c->types[ret_tid].prim;
+    if (rp == SIR_PRIM_VOID) {
+      // No return value.
+      result_count = 0;
+    } else
     if (rp == SIR_PRIM_I32) rk = VK_I32;
     else if (rp == SIR_PRIM_I64) rk = VK_I64;
     else if (rp == SIR_PRIM_PTR) rk = VK_PTR;
     else if (rp == SIR_PRIM_BOOL) rk = VK_BOOL;
     else return false;
-    res_slots[0] = alloc_slot(c, rk);
-    result_count = 1;
+    if (rk != VK_INVALID) {
+      res_slots[0] = alloc_slot(c, rk);
+      result_count = 1;
+    }
   }
 
   if (result_count) {
@@ -2528,6 +2645,33 @@ static bool lower_globals(sirj_ctx_t* c) {
   return true;
 }
 
+static const char* sem_zi_err_name(int32_t rc) {
+  switch (rc) {
+    case -1:
+      return "ZI_E_INVALID";
+    case -2:
+      return "ZI_E_BOUNDS";
+    case -3:
+      return "ZI_E_NOENT";
+    case -4:
+      return "ZI_E_DENIED";
+    case -5:
+      return "ZI_E_CLOSED";
+    case -6:
+      return "ZI_E_AGAIN";
+    case -7:
+      return "ZI_E_NOSYS";
+    case -8:
+      return "ZI_E_OOM";
+    case -9:
+      return "ZI_E_IO";
+    case -10:
+      return "ZI_E_INTERNAL";
+    default:
+      return "ZI_E_UNKNOWN";
+  }
+}
+
 static int sem_run_or_verify_sir_jsonl_ex(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root,
                                          sem_diag_format_t diag_format, bool diag_all, bool do_run) {
   if (!path) return 2;
@@ -2710,9 +2854,10 @@ static int sem_run_or_verify_sir_jsonl_ex(const char* path, const sem_cap_t* cap
   if (rc < 0) {
     // Execution errors come from sircore (ZI_E_*).
     if (diag_format == SEM_DIAG_JSON) {
-      fprintf(stderr, "{\"tool\":\"sem\",\"code\":\"sem.exec\",\"message\":\"execution failed\",\"rc\":%d}\n", (int)rc);
+      fprintf(stderr, "{\"tool\":\"sem\",\"code\":\"sem.exec\",\"message\":\"execution failed\",\"rc\":%d,\"rc_name\":\"%s\"}\n", (int)rc,
+              sem_zi_err_name(rc));
     } else {
-      fprintf(stderr, "sem: execution failed: %d\n", (int)rc);
+      fprintf(stderr, "sem: execution failed: %s (%d)\n", sem_zi_err_name(rc), (int)rc);
     }
     return 1;
   }

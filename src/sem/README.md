@@ -79,6 +79,12 @@ Run a small supported SIR subset from a `.sir.jsonl` file:
 sem --run src/sircc/examples/hello_zabi25_write.sir.jsonl
 ```
 
+Validate + lower (but do not execute) a `.sir.jsonl` file (useful for verifier-only fixtures like `ptr_layout.sir.jsonl`):
+
+```
+sem --verify src/sircc/examples/ptr_layout.sir.jsonl
+```
+
 The current `--run` MVP supports (growing over time):
 
 - types:
