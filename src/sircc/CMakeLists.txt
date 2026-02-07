@@ -408,6 +408,39 @@ add_test(
 )
 
 add_test(
+  NAME sircc_lower_hl_sem_match_sum_to_cfg
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/sem_match_sum_option_i32.sir.jsonl
+    -DOUT=${CMAKE_CURRENT_BINARY_DIR}/sem_match_sum_option_i32.core.sir.jsonl
+    -DCONTAINS=\\\"tag\\\":\\\"term.switch\\\"\\;\\\"tag\\\":\\\"bparam\\\"
+    -DNOT_CONTAINS=\\\"tag\\\":\\\"sem.match_sum\\\"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/lower_hl_emit_core_and_verify.cmake
+)
+
+add_test(
+  NAME sircc_diff_hl_vs_core_sem_if_thunk
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/sem_if_thunk_trap_not_taken.sir.jsonl
+    -DCORE_OUT=${CMAKE_CURRENT_BINARY_DIR}/diff_sem_if_thunk.core.sir.jsonl
+    -DEXE_HL=${CMAKE_CURRENT_BINARY_DIR}/diff_sem_if_thunk.hl.exe
+    -DEXE_CORE=${CMAKE_CURRENT_BINARY_DIR}/diff_sem_if_thunk.core.exe
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/diff_compile_run_hl_vs_core.cmake
+)
+
+add_test(
+  NAME sircc_diff_hl_vs_core_sem_match_sum
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    -DINPUT=${CMAKE_CURRENT_LIST_DIR}/examples/sem_match_sum_option_i32.sir.jsonl
+    -DCORE_OUT=${CMAKE_CURRENT_BINARY_DIR}/diff_sem_match_sum.core.sir.jsonl
+    -DEXE_HL=${CMAKE_CURRENT_BINARY_DIR}/diff_sem_match_sum.hl.exe
+    -DEXE_CORE=${CMAKE_CURRENT_BINARY_DIR}/diff_sem_match_sum.core.exe
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/diff_compile_run_hl_vs_core.cmake
+)
+
+add_test(
   NAME sircc_cinterop_export_add2
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>

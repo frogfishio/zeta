@@ -289,6 +289,42 @@ static int64_t infer_branch_type(SirProgram* p, const BranchOperand* br) {
   return 0;
 }
 
+static int64_t find_prim_type_id(SirProgram* p, const char* prim) {
+  if (!p || !prim) return 0;
+  for (size_t i = 0; i < p->types_cap; i++) {
+    TypeRec* t = p->types ? p->types[i] : NULL;
+    if (!t) continue;
+    if (t->kind != TYPE_PRIM || !t->prim) continue;
+    if (strcmp(t->prim, prim) == 0) return t->id;
+  }
+  return 0;
+}
+
+static bool get_callable_sig(SirProgram* p, int64_t callee_node_id, TypeRec** out_sig, bool* out_is_closure) {
+  if (out_sig) *out_sig = NULL;
+  if (out_is_closure) *out_is_closure = false;
+  if (!p) return false;
+  NodeRec* callee = get_node(p, callee_node_id);
+  if (!callee || callee->type_ref == 0) return false;
+  TypeRec* ct = get_type(p, callee->type_ref);
+  if (!ct) return false;
+  if (ct->kind == TYPE_FUN) {
+    TypeRec* sig = get_type(p, ct->sig);
+    if (!sig || sig->kind != TYPE_FN) return false;
+    if (out_sig) *out_sig = sig;
+    if (out_is_closure) *out_is_closure = false;
+    return true;
+  }
+  if (ct->kind == TYPE_CLOSURE) {
+    TypeRec* sig = get_type(p, ct->call_sig);
+    if (!sig || sig->kind != TYPE_FN) return false;
+    if (out_sig) *out_sig = sig;
+    if (out_is_closure) *out_is_closure = true;
+    return true;
+  }
+  return false;
+}
+
 static bool make_call_thunk(SirProgram* p, int64_t* next_id, int64_t callee_node_id, int64_t result_ty, int64_t* out_call_id) {
   if (!p || !next_id || !out_call_id) return false;
   *out_call_id = 0;
@@ -309,6 +345,45 @@ static bool make_call_thunk(SirProgram* p, int64_t* next_id, int64_t callee_node
   if (!args) return false;
   args->v.arr.items[0] = jv_make_ref(&p->arena, callee_node_id);
   if (!args->v.arr.items[0]) return false;
+
+  JsonValue* fields = jv_make_obj(&p->arena, 1);
+  if (!fields) return false;
+  fields->v.obj.items[0].key = "args";
+  fields->v.obj.items[0].value = args;
+
+  make_node_stub(p, call_id, tag, result_ty, fields);
+  *out_call_id = call_id;
+  return true;
+}
+
+static bool make_call_thunk_with_payload(SirProgram* p, int64_t* next_id, int64_t callee_node_id, int64_t payload_node_id, int64_t result_ty,
+                                        int64_t* out_call_id) {
+  if (!p || !next_id || !out_call_id) return false;
+  *out_call_id = 0;
+
+  TypeRec* sig = NULL;
+  bool is_closure = false;
+  if (!get_callable_sig(p, callee_node_id, &sig, &is_closure)) return false;
+  if (!sig) return false;
+
+  size_t argc = 1;
+  if (sig->param_len == 1) argc = 2;
+  if (sig->param_len != 0 && sig->param_len != 1) return false;
+  if (sig->param_len == 1 && payload_node_id == 0) return false;
+
+  const char* tag = is_closure ? "call.closure" : "call.fun";
+
+  const int64_t call_id = alloc_new_node_id(p, next_id);
+  if (!ensure_node_slot(p, call_id)) return false;
+
+  JsonValue* args = jv_make_arr(&p->arena, argc);
+  if (!args) return false;
+  args->v.arr.items[0] = jv_make_ref(&p->arena, callee_node_id);
+  if (!args->v.arr.items[0]) return false;
+  if (argc == 2) {
+    args->v.arr.items[1] = jv_make_ref(&p->arena, payload_node_id);
+    if (!args->v.arr.items[1]) return false;
+  }
 
   JsonValue* fields = jv_make_obj(&p->arena, 1);
   if (!fields) return false;
@@ -589,6 +664,353 @@ static bool lower_sem_value_to_cfg_ret(SirProgram* p, NodeRec* fn, int64_t sem_n
   return true;
 }
 
+static bool lower_sem_match_sum_to_cfg_ret(SirProgram* p, NodeRec* fn, int64_t match_node_id) {
+  if (!p || !fn || !fn->fields) return false;
+
+  int64_t body_id = 0;
+  if (!parse_node_ref_id(p, json_obj_get(fn->fields, "body"), &body_id)) return false;
+  NodeRec* body = get_node(p, body_id);
+  if (!body || !body->fields) return false;
+
+  JsonValue* stmts = json_obj_get(body->fields, "stmts");
+  if (!stmts || stmts->type != JSON_ARRAY || stmts->v.arr.len == 0) return false;
+
+  // Require last stmt is term.ret/return and returns match_node_id.
+  JsonValue* last = stmts->v.arr.items[stmts->v.arr.len - 1];
+  int64_t term_id = 0;
+  if (!parse_node_ref_id(p, last, &term_id)) return false;
+  NodeRec* term = get_node(p, term_id);
+  if (!term || !term->fields || !(strcmp(term->tag, "term.ret") == 0 || strcmp(term->tag, "return") == 0)) return false;
+  int64_t got = 0;
+  if (!parse_node_ref_id(p, json_obj_get(term->fields, "value"), &got)) return false;
+  if (got != match_node_id) return false;
+
+  NodeRec* mn = get_node(p, match_node_id);
+  if (!mn || !mn->fields || !mn->tag || strcmp(mn->tag, "sem.match_sum") != 0) return false;
+  const int64_t result_ty = mn->type_ref;
+  if (result_ty == 0) {
+    SIRCC_ERR_NODE(p, mn, "sircc.lower_hl.sem.type_missing", "sircc: --lower-hl requires sem.match_sum node to have type_ref");
+    return false;
+  }
+  TypeRec* rty = get_type(p, result_ty);
+  if (rty && rty->kind == TYPE_PRIM && rty->prim && strcmp(rty->prim, "void") == 0) {
+    SIRCC_ERR_NODE(p, mn, "sircc.lower_hl.sem.void_unsupported", "sircc: --lower-hl does not support sem.match_sum returning void yet");
+    return false;
+  }
+
+  int64_t sum_ty_id = 0;
+  if (!parse_type_ref_id(p, json_obj_get(mn->fields, "sum"), &sum_ty_id)) return false;
+  TypeRec* sty = get_type(p, sum_ty_id);
+  if (!sty || sty->kind != TYPE_SUM) return false;
+
+  JsonValue* args = json_obj_get(mn->fields, "args");
+  if (!args || args->type != JSON_ARRAY || args->v.arr.len != 1) return false;
+  int64_t scrut_id = 0;
+  if (!parse_node_ref_id(p, args->v.arr.items[0], &scrut_id)) return false;
+
+  JsonValue* cases = json_obj_get(mn->fields, "cases");
+  JsonValue* def = json_obj_get(mn->fields, "default");
+  if (!cases || cases->type != JSON_ARRAY || !def || def->type != JSON_OBJECT) return false;
+
+  const int64_t i32_ty = find_prim_type_id(p, "i32");
+  if (!i32_ty) {
+    SIRCC_ERR_NODE(p, mn, "sircc.lower_hl.sem.need_i32", "sircc: --lower-hl sem.match_sum requires an i32 primitive type in the module");
+    return false;
+  }
+
+  int64_t next_id = 0;
+
+  // Reuse match node id as the join bparam (this strips sem.* from output).
+  mn->tag = "bparam";
+  mn->type_ref = result_ty;
+  mn->fields = NULL;
+
+  // Allocate blocks: one per case, plus default and join.
+  const size_t case_n = cases->v.arr.len;
+  int64_t* case_bids = NULL;
+  if (case_n) {
+    case_bids = (int64_t*)arena_alloc(&p->arena, case_n * sizeof(*case_bids));
+    if (!case_bids) return false;
+    memset(case_bids, 0, case_n * sizeof(*case_bids));
+  }
+  for (size_t i = 0; i < case_n; i++) {
+    case_bids[i] = alloc_new_node_id(p, &next_id);
+    if (!ensure_node_slot(p, case_bids[i])) return false;
+  }
+  const int64_t def_bid = alloc_new_node_id(p, &next_id);
+  const int64_t join_bid = alloc_new_node_id(p, &next_id);
+  if (!ensure_node_slot(p, def_bid) || !ensure_node_slot(p, join_bid)) return false;
+
+  // Build per-case blocks (materialize thunk calls inside the block if needed).
+  for (size_t i = 0; i < case_n; i++) {
+    JsonValue* co = cases->v.arr.items[i];
+    if (!co || co->type != JSON_OBJECT) return false;
+    int64_t variant = 0;
+    if (!json_get_i64(json_obj_get(co, "variant"), &variant)) return false;
+    if (variant < 0) return false;
+    const size_t vix = (size_t)variant;
+    if (vix >= sty->variant_len) return false;
+    const int64_t pay_ty = sty->variants[vix].ty;
+
+    JsonValue* body_br = json_obj_get(co, "body");
+    if (!body_br || body_br->type != JSON_OBJECT) return false;
+    BranchOperand br = {0};
+    if (!parse_branch_operand(p, body_br, &br)) return false;
+
+    int64_t val_id = 0;
+    JsonValue* stm = NULL;
+    size_t stm_n = 0;
+
+    if (br.kind == BRANCH_VAL) {
+      val_id = br.node_id;
+      stm_n = 1;
+      stm = jv_make_arr(&p->arena, stm_n);
+      if (!stm) return false;
+    } else {
+      TypeRec* sig = NULL;
+      bool is_closure = false;
+      if (!get_callable_sig(p, br.node_id, &sig, &is_closure)) return false;
+      if (!sig) return false;
+      if (sig->param_len != 0 && sig->param_len != 1) return false;
+
+      int64_t payload_id = 0;
+      if (sig->param_len == 1) {
+        if (pay_ty == 0) return false;
+        payload_id = alloc_new_node_id(p, &next_id);
+        if (!ensure_node_slot(p, payload_id)) return false;
+        JsonValue* get_args = jv_make_arr(&p->arena, 1);
+        if (!get_args) return false;
+        get_args->v.arr.items[0] = jv_make_ref(&p->arena, scrut_id);
+        if (!get_args->v.arr.items[0]) return false;
+        JsonValue* flags = jv_make_obj(&p->arena, 1);
+        if (!flags) return false;
+        flags->v.obj.items[0].key = "variant";
+        JsonValue* vn = jv_make(&p->arena, JSON_NUMBER);
+        if (!vn) return false;
+        vn->v.i = (int64_t)vix;
+        flags->v.obj.items[0].value = vn;
+        JsonValue* ty_ref = jv_make_obj(&p->arena, 3);
+        if (!ty_ref) return false;
+        ty_ref->v.obj.items[0].key = "t";
+        ty_ref->v.obj.items[0].value = jv_make(&p->arena, JSON_STRING);
+        if (!ty_ref->v.obj.items[0].value) return false;
+        ty_ref->v.obj.items[0].value->v.s = "ref";
+        ty_ref->v.obj.items[1].key = "k";
+        ty_ref->v.obj.items[1].value = jv_make(&p->arena, JSON_STRING);
+        if (!ty_ref->v.obj.items[1].value) return false;
+        ty_ref->v.obj.items[1].value->v.s = "type";
+        ty_ref->v.obj.items[2].key = "id";
+        ty_ref->v.obj.items[2].value = jv_make(&p->arena, JSON_NUMBER);
+        if (!ty_ref->v.obj.items[2].value) return false;
+        ty_ref->v.obj.items[2].value->v.i = sum_ty_id;
+
+        JsonValue* get_fields = jv_make_obj(&p->arena, 3);
+        if (!get_fields) return false;
+        get_fields->v.obj.items[0].key = "ty";
+        get_fields->v.obj.items[0].value = ty_ref;
+        get_fields->v.obj.items[1].key = "args";
+        get_fields->v.obj.items[1].value = get_args;
+        get_fields->v.obj.items[2].key = "flags";
+        get_fields->v.obj.items[2].value = flags;
+        make_node_stub(p, payload_id, "adt.get", pay_ty, get_fields);
+      }
+
+      if (!make_call_thunk_with_payload(p, &next_id, br.node_id, payload_id, result_ty, &val_id)) return false;
+
+      stm_n = (sig->param_len == 1) ? 3 : 2;
+      stm = jv_make_arr(&p->arena, stm_n);
+      if (!stm) return false;
+      size_t wi = 0;
+      if (sig->param_len == 1) {
+        stm->v.arr.items[wi++] = jv_make_ref(&p->arena, payload_id);
+        if (!stm->v.arr.items[wi - 1]) return false;
+      }
+      stm->v.arr.items[wi++] = jv_make_ref(&p->arena, val_id);
+      if (!stm->v.arr.items[wi - 1]) return false;
+    }
+
+    const int64_t br_id = alloc_new_node_id(p, &next_id);
+    if (!ensure_node_slot(p, br_id)) return false;
+
+    JsonValue* br_args = jv_make_arr(&p->arena, 1);
+    if (!br_args) return false;
+    br_args->v.arr.items[0] = jv_make_ref(&p->arena, val_id);
+    if (!br_args->v.arr.items[0]) return false;
+
+    JsonValue* br_fields = jv_make_obj(&p->arena, 2);
+    if (!br_fields) return false;
+    br_fields->v.obj.items[0].key = "to";
+    br_fields->v.obj.items[0].value = jv_make_ref(&p->arena, join_bid);
+    if (!br_fields->v.obj.items[0].value) return false;
+    br_fields->v.obj.items[1].key = "args";
+    br_fields->v.obj.items[1].value = br_args;
+
+    make_node_stub(p, br_id, "term.br", 0, br_fields);
+
+    // Append term.br to stmts.
+    if (stm) {
+      stm->v.arr.items[stm->v.arr.len - 1] = jv_make_ref(&p->arena, br_id);
+      if (!stm->v.arr.items[stm->v.arr.len - 1]) return false;
+    }
+
+    JsonValue* block_fields = block_fields_with_stmts(p, NULL, stm, NULL);
+    if (!block_fields) return false;
+    make_node_stub(p, case_bids[i], "block", 0, block_fields);
+  }
+
+  // Default block.
+  BranchOperand dbr = {0};
+  if (!parse_branch_operand(p, def, &dbr)) return false;
+  int64_t def_val_id = 0;
+  JsonValue* def_stmts = NULL;
+  if (dbr.kind == BRANCH_VAL) {
+    def_val_id = dbr.node_id;
+    def_stmts = jv_make_arr(&p->arena, 1);
+    if (!def_stmts) return false;
+  } else {
+    if (!make_call_thunk(p, &next_id, dbr.node_id, result_ty, &def_val_id)) return false;
+    def_stmts = jv_make_arr(&p->arena, 2);
+    if (!def_stmts) return false;
+    def_stmts->v.arr.items[0] = jv_make_ref(&p->arena, def_val_id);
+    if (!def_stmts->v.arr.items[0]) return false;
+  }
+  const int64_t def_br_id = alloc_new_node_id(p, &next_id);
+  if (!ensure_node_slot(p, def_br_id)) return false;
+  JsonValue* def_br_args = jv_make_arr(&p->arena, 1);
+  if (!def_br_args) return false;
+  def_br_args->v.arr.items[0] = jv_make_ref(&p->arena, def_val_id);
+  if (!def_br_args->v.arr.items[0]) return false;
+  JsonValue* def_br_fields = jv_make_obj(&p->arena, 2);
+  if (!def_br_fields) return false;
+  def_br_fields->v.obj.items[0].key = "to";
+  def_br_fields->v.obj.items[0].value = jv_make_ref(&p->arena, join_bid);
+  if (!def_br_fields->v.obj.items[0].value) return false;
+  def_br_fields->v.obj.items[1].key = "args";
+  def_br_fields->v.obj.items[1].value = def_br_args;
+  make_node_stub(p, def_br_id, "term.br", 0, def_br_fields);
+  def_stmts->v.arr.items[def_stmts->v.arr.len - 1] = jv_make_ref(&p->arena, def_br_id);
+  if (!def_stmts->v.arr.items[def_stmts->v.arr.len - 1]) return false;
+  JsonValue* def_block_fields = block_fields_with_stmts(p, NULL, def_stmts, NULL);
+  if (!def_block_fields) return false;
+  make_node_stub(p, def_bid, "block", 0, def_block_fields);
+
+  // Join block: params=[bparam], stmts=[term.ret(bparam)].
+  JsonValue* join_params = jv_make_arr(&p->arena, 1);
+  if (!join_params) return false;
+  join_params->v.arr.items[0] = jv_make_ref(&p->arena, match_node_id);
+  if (!join_params->v.arr.items[0]) return false;
+
+  JsonValue* ret_fields = jv_make_obj(&p->arena, 1);
+  if (!ret_fields) return false;
+  ret_fields->v.obj.items[0].key = "value";
+  ret_fields->v.obj.items[0].value = jv_make_ref(&p->arena, match_node_id);
+  if (!ret_fields->v.obj.items[0].value) return false;
+  term->tag = "term.ret";
+  term->fields = ret_fields;
+
+  JsonValue* join_stmts = jv_make_arr(&p->arena, 1);
+  if (!join_stmts) return false;
+  join_stmts->v.arr.items[0] = jv_make_ref(&p->arena, term_id);
+  if (!join_stmts->v.arr.items[0]) return false;
+  JsonValue* join_block_fields = block_fields_with_stmts(p, NULL, join_stmts, join_params);
+  if (!join_block_fields) return false;
+  make_node_stub(p, join_bid, "block", 0, join_block_fields);
+
+  // Entry: replace the old return with term.switch over adt.tag(scrut).
+  const size_t prefix_n = stmts->v.arr.len - 1;
+  JsonValue* new_entry_stmts = jv_make_arr(&p->arena, prefix_n + 1);
+  if (!new_entry_stmts) return false;
+  for (size_t i = 0; i < prefix_n; i++) new_entry_stmts->v.arr.items[i] = stmts->v.arr.items[i];
+
+  // tag = adt.tag(scrut)
+  const int64_t tag_id = alloc_new_node_id(p, &next_id);
+  if (!ensure_node_slot(p, tag_id)) return false;
+  JsonValue* tag_args = jv_make_arr(&p->arena, 1);
+  if (!tag_args) return false;
+  tag_args->v.arr.items[0] = jv_make_ref(&p->arena, scrut_id);
+  if (!tag_args->v.arr.items[0]) return false;
+  JsonValue* tag_fields = jv_make_obj(&p->arena, 1);
+  if (!tag_fields) return false;
+  tag_fields->v.obj.items[0].key = "args";
+  tag_fields->v.obj.items[0].value = tag_args;
+  make_node_stub(p, tag_id, "adt.tag", i32_ty, tag_fields);
+
+  // Build switch cases.
+  const int64_t sw_id = alloc_new_node_id(p, &next_id);
+  if (!ensure_node_slot(p, sw_id)) return false;
+
+  JsonValue* sw_cases = jv_make_arr(&p->arena, case_n);
+  if (!sw_cases) return false;
+
+  for (size_t i = 0; i < case_n; i++) {
+    JsonValue* co = cases->v.arr.items[i];
+    if (!co || co->type != JSON_OBJECT) return false;
+    int64_t variant = 0;
+    if (!json_get_i64(json_obj_get(co, "variant"), &variant)) return false;
+    if (variant < 0) return false;
+
+    const int64_t lit_id = alloc_new_node_id(p, &next_id);
+    if (!ensure_node_slot(p, lit_id)) return false;
+    JsonValue* lit_fields = jv_make_obj(&p->arena, 1);
+    if (!lit_fields) return false;
+    lit_fields->v.obj.items[0].key = "value";
+    JsonValue* ln = jv_make(&p->arena, JSON_NUMBER);
+    if (!ln) return false;
+    ln->v.i = variant;
+    lit_fields->v.obj.items[0].value = ln;
+    make_node_stub(p, lit_id, "const.i32", i32_ty, lit_fields);
+
+    JsonValue* entry = jv_make_obj(&p->arena, 2);
+    if (!entry) return false;
+    entry->v.obj.items[0].key = "lit";
+    entry->v.obj.items[0].value = jv_make_ref(&p->arena, lit_id);
+    if (!entry->v.obj.items[0].value) return false;
+    entry->v.obj.items[1].key = "to";
+    entry->v.obj.items[1].value = jv_make_ref(&p->arena, case_bids[i]);
+    if (!entry->v.obj.items[1].value) return false;
+    sw_cases->v.arr.items[i] = entry;
+  }
+
+  JsonValue* sw_def = jv_make_obj(&p->arena, 1);
+  if (!sw_def) return false;
+  sw_def->v.obj.items[0].key = "to";
+  sw_def->v.obj.items[0].value = jv_make_ref(&p->arena, def_bid);
+  if (!sw_def->v.obj.items[0].value) return false;
+
+  JsonValue* scrut_ref = jv_make_ref(&p->arena, tag_id);
+  if (!scrut_ref) return false;
+
+  JsonValue* sw_fields = jv_make_obj(&p->arena, 3);
+  if (!sw_fields) return false;
+  sw_fields->v.obj.items[0].key = "scrut";
+  sw_fields->v.obj.items[0].value = scrut_ref;
+  sw_fields->v.obj.items[1].key = "cases";
+  sw_fields->v.obj.items[1].value = sw_cases;
+  sw_fields->v.obj.items[2].key = "default";
+  sw_fields->v.obj.items[2].value = sw_def;
+
+  make_node_stub(p, sw_id, "term.switch", 0, sw_fields);
+  new_entry_stmts->v.arr.items[prefix_n] = jv_make_ref(&p->arena, sw_id);
+  if (!new_entry_stmts->v.arr.items[prefix_n]) return false;
+
+  body->fields = block_fields_with_stmts(p, body->fields, new_entry_stmts, json_obj_get(body->fields, "params"));
+  if (!body->fields) return false;
+
+  // Rewrite fn to CFG form.
+  const size_t blk_n = 1 + case_n + 2; // entry + cases + default + join
+  int64_t* blks = (int64_t*)arena_alloc(&p->arena, blk_n * sizeof(*blks));
+  if (!blks) return false;
+  size_t wi = 0;
+  blks[wi++] = body_id;
+  for (size_t i = 0; i < case_n; i++) blks[wi++] = case_bids[i];
+  blks[wi++] = def_bid;
+  blks[wi++] = join_bid;
+  fn->fields = fn_fields_to_cfg(p, fn->fields, body_id, blks, blk_n);
+  if (!fn->fields) return false;
+
+  return true;
+}
+
 static bool lower_sem_sc_to_bool_bin(SirProgram* p, NodeRec* n, bool is_and) {
   if (!p || !n || !n->fields) return false;
   JsonValue* args = json_obj_get(n->fields, "args");
@@ -682,6 +1104,11 @@ static bool lower_sem_nodes(SirProgram* p) {
       BranchOperand bt = {0}, be = {0};
       if (!parse_branch_operand(p, args->v.arr.items[1], &bt) || !parse_branch_operand(p, args->v.arr.items[2], &be)) continue;
       if (!lower_sem_value_to_cfg_ret(p, fn, rid, "sem.if", cond_id, &bt, &be)) return false;
+      continue;
+    }
+
+    if (strcmp(rnode->tag, "sem.match_sum") == 0) {
+      if (!lower_sem_match_sum_to_cfg_ret(p, fn, rid)) return false;
       continue;
     }
 
