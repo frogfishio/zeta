@@ -38,6 +38,7 @@ Legend:
     - [x] `cfg_switch`, `cfg_join_phi`, `mem_stack`, `mem_copy_fill`, `ptr_layout` (golden tests).
     - [x] `alloca_array`, `load_store_no_align`, `trap`, `call_indirect_ptrsym` (golden tests).
   - [ ] Pack fixtures (`fun:v1`, `closure:v1`, `adt:v1`) beyond verification-only.
+    - [x] `fun_sym_call`, `closure_make_call`, `adt_make_get` (golden tests).
 - [ ] Negative fixtures: assert diagnostic code + span for common failures (unknown type, wrong arg count, bad attrs).
   - [x] Harness: CTest runner asserts `--diagnostics json` fields (code + loc + msg substring).
   - [x] Initial fixtures for sem-pack authoring guardrails (bad branch kind, bad keys).

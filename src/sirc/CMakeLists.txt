@@ -117,6 +117,9 @@ sirc_add_golden_test(sirc_golden_alloca_array examples/alloca_array.sir tests/go
 sirc_add_golden_test(sirc_golden_load_store_no_align examples/load_store_no_align.sir tests/golden/load_store_no_align.sir.jsonl)
 sirc_add_golden_test(sirc_golden_trap examples/trap.sir tests/golden/trap.sir.jsonl)
 sirc_add_golden_test(sirc_golden_call_indirect_ptrsym examples/call_indirect_ptrsym.sir tests/golden/call_indirect_ptrsym.sir.jsonl)
+sirc_add_golden_test(sirc_golden_fun_sym_call examples/fun_sym_call.sir tests/golden/fun_sym_call.sir.jsonl)
+sirc_add_golden_test(sirc_golden_closure_make_call examples/closure_make_call.sir tests/golden/closure_make_call.sir.jsonl)
+sirc_add_golden_test(sirc_golden_adt_make_get examples/adt_make_get.sir tests/golden/adt_make_get.sir.jsonl)
 
 function(sirc_add_diag_expect_test name input_rel expect_code expect_line expect_col expect_msg_substr)
   add_test(
