@@ -1,0 +1,15 @@
+unit u0 target host +fun:v1 +sem:v1
+
+type VoidSig = fn() -> void
+type VoidFun = fun(VoidSig)
+
+fn cleanup() -> void
+  term.ret
+end
+
+fn main() -> i32 public
+  let f: VoidFun = fun.sym() name "cleanup" as VoidFun
+  sem.defer(thunk f)
+  return 7:i32
+end
+

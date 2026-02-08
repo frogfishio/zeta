@@ -23,7 +23,13 @@ void yyerror(const char* s);
   SircNodeList*  stmts;
   SircExprList*  args;
   SircSwitchCaseList* cases;
+  SircSemSwitchCaseList* sem_cases;
+  SircSemMatchCaseList* match_cases;
+  SircBranchList* branch_list;
   SircAttrList* attrs;
+  SircBranch br;
+  SircSemSwitchCase sem_case;
+  SircSemMatchCase match_case;
   int64_t       node;
 }
 
@@ -45,6 +51,8 @@ void yyerror(const char* s);
 %token T_TERM_UNREACHABLE T_TERM_TRAP
 %token T_SCRUT T_CASES T_DEFAULT T_LIT
 %token T_FLAGS T_COUNT
+%token T_SEM_IF T_SEM_COND T_SEM_AND_SC T_SEM_OR_SC T_SEM_SWITCH T_SEM_MATCH_SUM
+%token T_SEM_WHILE T_SEM_BREAK T_SEM_CONTINUE T_SEM_DEFER T_SEM_SCOPE
 
 /* declared in lexer (unused for now, but must exist) */
 %token T_FEATURES T_SIG T_DO
@@ -63,6 +71,7 @@ void yyerror(const char* s);
 %type <stmts> cfg_blocks
 %type <node> stmt let_stmt return_stmt expr_stmt select_expr ptr_sizeof_expr ptr_alignof_expr ptr_offset_expr
 %type <node> term_stmt term_br_stmt term_cbr_stmt term_switch_stmt term_ret_stmt
+%type <node> sem_stmt sem_value_expr
 %type <node> block_decl
 %type <args> args_opt args
 %type <args> term_args_opt
@@ -73,6 +82,13 @@ void yyerror(const char* s);
 %type <i> attr_int
 %type <b> attr_bool
 %type <s> attr_ident
+%type <br> branch_operand
+%type <sem_cases> sem_switch_cases_opt sem_switch_cases
+%type <sem_case> sem_switch_case
+%type <match_cases> sem_match_cases_opt sem_match_cases
+%type <match_case> sem_match_case
+%type <branch_list> branch_list_opt branch_list
+%type <node> block_value
 
 %start program
 
@@ -168,7 +184,27 @@ stmt
   | return_stmt nl_star       { $$ = $1; }
   | expr_stmt nl_star         { $$ = $1; }
   | term_stmt nl_star         { $$ = $1; }
+  | sem_stmt nl_star          { $$ = $1; }
   | error nl_plus             { $$ = 0; yyerrok; }
+  ;
+
+sem_stmt
+  : T_SEM_WHILE '(' nl_star branch_operand comma_sep branch_operand nl_star ')'
+    { $$ = sirc_sem_while($4, $6); }
+  | T_SEM_BREAK
+    { $$ = sirc_sem_break(); }
+  | T_SEM_CONTINUE
+    { $$ = sirc_sem_continue(); }
+  | T_SEM_DEFER '(' nl_star branch_operand nl_star ')'
+    { $$ = sirc_sem_defer($4); }
+  | T_SEM_SCOPE '(' nl_star T_ID ':' '[' nl_star branch_list_opt nl_star ']' comma_sep T_ID ':' block_value nl_star ')'
+    {
+      if (strcmp($4, "defers") != 0) { yyerror("sem.scope: expected 'defers'"); free($4); free($12); YYERROR; }
+      if (strcmp($12, "body") != 0) { yyerror("sem.scope: expected 'body'"); free($4); free($12); YYERROR; }
+      free($4);
+      free($12);
+      $$ = sirc_sem_scope($8, $14);
+    }
   ;
 
 term_stmt
@@ -259,10 +295,95 @@ expr_stmt
 
 expr
   : value                    { $$ = $1; }
+  | sem_value_expr            { $$ = $1; }
   | select_expr              { $$ = $1; }
   | ptr_sizeof_expr           { $$ = $1; }
   | ptr_alignof_expr          { $$ = $1; }
   | ptr_offset_expr           { $$ = $1; }
+  ;
+
+sem_value_expr
+  : T_SEM_IF '(' nl_star expr comma_sep branch_operand comma_sep branch_operand nl_star ')' T_AS type
+    { $$ = sirc_sem_if($4, $6, $8, $12); }
+  | T_SEM_COND '(' nl_star expr comma_sep branch_operand comma_sep branch_operand nl_star ')' T_AS type
+    { $$ = sirc_sem_cond($4, $6, $8, $12); }
+  | T_SEM_AND_SC '(' nl_star expr comma_sep branch_operand nl_star ')'
+    { $$ = sirc_sem_and_sc($4, $6); }
+  | T_SEM_OR_SC '(' nl_star expr comma_sep branch_operand nl_star ')'
+    { $$ = sirc_sem_or_sc($4, $6); }
+  | T_SEM_SWITCH '(' nl_star expr ',' nl_star T_CASES ':' '[' nl_star sem_switch_cases_opt nl_star ']' ',' nl_star T_DEFAULT ':' branch_operand nl_star ')' T_AS type
+    { $$ = sirc_sem_switch($4, $11, $18, $22); }
+  | T_SEM_MATCH_SUM '(' nl_star type comma_sep expr ',' nl_star T_CASES ':' '[' nl_star sem_match_cases_opt nl_star ']' ',' nl_star T_DEFAULT ':' branch_operand nl_star ')' T_AS type
+    { $$ = sirc_sem_match_sum($4, $6, $13, $20, $24); }
+  ;
+
+branch_operand
+  : T_ID expr
+    {
+      if (strcmp($1, "val") == 0) { $$.kind = SIRC_BRANCH_VAL; $$.node = $2; free($1); }
+      else if (strcmp($1, "thunk") == 0) { $$.kind = SIRC_BRANCH_THUNK; $$.node = $2; free($1); }
+      else { yyerror("expected 'val' or 'thunk'"); free($1); YYERROR; }
+    }
+  ;
+
+branch_list_opt
+  : /* empty */                { $$ = sirc_branch_list_empty(); }
+  | branch_list                { $$ = $1; }
+  ;
+
+branch_list
+  : branch_operand             { $$ = sirc_branch_list_append(sirc_branch_list_empty(), $1); }
+  | branch_list comma_sep branch_operand
+                              { $$ = sirc_branch_list_append($1, $3); }
+  ;
+
+sem_switch_cases_opt
+  : /* empty */                { $$ = sirc_sem_switch_cases_empty(); }
+  | sem_switch_cases           { $$ = $1; }
+  ;
+
+sem_switch_cases
+  : sem_switch_case            { $$ = sirc_sem_switch_cases_append(sirc_sem_switch_cases_empty(), $1.lit, $1.body); }
+  | sem_switch_cases ',' nl_star sem_switch_case
+                              { $$ = sirc_sem_switch_cases_append($1, $4.lit, $4.body); }
+  ;
+
+sem_switch_case
+  : '{' nl_star T_LIT ':' int_lit ',' nl_star T_ID ':' branch_operand nl_star '}'
+    {
+      if (strcmp($8, "body") != 0) { yyerror("sem.switch: expected 'body'"); free($8); YYERROR; }
+      free($8);
+      $$.lit = $5;
+      $$.body = $10;
+    }
+  ;
+
+sem_match_cases_opt
+  : /* empty */                { $$ = sirc_sem_match_cases_empty(); }
+  | sem_match_cases            { $$ = $1; }
+  ;
+
+sem_match_cases
+  : sem_match_case             { $$ = sirc_sem_match_cases_append(sirc_sem_match_cases_empty(), $1.variant, $1.body); }
+  | sem_match_cases ',' nl_star sem_match_case
+                              { $$ = sirc_sem_match_cases_append($1, $4.variant, $4.body); }
+  ;
+
+sem_match_case
+  : '{' nl_star T_ID ':' T_INT ',' nl_star T_ID ':' branch_operand nl_star '}'
+    {
+      if (strcmp($3, "variant") != 0) { yyerror("sem.match_sum: expected 'variant'"); free($3); free($8); YYERROR; }
+      if (strcmp($8, "body") != 0) { yyerror("sem.match_sum: expected 'body'"); free($3); free($8); YYERROR; }
+      free($3);
+      free($8);
+      $$.variant = $5;
+      $$.body = $10;
+    }
+  ;
+
+block_value
+  : T_DO nl_star stmt_list T_END
+    { $$ = sirc_block_value($3); }
   ;
 
 select_expr

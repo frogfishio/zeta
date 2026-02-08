@@ -1,0 +1,22 @@
+unit u0 target host +fun:v1 +sem:v1
+
+type CondSig = fn() -> bool
+type CondFun = fun(CondSig)
+
+type BodySig = fn() -> i32
+type BodyFun = fun(BodySig)
+
+fn cond_fn() -> bool
+  return false
+end
+
+fn body() -> i32
+  sem.break
+end
+
+fn main() -> i32 public
+  let c: CondFun = fun.sym() name "cond_fn" as CondFun
+  let b: BodyFun = fun.sym() name "body" as BodyFun
+  sem.while(thunk c, thunk b)
+  return 0:i32
+end

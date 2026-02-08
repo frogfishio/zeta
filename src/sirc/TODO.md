@@ -45,10 +45,12 @@ Legend:
 
 ## P1 — Sem-pack authoring (avoid “split personality”)
 
-- [ ] Add sugar for `sem.*` records that require branch objects (thunk vs val) while keeping 1-line≈1-record:
-  - [ ] `sem.if`, `sem.and_sc`, `sem.or_sc`, `sem.cond`, `sem.while`, `sem.break`, `sem.continue`, `sem.switch`, `sem.match_sum`, `sem.defer`, `sem.scope`
-- [ ] Decide and document the minimal surface syntax for branch objects (e.g. `thunk <fun>` / `val <expr>` or similar).
-- [ ] Add examples + negative tests for each `sem.*` construct.
+- [x] Add sugar for `sem.*` records that require branch objects (thunk vs val) while keeping 1-line≈1-record:
+  - [x] `sem.if`, `sem.and_sc`, `sem.or_sc`, `sem.cond`, `sem.while`, `sem.break`, `sem.continue`, `sem.switch`, `sem.match_sum`, `sem.defer`, `sem.scope`
+- [x] Decide and document the minimal surface syntax for branch objects:
+  - `val <expr>` and `thunk <expr>` (where thunk expr evaluates to a fun/closure value)
+  - `sem.scope(..., body: do <stmts...> end)` uses a structural `block` node (not a CFG block)
+- [x] Add examples + verify tests for each `sem.*` construct.
 
 ## P1 — Quality-of-implementation
 

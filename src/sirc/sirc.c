@@ -975,6 +975,7 @@ static int64_t type_from_name(const char* name) {
   if (strcmp(name, "f32") == 0) return type_prim("f32");
   if (strcmp(name, "f64") == 0) return type_prim("f64");
   if (strcmp(name, "bool") == 0) return type_prim("bool");
+  if (strcmp(name, "void") == 0) return type_prim("void");
   if (strcmp(name, "ptr") == 0) {
     int64_t i8 = type_prim("i8");
     return type_ptr(i8);
@@ -1977,6 +1978,262 @@ int64_t sirc_term_br(char* to_block_name, SircExprList* args) {
   return id;
 }
 
+int64_t sirc_block_ref(char* name) {
+  if (!name || !name[0]) {
+    free(name);
+    die_at_last("sirc: block ref requires a name");
+  }
+  int64_t id = block_id_for_name(name);
+  free(name);
+  return id;
+}
+
+typedef struct SircSemSwitchCaseList {
+  int64_t* lit_nodes;
+  SircBranch* bodies;
+  size_t len;
+  size_t cap;
+} SircSemSwitchCaseList;
+
+typedef struct SircSemMatchCaseList {
+  long long* variants;
+  SircBranch* bodies;
+  size_t len;
+  size_t cap;
+} SircSemMatchCaseList;
+
+typedef struct SircBranchList {
+  SircBranch* items;
+  size_t len;
+  size_t cap;
+} SircBranchList;
+
+static SircSemSwitchCaseList* sem_switch_cases_new(void) { return (SircSemSwitchCaseList*)calloc(1, sizeof(SircSemSwitchCaseList)); }
+static SircSemMatchCaseList* sem_match_cases_new(void) { return (SircSemMatchCaseList*)calloc(1, sizeof(SircSemMatchCaseList)); }
+static SircBranchList* branch_list_new(void) { return (SircBranchList*)calloc(1, sizeof(SircBranchList)); }
+
+SircSemSwitchCaseList* sirc_sem_switch_cases_empty(void) { return sem_switch_cases_new(); }
+
+SircSemSwitchCaseList* sirc_sem_switch_cases_append(SircSemSwitchCaseList* l, int64_t lit_node, SircBranch body) {
+  if (!l) l = sem_switch_cases_new();
+  if (l->len == l->cap) {
+    l->cap = l->cap ? l->cap * 2 : 8;
+    l->lit_nodes = (int64_t*)xrealloc(l->lit_nodes, l->cap * sizeof(int64_t));
+    l->bodies = (SircBranch*)xrealloc(l->bodies, l->cap * sizeof(SircBranch));
+  }
+  l->lit_nodes[l->len] = lit_node;
+  l->bodies[l->len] = body;
+  l->len++;
+  return l;
+}
+
+SircSemMatchCaseList* sirc_sem_match_cases_empty(void) { return sem_match_cases_new(); }
+
+SircSemMatchCaseList* sirc_sem_match_cases_append(SircSemMatchCaseList* l, long long variant, SircBranch body) {
+  if (!l) l = sem_match_cases_new();
+  if (l->len == l->cap) {
+    l->cap = l->cap ? l->cap * 2 : 8;
+    l->variants = (long long*)xrealloc(l->variants, l->cap * sizeof(long long));
+    l->bodies = (SircBranch*)xrealloc(l->bodies, l->cap * sizeof(SircBranch));
+  }
+  l->variants[l->len] = variant;
+  l->bodies[l->len] = body;
+  l->len++;
+  return l;
+}
+
+SircBranchList* sirc_branch_list_empty(void) { return branch_list_new(); }
+
+SircBranchList* sirc_branch_list_append(SircBranchList* l, SircBranch b) {
+  if (!l) l = branch_list_new();
+  if (l->len == l->cap) {
+    l->cap = l->cap ? l->cap * 2 : 8;
+    l->items = (SircBranch*)xrealloc(l->items, l->cap * sizeof(SircBranch));
+  }
+  l->items[l->len++] = b;
+  return l;
+}
+
+static void emit_branch_operand_obj(SircBranch b) {
+  if (b.kind == SIRC_BRANCH_VAL) {
+    emitf("{\"kind\":\"val\",\"v\":");
+    emit_node_ref_obj(b.node);
+    emitf("}");
+    return;
+  }
+  if (b.kind == SIRC_BRANCH_THUNK) {
+    emitf("{\"kind\":\"thunk\",\"f\":");
+    emit_node_ref_obj(b.node);
+    emitf("}");
+    return;
+  }
+  die_at_last("sirc: internal error: bad branch kind");
+}
+
+int64_t sirc_sem_if(int64_t cond, SircBranch then_b, SircBranch else_b, int64_t ty) {
+  int64_t id = emit_node_with_fields_begin("sem.if", ty);
+  emitf("\"args\":[");
+  emit_node_ref_obj(cond);
+  emitf(",");
+  emit_branch_operand_obj(then_b);
+  emitf(",");
+  emit_branch_operand_obj(else_b);
+  emitf("]");
+  emit_fields_end();
+  return id;
+}
+
+int64_t sirc_sem_cond(int64_t cond, SircBranch then_b, SircBranch else_b, int64_t ty) {
+  int64_t id = emit_node_with_fields_begin("sem.cond", ty);
+  emitf("\"args\":[");
+  emit_node_ref_obj(cond);
+  emitf(",");
+  emit_branch_operand_obj(then_b);
+  emitf(",");
+  emit_branch_operand_obj(else_b);
+  emitf("]");
+  emit_fields_end();
+  return id;
+}
+
+int64_t sirc_sem_and_sc(int64_t lhs, SircBranch rhs_b) {
+  int64_t bty = type_prim("bool");
+  int64_t id = emit_node_with_fields_begin("sem.and_sc", bty);
+  emitf("\"args\":[");
+  emit_node_ref_obj(lhs);
+  emitf(",");
+  emit_branch_operand_obj(rhs_b);
+  emitf("]");
+  emit_fields_end();
+  return id;
+}
+
+int64_t sirc_sem_or_sc(int64_t lhs, SircBranch rhs_b) {
+  int64_t bty = type_prim("bool");
+  int64_t id = emit_node_with_fields_begin("sem.or_sc", bty);
+  emitf("\"args\":[");
+  emit_node_ref_obj(lhs);
+  emitf(",");
+  emit_branch_operand_obj(rhs_b);
+  emitf("]");
+  emit_fields_end();
+  return id;
+}
+
+int64_t sirc_sem_switch(int64_t scrut, SircSemSwitchCaseList* cases, SircBranch def_b, int64_t ty) {
+  int64_t id = emit_node_with_fields_begin("sem.switch", ty);
+  emitf("\"args\":[");
+  emit_node_ref_obj(scrut);
+  emitf("],\"cases\":[");
+  if (cases) {
+    for (size_t i = 0; i < cases->len; i++) {
+      if (i) emitf(",");
+      emitf("{\"lit\":");
+      emit_node_ref_obj(cases->lit_nodes[i]);
+      emitf(",\"body\":");
+      emit_branch_operand_obj(cases->bodies[i]);
+      emitf("}");
+    }
+  }
+  emitf("],\"default\":");
+  emit_branch_operand_obj(def_b);
+  emit_fields_end();
+  if (cases) {
+    free(cases->lit_nodes);
+    free(cases->bodies);
+    free(cases);
+  }
+  return id;
+}
+
+int64_t sirc_sem_match_sum(int64_t sum_ty, int64_t scrut, SircSemMatchCaseList* cases, SircBranch def_b, int64_t ty) {
+  int64_t id = emit_node_with_fields_begin("sem.match_sum", ty);
+  emitf("\"sum\":");
+  emit_type_ref_obj(sum_ty);
+  emitf(",\"args\":[");
+  emit_node_ref_obj(scrut);
+  emitf("],\"cases\":[");
+  if (cases) {
+    for (size_t i = 0; i < cases->len; i++) {
+      if (i) emitf(",");
+      emitf("{\"variant\":%lld,\"body\":", (long long)cases->variants[i]);
+      emit_branch_operand_obj(cases->bodies[i]);
+      emitf("}");
+    }
+  }
+  emitf("],\"default\":");
+  emit_branch_operand_obj(def_b);
+  emit_fields_end();
+  if (cases) {
+    free(cases->variants);
+    free(cases->bodies);
+    free(cases);
+  }
+  return id;
+}
+
+int64_t sirc_sem_while(SircBranch cond_thunk, SircBranch body_thunk) {
+  int64_t id = emit_node_with_fields_begin("sem.while", 0);
+  emitf("\"args\":[");
+  emit_branch_operand_obj(cond_thunk);
+  emitf(",");
+  emit_branch_operand_obj(body_thunk);
+  emitf("]");
+  emit_fields_end();
+  return id;
+}
+
+int64_t sirc_sem_break(void) {
+  int64_t id = emit_node_with_fields_begin("sem.break", 0);
+  emit_fields_end();
+  return id;
+}
+
+int64_t sirc_sem_continue(void) {
+  int64_t id = emit_node_with_fields_begin("sem.continue", 0);
+  emit_fields_end();
+  return id;
+}
+
+int64_t sirc_sem_defer(SircBranch thunk) {
+  int64_t id = emit_node_with_fields_begin("sem.defer", 0);
+  emitf("\"args\":[");
+  emit_branch_operand_obj(thunk);
+  emitf("]");
+  emit_fields_end();
+  return id;
+}
+
+int64_t sirc_sem_scope(SircBranchList* defers, int64_t body_block) {
+  int64_t id = emit_node_with_fields_begin("sem.scope", 0);
+  emitf("\"defers\":[");
+  if (defers) {
+    for (size_t i = 0; i < defers->len; i++) {
+      if (i) emitf(",");
+      emit_branch_operand_obj(defers->items[i]);
+    }
+  }
+  emitf("],\"body\":");
+  emit_node_ref_obj(body_block);
+  emit_fields_end();
+  if (defers) {
+    free(defers->items);
+    free(defers);
+  }
+  return id;
+}
+
+int64_t sirc_block_value(SircNodeList* stmts) {
+  const int64_t* ns = (stmts && stmts->len) ? stmts->nodes : NULL;
+  const size_t n = (stmts && stmts->len) ? stmts->len : 0;
+  int64_t id = emit_block_node(ns, n);
+  if (stmts) {
+    free(stmts->nodes);
+    free(stmts);
+  }
+  return id;
+}
+
 static void emit_branch_args_obj(SircExprList* args) {
   if (!args || !args->len) return;
   emitf(",\"args\":[");
@@ -2525,13 +2782,13 @@ static void print_support(FILE* out, bool as_json) {
     fputs("{\"tool\":\"sirc\",\"version\":", out);
     json_write_escaped(out, SIRC_VERSION);
     fputs(",\"ids_default\":\"string\",\"ids_modes\":[\"string\",\"numeric\"],\"features\":[", out);
-    fputs("\"fun:v1\",\"closure:v1\",\"adt:v1\"", out);
-    fputs("],\"emit_src_default\":\"loc\",\"emit_src_modes\":[\"none\",\"loc\",\"src_ref\",\"both\"", out);
-    fputs("],\"types\":[", out);
-    fputs("\"prim(i8,i16,i32,i64,f32,f64,bool,ptr)\",\"^T\",\"array(T,N)\",\"fn(T,...)->R\",\"fun(Sig)\",\"closure(CallSig,EnvTy)\",\"sum{V, V:Ty,...}\"",
+    fputs("\"fun:v1\",\"closure:v1\",\"adt:v1\",\"sem:v1\"", out);
+    fputs("],\"emit_src_default\":\"loc\",\"emit_src_modes\":[\"none\",\"loc\",\"src_ref\",\"both\"]", out);
+    fputs(",\"types\":[", out);
+    fputs("\"prim(i8,i16,i32,i64,f32,f64,bool,void,ptr)\",\"^T\",\"array(T,N)\",\"fn(T,...)->R\",\"fun(Sig)\",\"closure(CallSig,EnvTy)\",\"sum{V, V:Ty,...}\"",
           out);
     fputs("],\"expr\":[", out);
-    fputs("\"ident\",\"bool\",\"string\",\"int[:type]\",\"float[:type]\",\"call\",\"call as Type\"", out);
+    fputs("\"ident\",\"bool\",\"string\",\"int[:type]\",\"float[:type]\",\"call\",\"call as Type\",\"sem.*\"", out);
     fputs("],\"cfg\":[", out);
     fputs("\"block\",\"term.br\",\"term.cbr\",\"term.switch\",\"term.ret\",\"term.trap\",\"term.unreachable\"", out);
     fputs("]}\n", out);
@@ -2548,9 +2805,10 @@ static void print_support(FILE* out, bool as_json) {
   fprintf(out, "  - fun:v1\n");
   fprintf(out, "  - closure:v1\n");
   fprintf(out, "  - adt:v1\n");
+  fprintf(out, "  - sem:v1\n");
   fprintf(out, "\n");
   fprintf(out, "Type constructors:\n");
-  fprintf(out, "  - prims: i8 i16 i32 i64 f32 f64 bool ptr\n");
+  fprintf(out, "  - prims: i8 i16 i32 i64 f32 f64 bool void ptr\n");
   fprintf(out, "  - pointer: ^T\n");
   fprintf(out, "  - array: array(T, N)\n");
   fprintf(out, "  - signature: fn(T, ...) -> R\n");
@@ -2560,6 +2818,18 @@ static void print_support(FILE* out, bool as_json) {
   fprintf(out, "\n");
   fprintf(out, "Typed mnemonic calls:\n");
   fprintf(out, "  - tag(args...) ... as Type\n");
+  fprintf(out, "\n");
+  fprintf(out, "sem:v1 sugar:\n");
+  fprintf(out, "  - sem.if(cond, val <expr>, thunk <fun>) as T\n");
+  fprintf(out, "  - sem.cond(cond, ...) as T\n");
+  fprintf(out, "  - sem.and_sc(lhs, rhsBranch)\n");
+  fprintf(out, "  - sem.or_sc(lhs, rhsBranch)\n");
+  fprintf(out, "  - sem.switch(scrut, cases:[{lit:<int>, body:<branch>}, ...], default:<branch>) as T\n");
+  fprintf(out, "  - sem.match_sum(sumTy, scrut, cases:[{variant:N, body:<branch>}, ...], default:<branch>) as T\n");
+  fprintf(out, "  - sem.while(thunk <cond>, thunk <body>)\n");
+  fprintf(out, "  - sem.break / sem.continue\n");
+  fprintf(out, "  - sem.defer(thunk <cleanup>)\n");
+  fprintf(out, "  - sem.scope(defers:[thunk <f>, ...], body: do <stmts...> end)\n");
 }
 
 static int compile_one(const char* in_path, FILE* out) {

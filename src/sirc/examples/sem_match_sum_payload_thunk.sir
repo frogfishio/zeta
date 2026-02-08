@@ -1,0 +1,25 @@
+unit u0 target host +fun:v1 +adt:v1 +sem:v1
+
+type OptI32 = sum{None, Some:i32}
+
+type UseSig = fn(i32) -> i32
+type UseFun = fun(UseSig)
+
+fn use(x:i32) -> i32
+  return i32.add(x, 1:i32)
+end
+
+fn main() -> i32 public
+  let f: UseFun = fun.sym() name "use" as UseFun
+  let v: OptI32 = adt.make(5:i32) flags variant 1 as OptI32
+  return sem.match_sum(
+    OptI32,
+    v,
+    cases: [
+      { variant: 0, body: val 0:i32 },
+      { variant: 1, body: thunk f }
+    ],
+    default: val 0:i32
+  ) as i32
+end
+

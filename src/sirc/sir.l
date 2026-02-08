@@ -220,6 +220,18 @@ STR_UNTERM1  \"([^\"\\\n]|\\.)*\n
 "term.unreachable"          { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_TERM_UNREACHABLE; }
 "term.trap"                 { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_TERM_TRAP; }
 
+"sem.if"                    { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_SEM_IF; }
+"sem.cond"                  { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_SEM_COND; }
+"sem.and_sc"                { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_SEM_AND_SC; }
+"sem.or_sc"                 { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_SEM_OR_SC; }
+"sem.switch"                { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_SEM_SWITCH; }
+"sem.match_sum"             { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_SEM_MATCH_SUM; }
+"sem.while"                 { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_SEM_WHILE; }
+"sem.break"                 { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_SEM_BREAK; }
+"sem.continue"              { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_SEM_CONTINUE; }
+"sem.defer"                 { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_SEM_DEFER; }
+"sem.scope"                 { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_SEM_SCOPE; }
+
 "scrut"                     { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_SCRUT; }
 "flags"                     { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_FLAGS; }
 "count"                     { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_COUNT; }

@@ -12,6 +12,29 @@ typedef struct SircSwitchCaseList SircSwitchCaseList;
 typedef struct SircAttrList SircAttrList;
 typedef struct SircTypeList SircTypeList;
 typedef struct SircSumVariantList SircSumVariantList;
+typedef struct SircSemSwitchCaseList SircSemSwitchCaseList;
+typedef struct SircSemMatchCaseList SircSemMatchCaseList;
+typedef struct SircBranchList SircBranchList;
+
+typedef enum SircBranchKind {
+  SIRC_BRANCH_VAL = 1,
+  SIRC_BRANCH_THUNK = 2,
+} SircBranchKind;
+
+typedef struct SircBranch {
+  SircBranchKind kind;
+  int64_t node;
+} SircBranch;
+
+typedef struct SircSemSwitchCase {
+  int64_t lit;
+  SircBranch body;
+} SircSemSwitchCase;
+
+typedef struct SircSemMatchCase {
+  long long variant;
+  SircBranch body;
+} SircSemMatchCase;
 
 // Diagnostics context (set by lexer).
 extern int sirc_last_line;
@@ -109,6 +132,34 @@ int64_t sirc_term_trap(SircAttrList* attrs);
 
 int64_t sirc_block_def(char* name, SircParamList* bparams, SircNodeList* stmts); // takes ownership of name
 void sirc_fn_def_cfg(char* name, SircParamList* params, int64_t ret, int64_t entry_block, SircNodeList* blocks); // takes ownership of name
+
+// Block reference by name (used by sem.scope bodies).
+int64_t sirc_block_ref(char* name); // takes ownership of name
+
+// sem:v1 nodes
+SircSemSwitchCaseList* sirc_sem_switch_cases_empty(void);
+SircSemSwitchCaseList* sirc_sem_switch_cases_append(SircSemSwitchCaseList* l, int64_t lit_node, SircBranch body);
+
+SircSemMatchCaseList* sirc_sem_match_cases_empty(void);
+SircSemMatchCaseList* sirc_sem_match_cases_append(SircSemMatchCaseList* l, long long variant, SircBranch body);
+
+SircBranchList* sirc_branch_list_empty(void);
+SircBranchList* sirc_branch_list_append(SircBranchList* l, SircBranch b);
+
+int64_t sirc_sem_if(int64_t cond, SircBranch then_b, SircBranch else_b, int64_t ty);
+int64_t sirc_sem_cond(int64_t cond, SircBranch then_b, SircBranch else_b, int64_t ty);
+int64_t sirc_sem_and_sc(int64_t lhs, SircBranch rhs_b);
+int64_t sirc_sem_or_sc(int64_t lhs, SircBranch rhs_b);
+int64_t sirc_sem_switch(int64_t scrut, SircSemSwitchCaseList* cases, SircBranch def_b, int64_t ty);
+int64_t sirc_sem_match_sum(int64_t sum_ty, int64_t scrut, SircSemMatchCaseList* cases, SircBranch def_b, int64_t ty);
+int64_t sirc_sem_while(SircBranch cond_thunk, SircBranch body_thunk);
+int64_t sirc_sem_break(void);
+int64_t sirc_sem_continue(void);
+int64_t sirc_sem_defer(SircBranch thunk);
+int64_t sirc_sem_scope(SircBranchList* defers, int64_t body_block);
+
+// Structural block node constructor (used by sem.scope bodies).
+int64_t sirc_block_value(SircNodeList* stmts); // takes ownership of stmts
 
 // Statements/decls
 int64_t sirc_stmt_let(char* name, int64_t ty, int64_t value);

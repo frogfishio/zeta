@@ -1,0 +1,7 @@
+unit u0 target host +sem:v1
+
+fn main() -> i32 public
+  let c: bool = true
+  return sem.if(c, val 1:i32, val 2:i32) as i32
+end
+

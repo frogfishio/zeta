@@ -1,0 +1,9 @@
+unit u0 target host +sem:v1
+
+fn main() -> bool public
+  let a: bool = true
+  let b: bool = false
+  let x: bool = sem.and_sc(a, val b)
+  return sem.or_sc(x, val true)
+end
+
