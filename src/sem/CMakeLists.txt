@@ -636,6 +636,22 @@ target_compile_options(sem_unit_trace_smoke PRIVATE -Wall -Wextra -Wpedantic -We
 
 add_test(NAME sem_trace_smoke COMMAND sem_unit_trace_smoke)
 
+add_executable(sem_unit_trace_filter_op_smoke
+  tests/test_trace_filter_op_smoke.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_trace_filter_op_smoke PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_trace_filter_op_smoke PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_trace_filter_op_smoke PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_trace_filter_op_smoke PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_trace_filter_op_smoke PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_trace_filter_op_smoke COMMAND sem_unit_trace_filter_op_smoke)
+
 add_executable(sem_unit_coverage_smoke
   tests/test_coverage_smoke.c
   sem_hosted.c

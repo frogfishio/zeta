@@ -112,7 +112,7 @@ Work items:
 - [ ] Instrumentation hooks (using `sircore` events)
   - [x] coverage JSONL (instruction hits/counts)
   - [x] basic trace JSONL (`sem --run --trace-jsonl-out PATH`)
-  - [ ] trace filters (by fn / node / op)
+  - [x] trace filters (by fn / op)
   - [ ] replayable crash minimization hooks (longer-term)
 
 ---

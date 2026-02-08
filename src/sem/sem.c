@@ -73,6 +73,8 @@ static void sem_print_help(FILE* out) {
           "  --verify FILE Validate + lower (no execution)\n"
           "  --trace-jsonl-out PATH  Write execution trace JSONL to PATH (for --run)\n"
           "  --coverage-jsonl-out PATH  Write execution coverage JSONL to PATH (for --run)\n"
+          "  --trace-func NAME  For --trace-jsonl-out, only emit events in function NAME\n"
+          "  --trace-op OP      For --trace-jsonl-out, only emit step events matching OP (e.g. i32.add, term.cbr)\n"
           "  --json        Emit --caps output as JSON (stdout)\n"
           "  --diagnostics Emit --run/--verify diagnostics as: text (default) or json\n"
           "  --all         For --run/--verify, try to emit multiple diagnostics (best-effort)\n"
@@ -878,6 +880,8 @@ int main(int argc, char** argv) {
   const char* format_opt = NULL;
   const char* trace_jsonl_out = NULL;
   const char* coverage_jsonl_out = NULL;
+  const char* trace_func = NULL;
+  const char* trace_op = NULL;
 
   dyn_cap_t dyn_caps[64];
   uint32_t dyn_n = 0;
@@ -981,6 +985,14 @@ int main(int argc, char** argv) {
     }
     if (strcmp(a, "--coverage-jsonl-out") == 0 && i + 1 < argc) {
       coverage_jsonl_out = argv[++i];
+      continue;
+    }
+    if (strcmp(a, "--trace-func") == 0 && i + 1 < argc) {
+      trace_func = argv[++i];
+      continue;
+    }
+    if (strcmp(a, "--trace-op") == 0 && i + 1 < argc) {
+      trace_op = argv[++i];
       continue;
     }
     if (strcmp(a, "--cap") == 0 && i + 1 < argc) {
@@ -1139,7 +1151,7 @@ int main(int argc, char** argv) {
   if (run_path) {
     int rc = 0;
     if ((trace_jsonl_out && trace_jsonl_out[0]) || (coverage_jsonl_out && coverage_jsonl_out[0])) {
-      rc = sem_run_sir_jsonl_events_ex(run_path, caps, cap_n, fs_root, diag_format, diag_all, trace_jsonl_out, coverage_jsonl_out);
+      rc = sem_run_sir_jsonl_events_ex(run_path, caps, cap_n, fs_root, diag_format, diag_all, trace_jsonl_out, coverage_jsonl_out, trace_func, trace_op);
     } else {
       rc = sem_run_sir_jsonl_ex(run_path, caps, cap_n, fs_root, diag_format, diag_all);
     }

@@ -37,7 +37,8 @@ int sem_run_sir_jsonl_coverage_ex(const char* path, const sem_cap_t* caps, uint3
 // Run and emit trace and/or coverage JSONL sidecars (single execution).
 // Pass NULL for any sidecar you don't want.
 int sem_run_sir_jsonl_events_ex(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root, sem_diag_format_t diag_format,
-                                bool diag_all, const char* trace_jsonl_out_path, const char* coverage_jsonl_out_path);
+                                bool diag_all, const char* trace_jsonl_out_path, const char* coverage_jsonl_out_path, const char* trace_func_filter,
+                                const char* trace_op_filter);
 
 // Parse + lower + validate (but do not execute) a small SIR JSONL subset.
 // Returns 0 on success, or 1/2 for tool errors.

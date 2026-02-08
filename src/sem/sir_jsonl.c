@@ -3049,6 +3049,8 @@ int sem_run_sir_jsonl_capture_ex(const char* path, const sem_cap_t* caps, uint32
 
 typedef struct sem_trace_ctx {
   FILE* out;
+  const char* func_filter; // exact match on function name when non-NULL
+  const char* op_filter;   // exact match on sir_inst_kind_name when non-NULL (step records only)
 } sem_trace_ctx_t;
 
 typedef struct sem_cov_ctx {
@@ -3076,6 +3078,8 @@ static void sem_trace_on_step(void* user, const sir_module_t* m, sir_func_id_t f
   sem_trace_ctx_t* t = (sem_trace_ctx_t*)user;
   if (!t || !t->out) return;
   const char* fn = sem_trace_func_name(m, fid);
+  if (t->func_filter && t->func_filter[0] && strcmp(fn, t->func_filter) != 0) return;
+  if (t->op_filter && t->op_filter[0] && strcmp(sir_inst_kind_name(k), t->op_filter) != 0) return;
   fprintf(t->out, "{\"tool\":\"sem\",\"k\":\"trace_step\",\"fid\":%u,\"func\":\"", (unsigned)fid);
   sem_json_write_escaped(t->out, fn);
   fprintf(t->out, "\",\"ip\":%u,\"op\":\"%s\"}\n", (unsigned)ip, sir_inst_kind_name(k));
@@ -3102,6 +3106,7 @@ static void sem_trace_on_mem(void* user, const sir_module_t* m, sir_func_id_t fi
   sem_trace_ctx_t* t = (sem_trace_ctx_t*)user;
   if (!t || !t->out) return;
   const char* fn = sem_trace_func_name(m, fid);
+  if (t->func_filter && t->func_filter[0] && strcmp(fn, t->func_filter) != 0) return;
   fprintf(t->out, "{\"tool\":\"sem\",\"k\":\"trace_mem\",\"fid\":%u,\"func\":\"", (unsigned)fid);
   sem_json_write_escaped(t->out, fn);
   fprintf(t->out, "\",\"ip\":%u,\"kind\":\"%s\",\"addr\":%" PRIu64 ",\"size\":%u}\n", (unsigned)ip, (k == SIR_MEM_WRITE) ? "w" : "r",
@@ -3112,6 +3117,7 @@ static void sem_trace_on_hostcall(void* user, const sir_module_t* m, sir_func_id
   sem_trace_ctx_t* t = (sem_trace_ctx_t*)user;
   if (!t || !t->out) return;
   const char* fn = sem_trace_func_name(m, fid);
+  if (t->func_filter && t->func_filter[0] && strcmp(fn, t->func_filter) != 0) return;
   fprintf(t->out, "{\"tool\":\"sem\",\"k\":\"trace_hostcall\",\"fid\":%u,\"func\":\"", (unsigned)fid);
   sem_json_write_escaped(t->out, fn);
   fprintf(t->out, "\",\"ip\":%u,\"callee\":\"", (unsigned)ip);
@@ -3192,7 +3198,8 @@ static void sem_events_post_run(void* user, const sir_module_t* m, int32_t exec_
 }
 
 int sem_run_sir_jsonl_events_ex(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root, sem_diag_format_t diag_format,
-                                bool diag_all, const char* trace_jsonl_out_path, const char* coverage_jsonl_out_path) {
+                                bool diag_all, const char* trace_jsonl_out_path, const char* coverage_jsonl_out_path, const char* trace_func_filter,
+                                const char* trace_op_filter) {
   FILE* trace_out = NULL;
   FILE* cov_out = NULL;
 
@@ -3212,7 +3219,7 @@ int sem_run_sir_jsonl_events_ex(const char* path, const sem_cap_t* caps, uint32_
     }
   }
 
-  sem_trace_ctx_t t = {.out = trace_out};
+  sem_trace_ctx_t t = {.out = trace_out, .func_filter = trace_func_filter, .op_filter = trace_op_filter};
   sem_cov_ctx_t cov = {.out = cov_out};
 
   sem_events_ctx_t ev = {.trace = trace_out ? &t : NULL, .cov = cov_out ? &cov : NULL, .cov_inited = false};
@@ -3243,7 +3250,7 @@ int sem_run_sir_jsonl_trace_ex(const char* path, const sem_cap_t* caps, uint32_t
     fprintf(stderr, "sem: missing --trace-jsonl-out path\n");
     return 2;
   }
-  return sem_run_sir_jsonl_events_ex(path, caps, cap_count, fs_root, diag_format, diag_all, trace_jsonl_out_path, NULL);
+  return sem_run_sir_jsonl_events_ex(path, caps, cap_count, fs_root, diag_format, diag_all, trace_jsonl_out_path, NULL, NULL, NULL);
 }
 
 int sem_run_sir_jsonl_coverage_ex(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root, sem_diag_format_t diag_format,
@@ -3252,7 +3259,7 @@ int sem_run_sir_jsonl_coverage_ex(const char* path, const sem_cap_t* caps, uint3
     fprintf(stderr, "sem: missing --coverage-jsonl-out path\n");
     return 2;
   }
-  return sem_run_sir_jsonl_events_ex(path, caps, cap_count, fs_root, diag_format, diag_all, NULL, coverage_jsonl_out_path);
+  return sem_run_sir_jsonl_events_ex(path, caps, cap_count, fs_root, diag_format, diag_all, NULL, coverage_jsonl_out_path, NULL, NULL);
 }
 
 int sem_verify_sir_jsonl(const char* path, sem_diag_format_t diag_format) {
