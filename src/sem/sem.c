@@ -346,10 +346,17 @@ static void sem_print_support(FILE* out, bool json) {
       "call",
       "call.indirect",
 
+      // adt pack (adt:v1, MVP)
+      "adt.make",
+      "adt.tag",
+      "adt.is",
+      "adt.get",
+
       // sem intent (sem:v1)
       "sem.if",
       "sem.and_sc / sem.or_sc",
       "sem.switch",
+      "sem.match_sum",
       "sem.defer",
       "sem.scope",
       "sem.while",

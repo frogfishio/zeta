@@ -540,6 +540,38 @@ target_compile_options(sem_unit_run_sem_switch_thunk_trap_not_taken PRIVATE -Wal
 
 add_test(NAME sem_run_sem_switch_thunk_trap_not_taken COMMAND sem_unit_run_sem_switch_thunk_trap_not_taken)
 
+add_executable(sem_unit_run_sem_match_sum_option_i32
+  tests/test_run_sem_match_sum_option_i32.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_sem_match_sum_option_i32 PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_sem_match_sum_option_i32 PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_sem_match_sum_option_i32 PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_sem_match_sum_option_i32 PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_sem_match_sum_option_i32 PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_sem_match_sum_option_i32 COMMAND sem_unit_run_sem_match_sum_option_i32)
+
+add_executable(sem_unit_run_sem_match_sum_let_option_i32
+  tests/test_run_sem_match_sum_let_option_i32.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_sem_match_sum_let_option_i32 PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_sem_match_sum_let_option_i32 PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_sem_match_sum_let_option_i32 PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_sem_match_sum_let_option_i32 PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_sem_match_sum_let_option_i32 PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_sem_match_sum_let_option_i32 COMMAND sem_unit_run_sem_match_sum_let_option_i32)
+
 add_executable(sem_unit_run_sem_while_global_counter
   tests/test_run_sem_while_global_counter.c
   sem_hosted.c

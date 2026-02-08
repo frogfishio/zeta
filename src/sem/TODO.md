@@ -80,8 +80,8 @@ Acceptance:
 
 Work items:
 - [ ] `adt:v1` execution parity
-  - [ ] `adt.make`, `adt.tag`, `adt.is`, `adt.get`
-  - [ ] Match the normative layout/semantics contract used by `sircc`
+  - [x] `adt.make`, `adt.tag`, `adt.is`, `adt.get`
+  - [x] Match the normative layout/semantics contract used by `sircc` (MVP: `{tag:i32,payload}` in guest memory)
 - [ ] `fun:v1` execution parity
   - [x] `fun.sym` (MVP: only in-module function symbols)
   - [ ] `fun.cmp.eq`, `fun.cmp.ne`
@@ -93,7 +93,7 @@ Work items:
 - [ ] `sem:v1` parity (avoid IR drift)
   - [x] Decide: implement lowering rules in SEM (MVP, inline control-flow in sircore bytecode)
   - [x] Support runnable intent set (MVP): `sem.if`, `sem.and_sc`, `sem.or_sc`, `sem.switch`, `sem.while`, `sem.continue`, `sem.defer`, `sem.scope`
-  - [ ] Remaining intent set: `sem.cond`, `sem.match_sum`, `sem.break`
+  - [ ] Remaining intent set: `sem.cond`, `sem.break`
 
 ### Stage D — CI-grade emulator “superpowers” (optional, makes SEM a platform)
 
@@ -210,11 +210,11 @@ Work items:
 - [ ] `call.closure`
 
 ### ADTs / sums (adt:v1)
-- [ ] `adt.make`
-- [ ] `adt.tag`
-- [ ] `adt.is`
-- [ ] `adt.get`
-- [ ] Normative layout contract for sums (size/align/payload rules) for SEM execution
+- [x] `adt.make`
+- [x] `adt.tag`
+- [x] `adt.is`
+- [x] `adt.get`
+- [x] Normative layout contract for sums (size/align/payload rules) for SEM execution
 
 ### `sem:*` intent mnemonics (semantic desugaring)
 - [x] `sem.if` (MVP: value-only lowers to `select`, thunk branches use inline control-flow)
@@ -224,7 +224,7 @@ Work items:
 - [x] `sem.while` (MVP: thunk(cond)->bool + thunk(body)->any, lowered as loop in bytecode)
 - [x] `sem.defer` / `sem.scope` (MVP: stack of fun.sym thunks, runs on return + fallthrough)
 - [x] `sem.continue` (MVP: allowed in legacy thunk bodies; treated as `return 0`)
-- [ ] `sem.match_sum` (desugar to `adt.tag` + `term.switch` + join-args)
+- [x] `sem.match_sum` (desugar to `adt.tag` + `term.switch` + join-args)
 
 ## P4 (later / optional packs)
 

@@ -22,6 +22,7 @@ typedef struct type_info {
   bool is_ptr;
   bool is_struct;
   bool is_fun;
+  bool is_sum;
   bool layout_visiting;
   sir_prim_type_t prim; // for prim
   uint32_t* params;     // for fn, arena-owned
@@ -36,6 +37,8 @@ typedef struct type_info {
   uint32_t struct_field_count;
   bool struct_packed;
   uint32_t struct_align_override;  // 0 means computed
+  uint32_t* sum_payload_types;     // arena-owned; 0 means nullary
+  uint32_t sum_variant_count;
   uint32_t loc_line;
 } type_info_t;
 
@@ -136,6 +139,14 @@ typedef struct sirj_ctx {
   } params[32];
   uint32_t param_count;
 
+  // Current-function let bindings (name -> slot), in-stream order (shadowing allowed).
+  struct {
+    const char* name;
+    sir_val_id_t slot;
+    val_kind_t kind;
+  } lets[64];
+  uint32_t let_count;
+
   // Diagnostics
   sem_diag_format_t diag_format;
   const char* cur_path;
@@ -169,6 +180,9 @@ typedef struct sirj_ctx {
 static bool eval_node(sirj_ctx_t* c, uint32_t node_id, sir_val_id_t* out_slot, val_kind_t* out_kind);
 static bool resolve_internal_func_by_name(const sirj_ctx_t* c, const char* nm, sir_func_id_t* out);
 static bool parse_const_i32_value(const sirj_ctx_t* c, uint32_t node_id, int32_t* out);
+static bool type_layout(sirj_ctx_t* c, uint32_t type_ref, uint32_t* out_size, uint32_t* out_align);
+static bool sum_layout(sirj_ctx_t* c, uint32_t type_ref, uint32_t* out_size, uint32_t* out_align, uint32_t* out_payload_off, uint32_t* out_payload_size,
+                       uint32_t* out_payload_align);
 
 static void sirj_diag_setf(sirj_ctx_t* c, const char* code, const char* path, uint32_t line, uint32_t node_id, const char* tag, const char* fmt,
                            ...) {
@@ -621,6 +635,11 @@ static bool type_to_val_kind(const sirj_ctx_t* c, uint32_t type_id, val_kind_t* 
     *out = VK_PTR;
     return true;
   }
+  if (t->is_sum) {
+    // MVP execution model: sum values are represented as pointers to a sum-layout blob in guest memory.
+    *out = VK_PTR;
+    return true;
+  }
   switch (t->prim) {
     case SIR_PRIM_I1:
       *out = VK_I1;
@@ -649,6 +668,21 @@ static bool type_to_val_kind(const sirj_ctx_t* c, uint32_t type_id, val_kind_t* 
     default:
       return false;
   }
+}
+
+static bool sum_variant_payload_type(const sirj_ctx_t* c, uint32_t sum_type_id, uint32_t variant, uint32_t* out_payload_type) {
+  if (!c || !out_payload_type) return false;
+  *out_payload_type = 0;
+  if (sum_type_id == 0 || sum_type_id >= c->type_cap) return false;
+  const type_info_t* t = &c->types[sum_type_id];
+  if (!t->present || !t->is_sum) return false;
+  if (variant >= t->sum_variant_count) return false;
+  if (!t->sum_payload_types) {
+    *out_payload_type = 0;
+    return true;
+  }
+  *out_payload_type = t->sum_payload_types[variant];
+  return true;
 }
 
 static bool get_const_bool_cached(sirj_ctx_t* c, bool v, sir_val_id_t* out_slot) {
@@ -681,6 +715,71 @@ static bool emit_copy_slot(sirj_ctx_t* c, sir_val_id_t dst, sir_val_id_t src) {
   return true;
 }
 
+static bool emit_call_fun_sym_slots(sirj_ctx_t* c, uint32_t callsite_node_id, uint32_t fun_sym_node_id, const sir_val_id_t* arg_slots,
+                                    const val_kind_t* arg_kinds, uint32_t argc, bool discard_result, bool has_dst_override,
+                                    sir_val_id_t dst_override, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c) return false;
+  if (fun_sym_node_id >= c->node_cap || !c->nodes[fun_sym_node_id].present) return false;
+  const node_info_t* callee_n = &c->nodes[fun_sym_node_id];
+  if (!callee_n->tag || strcmp(callee_n->tag, "fun.sym") != 0) return false;
+  if (!callee_n->fields_obj || callee_n->fields_obj->type != JSON_OBJECT) return false;
+  const char* fn_name = json_get_string(json_obj_get(callee_n->fields_obj, "name"));
+  if (!fn_name) return false;
+
+  sir_func_id_t callee_fid = 0;
+  if (!resolve_internal_func_by_name(c, fn_name, &callee_fid)) return false;
+
+  const uint32_t fun_ty = callee_n->type_ref;
+  if (fun_ty == 0 || fun_ty >= c->type_cap || !c->types[fun_ty].present || !c->types[fun_ty].is_fun) return false;
+  const uint32_t sig_tid = c->types[fun_ty].fun_sig;
+  if (sig_tid == 0 || sig_tid >= c->type_cap || !c->types[sig_tid].present || !c->types[sig_tid].is_fn) return false;
+  const type_info_t* sti = &c->types[sig_tid];
+
+  if (argc != (uint32_t)sti->param_count) return false;
+  if (argc > 16) return false;
+
+  for (uint32_t i = 0; i < argc; i++) {
+    val_kind_t expected = VK_INVALID;
+    if (!type_to_val_kind(c, sti->params[i], &expected)) return false;
+    if (arg_kinds[i] != expected) return false;
+  }
+
+  // Compute result contract from fn type.
+  uint8_t result_count = 0;
+  val_kind_t rk = VK_INVALID;
+  if (sti->ret) {
+    if (sti->ret >= c->type_cap || !c->types[sti->ret].present || c->types[sti->ret].is_fn) return false;
+    if (c->types[sti->ret].prim == SIR_PRIM_VOID) {
+      result_count = 0;
+      rk = VK_INVALID;
+    } else {
+      if (!type_to_val_kind(c, sti->ret, &rk)) return false;
+      if (rk == VK_INVALID) return false;
+      result_count = 1;
+    }
+  }
+  sir_val_id_t res_slot = 0;
+  if (result_count) {
+    res_slot = has_dst_override ? dst_override : alloc_slot(c, rk);
+  }
+
+  sir_mb_set_src(c->mb, callsite_node_id,
+                 (callsite_node_id < c->node_cap && c->nodes[callsite_node_id].present) ? c->nodes[callsite_node_id].loc_line : 0);
+  const bool ok = result_count ? sir_mb_emit_call_func_res(c->mb, c->fn, callee_fid, arg_slots, argc, &res_slot, result_count)
+                               : sir_mb_emit_call_func_res(c->mb, c->fn, callee_fid, arg_slots, argc, NULL, 0);
+  sir_mb_clear_src(c->mb);
+  if (!ok) return false;
+
+  if (!discard_result && result_count) {
+    if (out_slot) *out_slot = res_slot;
+    if (out_kind) *out_kind = rk;
+  } else {
+    if (out_slot) *out_slot = 0;
+    if (out_kind) *out_kind = VK_INVALID;
+  }
+  return true;
+}
+
 static bool emit_call_fun_sym(sirj_ctx_t* c, uint32_t callsite_node_id, uint32_t fun_sym_node_id, const uint32_t* arg_nodes, uint32_t argc,
                               bool discard_result, bool has_dst_override, sir_val_id_t dst_override, sir_val_id_t* out_slot, val_kind_t* out_kind) {
   if (!c) return false;
@@ -704,6 +803,7 @@ static bool emit_call_fun_sym(sirj_ctx_t* c, uint32_t callsite_node_id, uint32_t
   if (argc > 16) return false;
 
   sir_val_id_t args_slots[16];
+  val_kind_t args_kinds[16];
   for (uint32_t i = 0; i < argc; i++) {
     sir_val_id_t s = 0;
     val_kind_t k = VK_INVALID;
@@ -712,41 +812,11 @@ static bool emit_call_fun_sym(sirj_ctx_t* c, uint32_t callsite_node_id, uint32_t
     if (!type_to_val_kind(c, sti->params[i], &expected)) return false;
     if (k != expected) return false;
     args_slots[i] = s;
+    args_kinds[i] = k;
   }
 
-  // Compute result contract from fn type.
-  uint8_t result_count = 0;
-  val_kind_t rk = VK_INVALID;
-  if (sti->ret) {
-    if (sti->ret >= c->type_cap || !c->types[sti->ret].present || c->types[sti->ret].is_fn) return false;
-    if (c->types[sti->ret].prim == SIR_PRIM_VOID) {
-      result_count = 0;
-      rk = VK_INVALID;
-    } else {
-      if (!type_to_val_kind(c, sti->ret, &rk)) return false;
-      if (rk == VK_INVALID) return false;
-      result_count = 1;
-    }
-  }
-  sir_val_id_t res_slot = 0;
-  if (result_count) {
-    res_slot = has_dst_override ? dst_override : alloc_slot(c, rk);
-  }
-
-  sir_mb_set_src(c->mb, callsite_node_id, (callsite_node_id < c->node_cap && c->nodes[callsite_node_id].present) ? c->nodes[callsite_node_id].loc_line : 0);
-  const bool ok = result_count ? sir_mb_emit_call_func_res(c->mb, c->fn, callee_fid, args_slots, argc, &res_slot, result_count)
-                               : sir_mb_emit_call_func_res(c->mb, c->fn, callee_fid, args_slots, argc, NULL, 0);
-  sir_mb_clear_src(c->mb);
-  if (!ok) return false;
-
-  if (!discard_result && result_count) {
-    if (out_slot) *out_slot = res_slot;
-    if (out_kind) *out_kind = rk;
-  } else {
-    if (out_slot) *out_slot = 0;
-    if (out_kind) *out_kind = VK_INVALID;
-  }
-  return true;
+  return emit_call_fun_sym_slots(c, callsite_node_id, fun_sym_node_id, args_slots, args_kinds, argc, discard_result, has_dst_override, dst_override,
+                                 out_slot, out_kind);
 }
 
 static bool emit_run_defers(sirj_ctx_t* c, uint32_t base_depth, uint32_t callsite_node_id) {
@@ -951,12 +1021,73 @@ static bool round_up_u32(uint32_t x, uint32_t a, uint32_t* out) {
   return true;
 }
 
+static bool sum_layout(sirj_ctx_t* c, uint32_t type_ref, uint32_t* out_size, uint32_t* out_align, uint32_t* out_payload_off,
+                       uint32_t* out_payload_size, uint32_t* out_payload_align) {
+  if (!c || !out_size || !out_align || !out_payload_off || !out_payload_size || !out_payload_align) return false;
+  if (type_ref == 0 || type_ref >= c->type_cap) return false;
+  type_info_t* t = &c->types[type_ref];
+  if (!t->present || t->is_fn || !t->is_sum) return false;
+
+  if (t->layout_visiting) return false;
+  t->layout_visiting = true;
+
+  uint32_t max_ps = 0;
+  uint32_t max_pa = 1;
+  for (uint32_t i = 0; i < t->sum_variant_count; i++) {
+    const uint32_t pty = t->sum_payload_types ? t->sum_payload_types[i] : 0;
+    if (!pty) continue;
+    uint32_t ps = 0, pa = 0;
+    if (!type_layout(c, pty, &ps, &pa)) {
+      t->layout_visiting = false;
+      return false;
+    }
+    if (ps > max_ps) max_ps = ps;
+    if (pa > max_pa) max_pa = pa;
+  }
+  if (max_pa == 0) max_pa = 1;
+  if (max_pa > (1u << 20)) {
+    t->layout_visiting = false;
+    return false;
+  }
+
+  // tag:i32 at offset 0 (size 4, align 4).
+  const uint32_t overall_align = (max_pa > 4u) ? max_pa : 4u;
+  uint32_t payload_off = 0;
+  if (!round_up_u32(4u, max_pa, &payload_off)) {
+    t->layout_visiting = false;
+    return false;
+  }
+  uint32_t size0 = 0;
+  const uint64_t size64 = (uint64_t)payload_off + (uint64_t)max_ps;
+  if (size64 > 0x7FFFFFFFull) {
+    t->layout_visiting = false;
+    return false;
+  }
+  if (!round_up_u32((uint32_t)size64, overall_align, &size0)) {
+    t->layout_visiting = false;
+    return false;
+  }
+
+  t->layout_visiting = false;
+  *out_size = size0;
+  *out_align = overall_align;
+  *out_payload_off = payload_off;
+  *out_payload_size = max_ps;
+  *out_payload_align = max_pa;
+  return true;
+}
+
 static bool type_layout(sirj_ctx_t* c, uint32_t type_ref, uint32_t* out_size, uint32_t* out_align) {
   if (!c || !out_size || !out_align) return false;
   if (type_ref == 0 || type_ref >= c->type_cap) return false;
   if (!c->types[type_ref].present) return false;
   type_info_t* t = &c->types[type_ref];
   if (t->is_fn) return false;
+
+  if (t->is_sum) {
+    uint32_t payload_off = 0, payload_size = 0, payload_align = 0;
+    return sum_layout(c, type_ref, out_size, out_align, &payload_off, &payload_size, &payload_align);
+  }
 
   if (t->is_array) {
     if (t->array_of == 0) return false;
@@ -1722,6 +1853,18 @@ static bool eval_name(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir
   if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
   const char* nm = json_get_string(json_obj_get(n->fields_obj, "name"));
   if (!nm) return false;
+
+  // Let bindings shadow params.
+  for (uint32_t i = c->let_count; i > 0; i--) {
+    if (strcmp(c->lets[i - 1].name, nm) == 0) {
+      const sir_val_id_t slot = c->lets[i - 1].slot;
+      const val_kind_t k = c->lets[i - 1].kind;
+      if (!set_node_val(c, node_id, slot, k)) return false;
+      *out_slot = slot;
+      *out_kind = k;
+      return true;
+    }
+  }
 
   for (uint32_t i = 0; i < c->param_count; i++) {
     if (strcmp(c->params[i].name, nm) == 0) {
@@ -2741,6 +2884,581 @@ static bool eval_ptr_cmp(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, 
   return true;
 }
 
+static bool emit_ptr_add_i32_imm(sirj_ctx_t* c, uint32_t callsite_node_id, uint32_t callsite_line, sir_val_id_t base_ptr, int32_t imm,
+                                 sir_val_id_t* out_ptr) {
+  if (!c || !out_ptr) return false;
+  const sir_val_id_t off = alloc_slot(c, VK_I32);
+  const sir_val_id_t dst = alloc_slot(c, VK_PTR);
+  sir_mb_set_src(c->mb, callsite_node_id, callsite_line);
+  if (!sir_mb_emit_const_i32(c->mb, c->fn, off, imm)) return false;
+  if (!sir_mb_emit_ptr_add(c->mb, c->fn, dst, base_ptr, off)) return false;
+  sir_mb_clear_src(c->mb);
+  *out_ptr = dst;
+  return true;
+}
+
+static bool emit_sum_tag_load(sirj_ctx_t* c, uint32_t callsite_node_id, uint32_t callsite_line, sir_val_id_t sum_ptr, sir_val_id_t* out_tag) {
+  if (!c || !out_tag) return false;
+  const sir_val_id_t dst = alloc_slot(c, VK_I32);
+  sir_mb_set_src(c->mb, callsite_node_id, callsite_line);
+  if (!sir_mb_emit_load_i32(c->mb, c->fn, dst, sum_ptr, 4)) return false;
+  sir_mb_clear_src(c->mb);
+  *out_tag = dst;
+  return true;
+}
+
+static bool emit_sum_payload_ptr(sirj_ctx_t* c, uint32_t callsite_node_id, uint32_t callsite_line, uint32_t sum_type_id, sir_val_id_t sum_ptr,
+                                 sir_val_id_t* out_payload_ptr) {
+  if (!c || !out_payload_ptr) return false;
+  uint32_t size = 0, align = 0, payload_off = 0, payload_size = 0, payload_align = 0;
+  if (!sum_layout(c, sum_type_id, &size, &align, &payload_off, &payload_size, &payload_align)) return false;
+  (void)size;
+  (void)align;
+  (void)payload_size;
+  (void)payload_align;
+  if (payload_off == 0) {
+    *out_payload_ptr = sum_ptr;
+    return true;
+  }
+  return emit_ptr_add_i32_imm(c, callsite_node_id, callsite_line, sum_ptr, (int32_t)payload_off, out_payload_ptr);
+}
+
+static bool emit_sum_payload_load_for_variant(sirj_ctx_t* c, uint32_t callsite_node_id, uint32_t callsite_line, uint32_t sum_ty, sir_val_id_t sum_ptr,
+                                              uint32_t variant, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !out_slot || !out_kind) return false;
+  *out_slot = 0;
+  *out_kind = VK_INVALID;
+
+  uint32_t payload_ty = 0;
+  if (!sum_variant_payload_type(c, sum_ty, variant, &payload_ty)) return false;
+  if (payload_ty == 0) return false;
+
+  val_kind_t pk = VK_INVALID;
+  if (!type_to_val_kind(c, payload_ty, &pk)) return false;
+  if (pk == VK_INVALID || pk == VK_I1) return false;
+
+  uint32_t size = 0, align = 0, payload_off = 0, payload_size = 0, payload_align = 0;
+  if (!sum_layout(c, sum_ty, &size, &align, &payload_off, &payload_size, &payload_align)) return false;
+  (void)size;
+  (void)align;
+  (void)payload_size;
+
+  sir_val_id_t payload_ptr = sum_ptr;
+  if (payload_off) {
+    if (!emit_ptr_add_i32_imm(c, callsite_node_id, callsite_line, sum_ptr, (int32_t)payload_off, &payload_ptr)) return false;
+  }
+
+  const sir_val_id_t dst = alloc_slot(c, pk);
+  sir_mb_set_src(c->mb, callsite_node_id, callsite_line);
+
+  bool ok = false;
+  switch (pk) {
+    case VK_I8:
+      ok = sir_mb_emit_load_i8(c->mb, c->fn, dst, payload_ptr, payload_align ? payload_align : 1);
+      break;
+    case VK_I16:
+      ok = sir_mb_emit_load_i16(c->mb, c->fn, dst, payload_ptr, payload_align ? payload_align : 2);
+      break;
+    case VK_I32:
+      ok = sir_mb_emit_load_i32(c->mb, c->fn, dst, payload_ptr, payload_align ? payload_align : 4);
+      break;
+    case VK_I64:
+      ok = sir_mb_emit_load_i64(c->mb, c->fn, dst, payload_ptr, payload_align ? payload_align : 8);
+      break;
+    case VK_PTR:
+      ok = sir_mb_emit_load_ptr(c->mb, c->fn, dst, payload_ptr, payload_align ? payload_align : 8);
+      break;
+    case VK_F32:
+      ok = sir_mb_emit_load_f32(c->mb, c->fn, dst, payload_ptr, payload_align ? payload_align : 4);
+      break;
+    case VK_F64:
+      ok = sir_mb_emit_load_f64(c->mb, c->fn, dst, payload_ptr, payload_align ? payload_align : 8);
+      break;
+    case VK_BOOL: {
+      const sir_val_id_t b8 = alloc_slot(c, VK_I8);
+      if (!sir_mb_emit_load_i8(c->mb, c->fn, b8, payload_ptr, payload_align ? payload_align : 1)) return false;
+      const sir_val_id_t bi32 = alloc_slot(c, VK_I32);
+      const sir_val_id_t zi32 = alloc_slot(c, VK_I32);
+      const sir_val_id_t t = alloc_slot(c, VK_BOOL);
+      if (!sir_mb_emit_i32_zext_i8(c->mb, c->fn, bi32, b8)) return false;
+      if (!sir_mb_emit_const_i32(c->mb, c->fn, zi32, 0)) return false;
+      if (!sir_mb_emit_i32_cmp_ne(c->mb, c->fn, t, bi32, zi32)) return false;
+      if (!emit_copy_slot(c, dst, t)) return false;
+      ok = true;
+      break;
+    }
+    default:
+      ok = false;
+      break;
+  }
+
+  sir_mb_clear_src(c->mb);
+  if (!ok) return false;
+  *out_slot = dst;
+  *out_kind = pk;
+  return true;
+}
+
+static bool eval_adt_make(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const uint32_t sum_ty = n->type_ref;
+  if (sum_ty == 0 || sum_ty >= c->type_cap || !c->types[sum_ty].present || !c->types[sum_ty].is_sum) {
+    sirj_diag_setf(c, "sem.adt.make.bad_type", c->cur_path, n->loc_line, node_id, n->tag, "adt.make requires sum type_ref");
+    return false;
+  }
+
+  const JsonValue* flags = json_obj_get(n->fields_obj, "flags");
+  if (!json_is_object(flags)) return false;
+  uint32_t variant = 0;
+  if (!json_get_u32(json_obj_get((JsonValue*)flags, "variant"), &variant)) return false;
+
+  uint32_t payload_ty = 0;
+  if (!sum_variant_payload_type(c, sum_ty, variant, &payload_ty)) {
+    // deterministic trap on out-of-range variant
+    sir_mb_set_src(c->mb, node_id, n->loc_line);
+    if (!sir_mb_emit_exit(c->mb, c->fn, 255)) return false;
+    sir_mb_clear_src(c->mb);
+    *out_slot = 0;
+    *out_kind = VK_INVALID;
+    return true;
+  }
+
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (payload_ty == 0) {
+    if (av && json_is_array(av) && av->v.arr.len != 0) return false;
+  } else {
+    if (!json_is_array(av) || av->v.arr.len != 1) return false;
+  }
+
+  uint32_t size = 0, align = 0, payload_off = 0, payload_size = 0, payload_align = 0;
+  if (!sum_layout(c, sum_ty, &size, &align, &payload_off, &payload_size, &payload_align)) return false;
+
+  const sir_val_id_t ptr_slot = alloc_slot(c, VK_PTR);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_alloca(c->mb, c->fn, ptr_slot, size, align)) return false;
+
+  // Zero-initialize entire sum blob for determinism.
+  const sir_val_id_t zbyte = alloc_slot(c, VK_I8);
+  const sir_val_id_t zlen = alloc_slot(c, VK_I32);
+  if (!sir_mb_emit_const_i8(c->mb, c->fn, zbyte, 0)) return false;
+  if (!sir_mb_emit_const_i32(c->mb, c->fn, zlen, (int32_t)size)) return false;
+  if (!sir_mb_emit_mem_fill(c->mb, c->fn, ptr_slot, zbyte, zlen)) return false;
+
+  // Store tag.
+  const sir_val_id_t tagv = alloc_slot(c, VK_I32);
+  if (!sir_mb_emit_const_i32(c->mb, c->fn, tagv, (int32_t)variant)) return false;
+  if (!sir_mb_emit_store_i32(c->mb, c->fn, ptr_slot, tagv, 4)) return false;
+
+  if (payload_ty != 0) {
+    uint32_t payload_node = 0;
+    if (!parse_ref_id(av->v.arr.items[0], &payload_node)) return false;
+    sir_val_id_t pv = 0;
+    val_kind_t pk = VK_INVALID;
+    if (!eval_node(c, payload_node, &pv, &pk)) return false;
+    val_kind_t expected = VK_INVALID;
+    if (!type_to_val_kind(c, payload_ty, &expected)) return false;
+    if (pk != expected) return false;
+
+    sir_val_id_t payload_ptr = 0;
+    if (!emit_sum_payload_ptr(c, node_id, n->loc_line, sum_ty, ptr_slot, &payload_ptr)) return false;
+
+    // Store payload in its in-memory encoding (MVP: prim payloads).
+    bool ok = false;
+    switch (pk) {
+      case VK_I8:
+        ok = sir_mb_emit_store_i8(c->mb, c->fn, payload_ptr, pv, payload_align ? payload_align : 1);
+        break;
+      case VK_I16:
+        ok = sir_mb_emit_store_i16(c->mb, c->fn, payload_ptr, pv, payload_align ? payload_align : 2);
+        break;
+      case VK_I32:
+        ok = sir_mb_emit_store_i32(c->mb, c->fn, payload_ptr, pv, payload_align ? payload_align : 4);
+        break;
+      case VK_I64:
+        ok = sir_mb_emit_store_i64(c->mb, c->fn, payload_ptr, pv, payload_align ? payload_align : 8);
+        break;
+      case VK_PTR:
+        ok = sir_mb_emit_store_ptr(c->mb, c->fn, payload_ptr, pv, payload_align ? payload_align : 8);
+        break;
+      case VK_F32:
+        ok = sir_mb_emit_store_f32(c->mb, c->fn, payload_ptr, pv, payload_align ? payload_align : 4);
+        break;
+      case VK_F64:
+        ok = sir_mb_emit_store_f64(c->mb, c->fn, payload_ptr, pv, payload_align ? payload_align : 8);
+        break;
+      case VK_BOOL: {
+        // bool in-memory encoding is one byte 0/1.
+        const sir_val_id_t one = alloc_slot(c, VK_I8);
+        const sir_val_id_t zero = alloc_slot(c, VK_I8);
+        const sir_val_id_t b8 = alloc_slot(c, VK_I8);
+        if (!sir_mb_emit_const_i8(c->mb, c->fn, one, 1)) return false;
+        if (!sir_mb_emit_const_i8(c->mb, c->fn, zero, 0)) return false;
+        if (!sir_mb_emit_select(c->mb, c->fn, b8, pv, one, zero)) return false;
+        ok = sir_mb_emit_store_i8(c->mb, c->fn, payload_ptr, b8, payload_align ? payload_align : 1);
+        break;
+      }
+      default:
+        ok = false;
+        break;
+    }
+    if (!ok) return false;
+  }
+
+  sir_mb_clear_src(c->mb);
+  if (!set_node_val(c, node_id, ptr_slot, VK_PTR)) return false;
+  *out_slot = ptr_slot;
+  *out_kind = VK_PTR;
+  return true;
+}
+
+static bool eval_adt_tag(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 1) return false;
+  uint32_t vid = 0;
+  if (!parse_ref_id(av->v.arr.items[0], &vid)) return false;
+  sir_val_id_t vslot = 0;
+  val_kind_t vk = VK_INVALID;
+  if (!eval_node(c, vid, &vslot, &vk)) return false;
+  if (vk != VK_PTR) return false;
+  sir_val_id_t tag = 0;
+  if (!emit_sum_tag_load(c, node_id, n->loc_line, vslot, &tag)) return false;
+  if (!set_node_val(c, node_id, tag, VK_I32)) return false;
+  *out_slot = tag;
+  *out_kind = VK_I32;
+  return true;
+}
+
+static bool eval_adt_is(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* flags = json_obj_get(n->fields_obj, "flags");
+  if (!json_is_object(flags)) return false;
+  uint32_t variant = 0;
+  if (!json_get_u32(json_obj_get((JsonValue*)flags, "variant"), &variant)) return false;
+
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 1) return false;
+  uint32_t vid = 0;
+  if (!parse_ref_id(av->v.arr.items[0], &vid)) return false;
+  sir_val_id_t vslot = 0;
+  val_kind_t vk = VK_INVALID;
+  if (!eval_node(c, vid, &vslot, &vk)) return false;
+  if (vk != VK_PTR) return false;
+
+  const sir_val_id_t tag = alloc_slot(c, VK_I32);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_load_i32(c->mb, c->fn, tag, vslot, 4)) return false;
+  const sir_val_id_t lit = alloc_slot(c, VK_I32);
+  if (!sir_mb_emit_const_i32(c->mb, c->fn, lit, (int32_t)variant)) return false;
+  const sir_val_id_t dst = alloc_slot(c, VK_BOOL);
+  if (!sir_mb_emit_i32_cmp_eq(c->mb, c->fn, dst, tag, lit)) return false;
+  sir_mb_clear_src(c->mb);
+  if (!set_node_val(c, node_id, dst, VK_BOOL)) return false;
+  *out_slot = dst;
+  *out_kind = VK_BOOL;
+  return true;
+}
+
+static bool eval_adt_get(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+
+  const uint32_t sum_ty = n->type_ref;
+  if (sum_ty == 0 || sum_ty >= c->type_cap || !c->types[sum_ty].present || !c->types[sum_ty].is_sum) return false;
+  const JsonValue* flags = json_obj_get(n->fields_obj, "flags");
+  if (!json_is_object(flags)) return false;
+  uint32_t variant = 0;
+  if (!json_get_u32(json_obj_get((JsonValue*)flags, "variant"), &variant)) return false;
+  uint32_t payload_ty = 0;
+  if (!sum_variant_payload_type(c, sum_ty, variant, &payload_ty)) {
+    sir_mb_set_src(c->mb, node_id, n->loc_line);
+    if (!sir_mb_emit_exit(c->mb, c->fn, 255)) return false;
+    sir_mb_clear_src(c->mb);
+    *out_slot = 0;
+    *out_kind = VK_INVALID;
+    return true;
+  }
+  if (payload_ty == 0) return false;
+
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 1) return false;
+  uint32_t vid = 0;
+  if (!parse_ref_id(av->v.arr.items[0], &vid)) return false;
+  sir_val_id_t vslot = 0;
+  val_kind_t vk = VK_INVALID;
+  if (!eval_node(c, vid, &vslot, &vk)) return false;
+  if (vk != VK_PTR) return false;
+
+  val_kind_t pk = VK_INVALID;
+  if (!type_to_val_kind(c, payload_ty, &pk)) return false;
+  if (pk == VK_INVALID) return false;
+
+  // Check tag == variant, else deterministic trap.
+  const sir_val_id_t tag = alloc_slot(c, VK_I32);
+  const sir_val_id_t lit = alloc_slot(c, VK_I32);
+  const sir_val_id_t iseq = alloc_slot(c, VK_BOOL);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_load_i32(c->mb, c->fn, tag, vslot, 4)) return false;
+  if (!sir_mb_emit_const_i32(c->mb, c->fn, lit, (int32_t)variant)) return false;
+  if (!sir_mb_emit_i32_cmp_eq(c->mb, c->fn, iseq, tag, lit)) return false;
+
+  uint32_t ip_cbr = 0;
+  if (!sir_mb_emit_cbr(c->mb, c->fn, iseq, 0, 0, &ip_cbr)) return false;
+  const uint32_t ok_ip = sir_mb_func_ip(c->mb, c->fn);
+
+  uint32_t size = 0, align = 0, payload_off = 0, payload_size = 0, payload_align = 0;
+  if (!sum_layout(c, sum_ty, &size, &align, &payload_off, &payload_size, &payload_align)) return false;
+  (void)size;
+  (void)align;
+  (void)payload_size;
+
+  sir_val_id_t payload_ptr = vslot;
+  if (payload_off) {
+    if (!emit_ptr_add_i32_imm(c, node_id, n->loc_line, vslot, (int32_t)payload_off, &payload_ptr)) return false;
+  }
+
+  const sir_val_id_t dst = alloc_slot(c, pk);
+  bool ok = false;
+  switch (pk) {
+    case VK_I8:
+      ok = sir_mb_emit_load_i8(c->mb, c->fn, dst, payload_ptr, payload_align ? payload_align : 1);
+      break;
+    case VK_I16:
+      ok = sir_mb_emit_load_i16(c->mb, c->fn, dst, payload_ptr, payload_align ? payload_align : 2);
+      break;
+    case VK_I32:
+      ok = sir_mb_emit_load_i32(c->mb, c->fn, dst, payload_ptr, payload_align ? payload_align : 4);
+      break;
+    case VK_I64:
+      ok = sir_mb_emit_load_i64(c->mb, c->fn, dst, payload_ptr, payload_align ? payload_align : 8);
+      break;
+    case VK_PTR:
+      ok = sir_mb_emit_load_ptr(c->mb, c->fn, dst, payload_ptr, payload_align ? payload_align : 8);
+      break;
+    case VK_F32:
+      ok = sir_mb_emit_load_f32(c->mb, c->fn, dst, payload_ptr, payload_align ? payload_align : 4);
+      break;
+    case VK_F64:
+      ok = sir_mb_emit_load_f64(c->mb, c->fn, dst, payload_ptr, payload_align ? payload_align : 8);
+      break;
+    case VK_BOOL: {
+      const sir_val_id_t b8 = alloc_slot(c, VK_I8);
+      if (!sir_mb_emit_load_i8(c->mb, c->fn, b8, payload_ptr, payload_align ? payload_align : 1)) return false;
+      const sir_val_id_t bi32 = alloc_slot(c, VK_I32);
+      if (!sir_mb_emit_i32_zext_i8(c->mb, c->fn, bi32, b8)) return false;
+      const sir_val_id_t zi32 = alloc_slot(c, VK_I32);
+      if (!sir_mb_emit_const_i32(c->mb, c->fn, zi32, 0)) return false;
+      const sir_val_id_t t = alloc_slot(c, VK_BOOL);
+      if (!sir_mb_emit_i32_cmp_ne(c->mb, c->fn, t, bi32, zi32)) return false;
+      if (!emit_copy_slot(c, dst, t)) return false;
+      ok = true;
+      break;
+    }
+    default:
+      ok = false;
+      break;
+  }
+  if (!ok) return false;
+  uint32_t ip_br_join = 0;
+  if (!sir_mb_emit_br(c->mb, c->fn, 0, &ip_br_join)) return false;
+
+  const uint32_t trap_ip = sir_mb_func_ip(c->mb, c->fn);
+  if (!sir_mb_emit_exit(c->mb, c->fn, 255)) return false;
+  const uint32_t join_ip = sir_mb_func_ip(c->mb, c->fn);
+  if (!sir_mb_patch_cbr(c->mb, c->fn, ip_cbr, ok_ip, trap_ip)) return false;
+  if (!sir_mb_patch_br(c->mb, c->fn, ip_br_join, join_ip)) return false;
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, dst, pk)) return false;
+  *out_slot = dst;
+  *out_kind = pk;
+  return true;
+}
+
+static bool eval_sem_match_sum(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+
+  if (n->type_ref == 0) {
+    sirj_diag_setf(c, "sem.sem.match_sum.missing_type", c->cur_path, n->loc_line, node_id, n->tag, "sem.match_sum missing type_ref");
+    return false;
+  }
+  val_kind_t rk = VK_INVALID;
+  if (!type_to_val_kind(c, n->type_ref, &rk) || rk == VK_INVALID || rk == VK_I1) {
+    sirj_diag_setf(c, "sem.sem.match_sum.bad_type", c->cur_path, n->loc_line, node_id, n->tag, "sem.match_sum has unsupported type_ref=%u",
+                   (unsigned)n->type_ref);
+    return false;
+  }
+
+  // Sum type reference.
+  uint32_t sum_ty = 0;
+  const JsonValue* sumref = json_obj_get(n->fields_obj, "sum");
+  if (!parse_ref_id(sumref, &sum_ty)) {
+    sirj_diag_setf(c, "sem.sem.match_sum.bad_sum", c->cur_path, n->loc_line, node_id, n->tag, "sem.match_sum sum must be a type ref");
+    return false;
+  }
+  if (sum_ty == 0 || sum_ty >= c->type_cap || !c->types[sum_ty].present || !c->types[sum_ty].is_sum) {
+    sirj_diag_setf(c, "sem.sem.match_sum.bad_sum", c->cur_path, n->loc_line, node_id, n->tag, "sem.match_sum sum type_ref is not a sum");
+    return false;
+  }
+
+  // Args: [scrut]
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 1) {
+    sirj_diag_setf(c, "sem.sem.match_sum.bad_args", c->cur_path, n->loc_line, node_id, n->tag, "sem.match_sum expects args:[scrut]");
+    return false;
+  }
+  uint32_t scrut_id = 0;
+  if (!parse_ref_id(av->v.arr.items[0], &scrut_id)) return false;
+  if (scrut_id >= c->node_cap || !c->nodes[scrut_id].present) return false;
+  const node_info_t* scrut_n = &c->nodes[scrut_id];
+  if (scrut_n->type_ref != sum_ty) {
+    sirj_diag_setf(c, "sem.sem.match_sum.sum_type_mismatch", c->cur_path, n->loc_line, node_id, n->tag,
+                   "sem.match_sum scrutinee type_ref=%u does not match sum type_ref=%u", (unsigned)scrut_n->type_ref, (unsigned)sum_ty);
+    return false;
+  }
+  sir_val_id_t scrut_slot = 0;
+  val_kind_t sk = VK_INVALID;
+  if (!eval_node(c, scrut_id, &scrut_slot, &sk)) return false;
+  if (sk != VK_PTR) return false;
+
+  // Cases.
+  const JsonValue* casesv = json_obj_get(n->fields_obj, "cases");
+  if (!json_is_array(casesv)) return false;
+  const JsonArray* ca = &casesv->v.arr;
+  if (ca->len > 64) return false;
+  const uint32_t ncase = (uint32_t)ca->len;
+
+  int32_t* case_lits = NULL;
+  uint32_t* case_target = NULL;
+  sem_branch_t* case_body = NULL;
+  uint32_t* case_variant_u32 = NULL;
+  if (ncase) {
+    case_lits = (int32_t*)arena_alloc(&c->arena, (size_t)ncase * sizeof(int32_t));
+    case_target = (uint32_t*)arena_alloc(&c->arena, (size_t)ncase * sizeof(uint32_t));
+    case_body = (sem_branch_t*)arena_alloc(&c->arena, (size_t)ncase * sizeof(sem_branch_t));
+    case_variant_u32 = (uint32_t*)arena_alloc(&c->arena, (size_t)ncase * sizeof(uint32_t));
+    if (!case_lits || !case_target || !case_body || !case_variant_u32) return false;
+  }
+  for (uint32_t i = 0; i < ncase; i++) {
+    if (!json_is_object(ca->items[i])) return false;
+    uint32_t variant = 0;
+    if (!json_get_u32(json_obj_get(ca->items[i], "variant"), &variant)) return false;
+    if (variant >= c->types[sum_ty].sum_variant_count) return false;
+
+    // reject duplicates (small N, O(N^2) is fine)
+    for (uint32_t j = 0; j < i; j++) {
+      if (case_variant_u32[j] == variant) return false;
+    }
+
+    case_variant_u32[i] = variant;
+    case_lits[i] = (int32_t)variant;
+    if (!parse_sem_branch(json_obj_get(ca->items[i], "body"), &case_body[i])) return false;
+    case_target[i] = 0;
+
+    // If it's a thunk branch, validate signature against variant payload and result type.
+    if (case_body[i].kind == SEM_BRANCH_THUNK) {
+      const uint32_t fun_node = case_body[i].node_id;
+      if (fun_node >= c->node_cap || !c->nodes[fun_node].present) return false;
+      const node_info_t* fn = &c->nodes[fun_node];
+      if (!fn->tag || strcmp(fn->tag, "fun.sym") != 0) return false;
+      const uint32_t fun_ty = fn->type_ref;
+      if (fun_ty == 0 || fun_ty >= c->type_cap || !c->types[fun_ty].present || !c->types[fun_ty].is_fun) return false;
+      const uint32_t sig_tid = c->types[fun_ty].fun_sig;
+      if (sig_tid == 0 || sig_tid >= c->type_cap || !c->types[sig_tid].present || !c->types[sig_tid].is_fn) return false;
+      const type_info_t* sti = &c->types[sig_tid];
+
+      uint32_t payload_ty = 0;
+      if (!sum_variant_payload_type(c, sum_ty, variant, &payload_ty)) return false;
+      if (payload_ty == 0) {
+        if (sti->param_count != 0) return false;
+      } else {
+        if (sti->param_count != 1) return false;
+        if (sti->params[0] != payload_ty) return false;
+      }
+      if (sti->ret != n->type_ref) return false;
+    }
+  }
+
+  sem_branch_t defb = {0};
+  if (!parse_sem_branch(json_obj_get(n->fields_obj, "default"), &defb)) return false;
+  if (defb.kind == SEM_BRANCH_THUNK) {
+    const uint32_t fun_node = defb.node_id;
+    if (fun_node >= c->node_cap || !c->nodes[fun_node].present) return false;
+    const node_info_t* fn = &c->nodes[fun_node];
+    if (!fn->tag || strcmp(fn->tag, "fun.sym") != 0) return false;
+    const uint32_t fun_ty = fn->type_ref;
+    if (fun_ty == 0 || fun_ty >= c->type_cap || !c->types[fun_ty].present || !c->types[fun_ty].is_fun) return false;
+    const uint32_t sig_tid = c->types[fun_ty].fun_sig;
+    if (sig_tid == 0 || sig_tid >= c->type_cap || !c->types[sig_tid].present || !c->types[sig_tid].is_fn) return false;
+    const type_info_t* sti = &c->types[sig_tid];
+    if (sti->param_count != 0) return false;
+    if (sti->ret != n->type_ref) return false;
+  }
+
+  // Switch on tag.
+  const sir_val_id_t tag = alloc_slot(c, VK_I32);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_load_i32(c->mb, c->fn, tag, scrut_slot, 4)) return false;
+
+  const sir_val_id_t res = alloc_slot(c, rk);
+  uint32_t ip_sw = 0;
+  if (!sir_mb_emit_switch(c->mb, c->fn, tag, case_lits, case_target, ncase, 0, &ip_sw)) return false;
+
+  uint32_t* patch_br = NULL;
+  if (ncase) {
+    patch_br = (uint32_t*)arena_alloc(&c->arena, (size_t)ncase * sizeof(uint32_t));
+    if (!patch_br) return false;
+  }
+
+  for (uint32_t i = 0; i < ncase; i++) {
+    const uint32_t variant = case_variant_u32[i];
+    case_target[i] = sir_mb_func_ip(c->mb, c->fn);
+
+    if (case_body[i].kind == SEM_BRANCH_THUNK) {
+      uint32_t payload_ty = 0;
+      if (!sum_variant_payload_type(c, sum_ty, variant, &payload_ty)) return false;
+      if (payload_ty == 0) {
+        sir_val_id_t tmp = 0;
+        val_kind_t tk = VK_INVALID;
+        if (!emit_call_fun_sym_slots(c, node_id, case_body[i].node_id, NULL, NULL, 0, false, true, res, &tmp, &tk)) return false;
+        if (tk != rk) return false;
+      } else {
+        sir_val_id_t payload_slot = 0;
+        val_kind_t pk = VK_INVALID;
+        if (!emit_sum_payload_load_for_variant(c, node_id, n->loc_line, sum_ty, scrut_slot, variant, &payload_slot, &pk)) return false;
+        sir_val_id_t tmp = 0;
+        val_kind_t tk = VK_INVALID;
+        if (!emit_call_fun_sym_slots(c, node_id, case_body[i].node_id, &payload_slot, &pk, 1, false, true, res, &tmp, &tk)) return false;
+        if (tk != rk) return false;
+      }
+    } else {
+      if (!emit_branch_into_slot(c, node_id, &case_body[i], res, rk)) return false;
+    }
+
+    patch_br[i] = 0;
+    if (!sir_mb_emit_br(c->mb, c->fn, 0, &patch_br[i])) return false;
+  }
+
+  const uint32_t def_ip = sir_mb_func_ip(c->mb, c->fn);
+  if (!emit_branch_into_slot(c, node_id, &defb, res, rk)) return false;
+  const uint32_t join_ip = sir_mb_func_ip(c->mb, c->fn);
+
+  if (!sir_mb_patch_switch(c->mb, c->fn, ip_sw, case_target, ncase, def_ip)) return false;
+  for (uint32_t i = 0; i < ncase; i++) {
+    if (!sir_mb_patch_br(c->mb, c->fn, patch_br[i], join_ip)) return false;
+  }
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, res, rk)) return false;
+  *out_slot = res;
+  *out_kind = rk;
+  return true;
+}
+
 static bool resolve_internal_func_by_name(const sirj_ctx_t* c, const char* nm, sir_func_id_t* out) {
   if (!c || !nm || !out) return false;
   for (uint32_t i = 0; i < c->node_cap; i++) {
@@ -3390,6 +4108,11 @@ static bool eval_node(sirj_ctx_t* c, uint32_t node_id, sir_val_id_t* out_slot, v
   if (strcmp(n->tag, "sem.and_sc") == 0) return eval_sem_and_or_sc(c, node_id, n, false, out_slot, out_kind);
   if (strcmp(n->tag, "sem.or_sc") == 0) return eval_sem_and_or_sc(c, node_id, n, true, out_slot, out_kind);
   if (strcmp(n->tag, "sem.switch") == 0) return eval_sem_switch(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "adt.make") == 0) return eval_adt_make(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "adt.tag") == 0) return eval_adt_tag(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "adt.is") == 0) return eval_adt_is(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "adt.get") == 0) return eval_adt_get(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "sem.match_sum") == 0) return eval_sem_match_sum(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "ptr.sizeof") == 0) return eval_ptr_size_alignof(c, node_id, n, true, out_slot, out_kind);
   if (strcmp(n->tag, "ptr.alignof") == 0) return eval_ptr_size_alignof(c, node_id, n, false, out_slot, out_kind);
   if (strcmp(n->tag, "ptr.offset") == 0) return eval_ptr_offset(c, node_id, n, out_slot, out_kind);
@@ -3500,14 +4223,22 @@ static bool exec_stmt(sirj_ctx_t* c, uint32_t stmt_id, bool* out_did_return, sir
 
   if (strcmp(n->tag, "let") == 0) {
     if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+    const char* nm = json_get_string(json_obj_get(n->fields_obj, "name"));
+    if (!nm || nm[0] == '\0') return false;
     const JsonValue* vv = json_obj_get(n->fields_obj, "value");
     uint32_t vid = 0;
     if (!parse_ref_id(vv, &vid)) return false;
     sir_val_id_t tmp = 0;
     val_kind_t tk = VK_INVALID;
     if (!eval_node(c, vid, &tmp, &tk)) return false;
-    (void)tmp;
-    (void)tk;
+    if (c->let_count >= (uint32_t)(sizeof(c->lets) / sizeof(c->lets[0]))) {
+      sirj_diag_setf(c, "sem.let.too_many", c->cur_path, n->loc_line, stmt_id, n->tag, "too many let bindings");
+      return false;
+    }
+    c->lets[c->let_count].name = nm;
+    c->lets[c->let_count].slot = tmp;
+    c->lets[c->let_count].kind = tk;
+    c->let_count++;
     return true;
   }
 
@@ -4339,6 +5070,47 @@ static bool parse_file(sirj_ctx_t* c, const char* path) {
             return false;
           }
           ti.fun_sig = sig;
+        } else if (strcmp(kind, "sum") == 0) {
+          ti.is_sum = true;
+          const JsonValue* vv = json_obj_get(root, "variants");
+          if (!json_is_array(vv)) {
+            sirj_diag_setf(c, "sem.parse.type.sum.variants", diag_path, loc_line, 0, NULL, "bad sum.variants array");
+            free(line);
+            fclose(f);
+            return false;
+          }
+          const JsonArray* va = &vv->v.arr;
+          const uint32_t nvar = (uint32_t)va->len;
+          if (nvar != va->len) {
+            sirj_diag_setf(c, "sem.parse.type.sum.variants", diag_path, loc_line, 0, NULL, "sum.variants too large");
+            free(line);
+            fclose(f);
+            return false;
+          }
+          ti.sum_variant_count = nvar;
+          if (nvar) {
+            ti.sum_payload_types = (uint32_t*)arena_alloc(&c->arena, (size_t)nvar * sizeof(uint32_t));
+            if (!ti.sum_payload_types) {
+              sirj_diag_setf(c, "sem.oom", diag_path, loc_line, 0, NULL, "out of memory");
+              free(line);
+              fclose(f);
+              return false;
+            }
+            memset(ti.sum_payload_types, 0, (size_t)nvar * sizeof(uint32_t));
+          }
+          for (uint32_t vi = 0; vi < nvar; vi++) {
+            const JsonValue* vobj = va->items[vi];
+            if (!json_is_object(vobj)) {
+              sirj_diag_setf(c, "sem.parse.type.sum.variant", diag_path, loc_line, 0, NULL, "sum.variants[%u] must be an object", (unsigned)vi);
+              free(line);
+              fclose(f);
+              return false;
+            }
+            uint32_t pty = 0;
+            // payload type is optional.
+            (void)json_get_u32(json_obj_get((JsonValue*)vobj, "ty"), &pty);
+            ti.sum_payload_types[vi] = pty;
+          }
         } else if (strcmp(kind, "array") == 0) {
           ti.is_array = true;
           if (!json_get_u32(json_obj_get(root, "of"), &ti.array_of)) {
@@ -4616,6 +5388,7 @@ static bool init_params_for_fn(sirj_ctx_t* c, uint32_t fn_node_id, uint32_t fn_t
   c->param_count = 0;
   c->next_slot = 0;
   reset_value_cache(c);
+  c->let_count = 0;
   c->defer_count = 0;
   c->cached_true_slot = 0;
   c->cached_false_slot = 0;
