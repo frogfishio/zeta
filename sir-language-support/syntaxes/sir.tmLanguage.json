@@ -1,0 +1,141 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "SIR",
+  "scopeName": "source.sir",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#string" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#flags" },
+    { "include": "#decls" },
+    { "include": "#callNames" },
+    { "include": "#attrKeys" }
+  ],
+  "repository": {
+    "comment": {
+      "patterns": [
+        {
+          "name": "comment.line.double-semicolon.sir",
+          "match": ";;.*$"
+        }
+      ]
+    },
+    "string": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.sir",
+          "begin": "\"",
+          "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.sir" } },
+          "end": "\"",
+          "endCaptures": { "0": { "name": "punctuation.definition.string.end.sir" } },
+          "patterns": [
+            { "name": "constant.character.escape.sir", "match": "\\\\([\\\\\"nrt]|u[0-9a-fA-F]{4})" }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.sir",
+          "match": "\\b0[xX][0-9a-fA-F]+\\b"
+        },
+        {
+          "name": "constant.numeric.float.sir",
+          "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.decimal.sir",
+          "match": "\\b[0-9]+\\b"
+        },
+        {
+          "name": "storage.type.annotation.sir",
+          "match": ":(i8|i16|i32|i64|f32|f64|bool|void|ptr)\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.sir",
+          "match": "\\b(unit|target|fn|extern|public|end|return|let|type|const|global|block|do|as)\\b"
+        },
+        {
+          "name": "keyword.control.sir",
+          "match": "\\b(term\\.(br|cbr|switch|ret|trap|unreachable))\\b"
+        },
+        {
+          "name": "keyword.control.sir",
+          "match": "\\b(sem\\.[A-Za-z_][A-Za-z0-9_]*)\\b"
+        },
+        {
+          "name": "keyword.operator.sir",
+          "match": "->|=|\\+|:|\\^"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.sir",
+          "match": "\\b(i8|i16|i32|i64|f32|f64|bool|void|ptr)\\b"
+        },
+        {
+          "name": "keyword.control.sir",
+          "match": "\\b(array)\\b(?=\\s*\\()"
+        },
+        {
+          "name": "keyword.control.sir",
+          "match": "\\b(fun|closure|sum)\\b(?=\\s*(\\{|\\())"
+        }
+      ]
+    },
+    "flags": {
+      "patterns": [
+        {
+          "name": "constant.language.flag.sir",
+          "match": "(?<!\\w)\\+[A-Za-z_][A-Za-z0-9_:\\.-]*\\b"
+        }
+      ]
+    },
+    "decls": {
+      "patterns": [
+        {
+          "name": "entity.name.function.sir",
+          "match": "(?<=\\bfn\\s)[A-Za-z_][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "entity.name.function.sir",
+          "match": "(?<=\\bextern\\s+fn\\s)[A-Za-z_][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "entity.name.type.sir",
+          "match": "(?<=\\btype\\s)[A-Za-z_][A-Za-z0-9_]*\\b"
+        },
+        {
+          "name": "entity.name.label.sir",
+          "match": "(?<=\\bblock\\s)[A-Za-z_][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "callNames": {
+      "patterns": [
+        {
+          "name": "support.function.sir",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_\\.]*\\b(?=\\s*\\()"
+        }
+      ]
+    },
+    "attrKeys": {
+      "patterns": [
+        {
+          "name": "variable.other.member.sir",
+          "match": "\\b(flags|sig|count|cases|default|scrut|lit|body|defers|variant|cond|then|else|args|value)\\b(?=\\s*:)\\b"
+        }
+      ]
+    }
+  }
+}
+

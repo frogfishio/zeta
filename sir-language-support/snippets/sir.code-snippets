@@ -1,0 +1,53 @@
+{
+  "Unit header": {
+    "prefix": "unit",
+    "body": ["unit ${1:name} target ${2:host}", ""],
+    "description": "SIR unit header"
+  },
+  "Function": {
+    "prefix": "fn",
+    "body": ["fn ${1:name}(${2:args}) -> ${3:i32}${4: public}", "  ${5:return 0:i32}", "end", ""],
+    "description": "Function definition"
+  },
+  "Extern function": {
+    "prefix": "extern fn",
+    "body": ["extern fn ${1:name}(${2:args}) -> ${3:i32}", ""],
+    "description": "Extern function declaration"
+  },
+  "Let binding": {
+    "prefix": "let",
+    "body": ["let ${1:x}:${2:i32} = ${3:expr}"],
+    "description": "Let binding"
+  },
+  "Return": {
+    "prefix": "return",
+    "body": ["return ${1:expr}"],
+    "description": "Return statement"
+  },
+  "CFG block": {
+    "prefix": "block",
+    "body": ["block ${1:name}${2:(${3:params})}", "  ${4:term.ret value: 0:i32}", "end", ""],
+    "description": "CFG block"
+  },
+  "term.br": {
+    "prefix": "term.br",
+    "body": ["term.br to ${1:dest}"],
+    "description": "Unconditional branch terminator"
+  },
+  "term.cbr": {
+    "prefix": "term.cbr",
+    "body": ["term.cbr cond: ${1:cond}, then: ${2:then_block}, else: ${3:else_block}"],
+    "description": "Conditional branch terminator"
+  },
+  "sem.if": {
+    "prefix": "sem.if",
+    "body": ["let ${1:x}:${2:i32} = sem.if(${3:cond}, val ${4:thenExpr}, val ${5:elseExpr}) as ${2:i32}"],
+    "description": "sem.if intent node"
+  },
+  "sem.while": {
+    "prefix": "sem.while",
+    "body": ["sem.while(thunk ${1:cond_fn}, thunk ${2:body_fn})"],
+    "description": "sem.while intent node"
+  }
+}
+

@@ -9,9 +9,55 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:sir",
+    "onLanguage:sirjsonl",
+    "onCommand:sir-language-support.helloWorld"
+  ],
   "main": "./out/extension.js",
   "contributes": {
+    "languages": [
+      {
+        "id": "sir",
+        "aliases": [
+          "SIR",
+          "sir"
+        ],
+        "extensions": [
+          ".sir"
+        ],
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "sirjsonl",
+        "aliases": [
+          "SIR JSONL",
+          "sir.jsonl"
+        ],
+        "extensions": [
+          ".sir.jsonl"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "sir",
+        "scopeName": "source.sir",
+        "path": "./syntaxes/sir.tmLanguage.json"
+      },
+      {
+        "language": "sirjsonl",
+        "scopeName": "source.sirjsonl",
+        "path": "./syntaxes/sirjsonl.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "sir",
+        "path": "./snippets/sir.code-snippets"
+      }
+    ],
     "commands": [
       {
         "command": "sir-language-support.helloWorld",
