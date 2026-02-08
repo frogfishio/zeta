@@ -185,6 +185,50 @@ static void diag_print_one(void) {
     return;
   }
 
+  // Best-effort caret diagnostics (single line).
+  // We keep this simple: show the source line if it can be read, then a caret at the column.
+  // (Multi-line context and tab-aware caret alignment can be added later.)
+  if (g_diag.path && strcmp(g_diag.path, "<input>") != 0 && g_diag.line > 0) {
+    FILE* f = fopen(g_diag.path, "rb");
+    if (f) {
+      char* line = NULL;
+      size_t cap = 0;
+      size_t len = 0;
+      int ch = 0;
+      int cur = 1;
+      while ((ch = fgetc(f)) != EOF) {
+        if (cur == g_diag.line) {
+          if (ch == '\n') break;
+          if (cap < len + 2) {
+            size_t ncap = cap ? cap * 2 : 256;
+            char* np = (char*)realloc(line, ncap);
+            if (!np) break;
+            line = np;
+            cap = ncap;
+          }
+          line[len++] = (char)ch;
+        }
+        if (ch == '\n') {
+          if (cur >= g_diag.line) break;
+          cur++;
+        }
+      }
+      if (line) line[len] = 0;
+      fclose(f);
+      if (line) {
+        fprintf(stderr, "  |\n");
+        fprintf(stderr, "%4d | %s\n", g_diag.line, line);
+        fprintf(stderr, "  | ");
+        int caret_col = g_diag.col;
+        if (caret_col < 1) caret_col = 1;
+        for (int i = 1; i < caret_col; i++) fputc(' ', stderr);
+        fputc('^', stderr);
+        fputc('\n', stderr);
+      }
+      free(line);
+    }
+  }
+
   // Text mode (current style).
   fprintf(stderr, "%s:%d:%d: error: %s", g_diag.path ? g_diag.path : "<input>", g_diag.line, g_diag.col,
           g_diag.msg ? g_diag.msg : "error");
@@ -2422,13 +2466,51 @@ int main(int argc, char** argv) {
   int tool_rc = 0;
   for (size_t fi = 0; fi < inputs_len; fi++) {
     sirc_reset_compiler_state();
-    const int rc = compile_one(inputs[fi], out);
+
+    // In --tool mode, avoid producing partial output for a failing file:
+    // compile into a temp file and only append on success.
+    FILE* dst = out;
+    FILE* tmp = NULL;
+    if (tool_mode && !lint) {
+      tmp = tmpfile();
+      if (!tmp) {
+        g_emit.input_path = inputs[fi];
+        diag_setf("sirc.io.tmpfile", "failed to create temp file");
+        diag_print_one();
+        tool_rc = 2;
+        break;
+      }
+      dst = tmp;
+    }
+
+    const int rc = compile_one(inputs[fi], dst);
+    if (tmp) {
+      if (rc == 0) {
+        rewind(tmp);
+        char buf[8192];
+        size_t n = 0;
+        while ((n = fread(buf, 1, sizeof(buf), tmp)) != 0) {
+          if (fwrite(buf, 1, n, out) != n) {
+            fclose(tmp);
+            g_emit.input_path = inputs[fi];
+            diag_setf("sirc.io.write", "failed to write output");
+            diag_print_one();
+            tool_rc = 2;
+            goto done;
+          }
+        }
+      } else {
+      }
+      fclose(tmp);
+    }
+
     if (rc != 0) {
-      tool_rc = rc;
-      break;
+      if (!tool_rc) tool_rc = rc;
+      if (!g_diag_all) break;
     }
   }
 
+done:
   fclose(out);
 
   free(out_path_owned);

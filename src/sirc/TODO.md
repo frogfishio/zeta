@@ -10,7 +10,9 @@ Legend:
 
 - [x] Add `--diagnostics text|json` (JSONL on stderr) with stable diagnostic codes and a consistent record shape.
 - [ ] Add `--all` to continue after the first error (collect + print multiple diagnostics).
-- [ ] Add caret diagnostics in text mode (1–3 context lines with `^` under the span).
+  - [x] In `--tool` mode: continue compiling other files and don’t append partial output for failing inputs.
+  - [ ] Intra-file recovery + multi-diagnostic collection (Bison error recovery).
+- [x] Add caret diagnostics in text mode (1–3 context lines with `^` under the span).
 - [x] Define and document exit codes: `0` success, `1` compile/verify error, `2` tool error (I/O, OOM, internal).
 
 ## P0 — Source mapping contract (output)
