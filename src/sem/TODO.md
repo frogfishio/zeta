@@ -68,7 +68,7 @@ Work items:
 - [ ] Core calls parity (execution)
   - [x] `call` (direct call) if required by producers (or document “use call.indirect only”)
 - [ ] Diagnostics parity (developer UX)
-  - [ ] When unsupported: emit “what to do instead” hints (e.g. for extern calls, point to `decl.fn`)
+  - [x] When unsupported: emit “what to do instead” hints (e.g. for extern calls, point to `decl.fn`)
   - [x] Ensure `--diagnostics json` includes stable fields for CI parsing (code/path/line/node/tag/fid/ip/op when available)
 
 ### Stage C — Pack parity (closes “split personality” for integrators)

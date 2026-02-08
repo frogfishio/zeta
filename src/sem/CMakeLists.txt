@@ -364,6 +364,22 @@ target_compile_options(sem_unit_run_call_direct_internal PRIVATE -Wall -Wextra -
 
 add_test(NAME sem_run_call_direct_internal COMMAND sem_unit_run_call_direct_internal)
 
+add_executable(sem_unit_hint_ptrsym_extern_decl_fn
+  tests/test_hint_ptrsym_extern_decl_fn.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_hint_ptrsym_extern_decl_fn PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_hint_ptrsym_extern_decl_fn PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_hint_ptrsym_extern_decl_fn PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_hint_ptrsym_extern_decl_fn PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_hint_ptrsym_extern_decl_fn PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_hint_ptrsym_extern_decl_fn COMMAND sem_unit_hint_ptrsym_extern_decl_fn)
+
 add_executable(sem_unit_run_sem_ptr_add_sub_cmp
   tests/test_run_sem_ptr_add_sub_cmp.c
   sem_hosted.c

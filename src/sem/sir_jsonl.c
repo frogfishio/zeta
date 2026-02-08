@@ -2079,7 +2079,8 @@ static bool eval_ptr_sym(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, 
     return true;
   }
 
-  sirj_diag_setf(c, "sem.sym.unknown", c->cur_path, n->loc_line, node_id, n->tag, "unknown symbol: %s", nm);
+  sirj_diag_setf(c, "sem.sym.unknown", c->cur_path, n->loc_line, node_id, n->tag,
+                 "unknown symbol: %s (extern calls: use decl.fn + call.indirect; globals: emit sym; in-module: emit fn)", nm);
   return false;
 }
 
@@ -2307,8 +2308,8 @@ static bool eval_call_indirect(sirj_ctx_t* c, uint32_t node_id, const node_info_
       return false;
     }
     if (!resolve_internal_func_by_name(c, nm, &callee_fn)) {
-      sirj_diag_setf(c, "sem.call.ptrsym_not_fn", c->cur_path, n->loc_line, node_id, n->tag, "ptr.sym does not resolve to an in-module fn: %s",
-                     nm);
+      sirj_diag_setf(c, "sem.call.ptrsym_not_fn", c->cur_path, n->loc_line, node_id, n->tag,
+                     "ptr.sym does not resolve to an in-module fn: %s (extern calls: use decl.fn + call.indirect)", nm);
       return false;
     }
   } else {
