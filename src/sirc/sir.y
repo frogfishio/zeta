@@ -8,11 +8,7 @@
 int yylex(void);
 extern int yylineno;
 extern int yycolumn;
-void yyerror(const char* s) {
-  fprintf(stderr, "%s:%d:%d: error: %s", sirc_input_path(), sirc_last_line, sirc_last_col, s);
-  if (sirc_last_tok[0]) fprintf(stderr, " (near '%s')", sirc_last_tok);
-  fputc('\n', stderr);
-}
+void yyerror(const char* s);
 %}
 
 %union {

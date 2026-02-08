@@ -111,6 +111,9 @@ static void emit_node_id_value(int64_t id);
 static void emit_type_id_value(int64_t id);
 static void emit_node_ref_obj(int64_t id);
 static void emit_type_ref_obj(int64_t ty);
+static char* xstrdup(const char* s);
+static void json_write_escaped(FILE* out, const char* s);
+static void locals_clear(void);
 
 int sirc_last_line = 1;
 int sirc_last_col = 1;
@@ -118,15 +121,91 @@ char sirc_last_tok[64] = {0};
 
 const char* sirc_input_path(void) { return g_emit.input_path ? g_emit.input_path : "<input>"; }
 
-static void die_at_last(const char* fmt, ...) {
-  fprintf(stderr, "%s:%d:%d: error: ", sirc_input_path(), sirc_last_line, sirc_last_col);
+typedef enum sirc_diag_format {
+  SIRC_DIAG_TEXT = 0,
+  SIRC_DIAG_JSON = 1,
+} sirc_diag_format_t;
+
+typedef struct sirc_diag {
+  bool set;
+  const char* code;
+  const char* path;
+  int line;
+  int col;
+  char* msg;
+  char tok[64];
+} sirc_diag_t;
+
+static sirc_diag_t g_diag = {0};
+static sirc_diag_format_t g_diag_format = SIRC_DIAG_TEXT;
+static bool g_diag_all = false; // TODO: implement (collector + error recovery)
+
+static void diag_reset(void) {
+  free(g_diag.msg);
+  memset(&g_diag, 0, sizeof(g_diag));
+}
+
+static void diag_setf(const char* code, const char* fmt, ...) {
+  if (g_diag.set && !g_diag_all) return;
+  diag_reset();
+  g_diag.set = true;
+  g_diag.code = code ? code : "sirc.error";
+  g_diag.path = sirc_input_path();
+  g_diag.line = sirc_last_line;
+  g_diag.col = sirc_last_col;
+  memcpy(g_diag.tok, sirc_last_tok, sizeof(g_diag.tok));
+
   va_list ap;
   va_start(ap, fmt);
-  vfprintf(stderr, fmt, ap);
+  char tmp[2048];
+  vsnprintf(tmp, sizeof(tmp), fmt, ap);
   va_end(ap);
-  if (sirc_last_tok[0]) fprintf(stderr, " (near '%s')", sirc_last_tok);
+  g_diag.msg = xstrdup(tmp);
+}
+
+static void diag_print_one(void) {
+  if (!g_diag.set) return;
+  if (g_diag_format == SIRC_DIAG_JSON) {
+    // JSONL on stderr.
+    FILE* out = stderr;
+    fputs("{\"k\":\"diag\",\"tool\":\"sirc\",\"code\":", out);
+    json_write_escaped(out, g_diag.code ? g_diag.code : "sirc.error");
+    fputs(",\"path\":", out);
+    json_write_escaped(out, g_diag.path ? g_diag.path : "<input>");
+    fprintf(out, ",\"line\":%d,\"col\":%d", g_diag.line, g_diag.col);
+    if (g_diag.msg) {
+      fputs(",\"msg\":", out);
+      json_write_escaped(out, g_diag.msg);
+    }
+    if (g_diag.tok[0]) {
+      fputs(",\"near\":", out);
+      json_write_escaped(out, g_diag.tok);
+    }
+    fputs("}\n", out);
+    return;
+  }
+
+  // Text mode (current style).
+  fprintf(stderr, "%s:%d:%d: error: %s", g_diag.path ? g_diag.path : "<input>", g_diag.line, g_diag.col,
+          g_diag.msg ? g_diag.msg : "error");
+  if (g_diag.tok[0]) fprintf(stderr, " (near '%s')", g_diag.tok);
   fputc('\n', stderr);
-  exit(2);
+  if (g_diag.code) fprintf(stderr, "  code: %s\n", g_diag.code);
+}
+
+void yyerror(const char* s) {
+  diag_setf("sirc.parse.syntax", "%s", s ? s : "syntax error");
+}
+
+static void die_at_last(const char* fmt, ...) {
+  char tmp[2048];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(tmp, sizeof(tmp), fmt, ap);
+  va_end(ap);
+  diag_setf("sirc.error", "%s", tmp);
+  diag_print_one();
+  exit(1);
 }
 
 static void* xmalloc(size_t n) {
@@ -147,6 +226,83 @@ static char* xstrdup(const char* s) {
   if (n) memcpy(out, s, n);
   out[n] = 0;
   return out;
+}
+
+static void sirc_reset_compiler_state(void) {
+  // Output + input path are managed by the caller.
+  // ids_mode is managed by main().
+
+  // Free per-id string ids.
+  for (size_t i = 0; i < g_emit.node_id_cap; i++) free(g_emit.node_id_by_id ? g_emit.node_id_by_id[i] : NULL);
+  free(g_emit.node_id_by_id);
+  g_emit.node_id_by_id = NULL;
+  g_emit.node_id_cap = 0;
+
+  // type_id_by_id entries point into g_emit.types[*].key; only free the array.
+  free(g_emit.type_id_by_id);
+  g_emit.type_id_by_id = NULL;
+  g_emit.type_id_cap = 0;
+
+  // Free node name table (internal helper for alloca(type)).
+  for (size_t i = 0; i < g_emit.node_name_cap; i++) free(g_emit.node_name_by_id ? g_emit.node_name_by_id[i] : NULL);
+  free(g_emit.node_name_by_id);
+  g_emit.node_name_by_id = NULL;
+  g_emit.node_name_cap = 0;
+
+  // Types.
+  for (size_t i = 0; i < g_emit.types_len; i++) free(g_emit.types[i].key);
+  free(g_emit.types);
+  g_emit.types = NULL;
+  g_emit.types_len = 0;
+  g_emit.types_cap = 0;
+
+  // Functions.
+  for (size_t i = 0; i < g_emit.fns_len; i++) free(g_emit.fns[i].name);
+  free(g_emit.fns);
+  g_emit.fns = NULL;
+  g_emit.fns_len = 0;
+  g_emit.fns_cap = 0;
+
+  // Named types.
+  for (size_t i = 0; i < g_emit.named_types_len; i++) free(g_emit.named_types[i].name);
+  free(g_emit.named_types);
+  g_emit.named_types = NULL;
+  g_emit.named_types_len = 0;
+  g_emit.named_types_cap = 0;
+
+  // Features.
+  for (size_t i = 0; i < g_emit.features_len; i++) free(g_emit.features[i]);
+  free(g_emit.features);
+  g_emit.features = NULL;
+  g_emit.features_len = 0;
+  g_emit.features_cap = 0;
+
+  // CFG blocks.
+  for (size_t i = 0; i < g_emit.blocks_len; i++) free(g_emit.blocks[i].name);
+  free(g_emit.blocks);
+  g_emit.blocks = NULL;
+  g_emit.blocks_len = 0;
+  g_emit.blocks_cap = 0;
+
+  // Locals.
+  locals_clear();
+  free(g_emit.locals);
+  g_emit.locals = NULL;
+  g_emit.locals_len = 0;
+  g_emit.locals_cap = 0;
+
+  // Unit meta.
+  free(g_emit.unit);
+  free(g_emit.target);
+  g_emit.unit = NULL;
+  g_emit.target = NULL;
+
+  g_emit.next_type_id = 1;
+  g_emit.next_node_id = 10;
+  g_emit.last_id_line = 0;
+  g_emit.line_id_seq = 0;
+
+  diag_reset();
 }
 
 static void json_write_escaped(FILE* out, const char* s) {
@@ -2061,21 +2217,115 @@ static void usage(FILE* out) {
           "\n"
           "Usage:\n"
           "  sirc <input.sir> [-o <output.sir.jsonl>]\n"
+          "  sirc --tool -o <output.jsonl> <input.sir>...\n"
+          "  sirc --print-support [--format text|json]\n"
           "\n"
           "Options:\n"
           "  --help, -h    Show this help message\n"
           "  --version     Show version information\n"
           "  --ids <mode>  Id mode: string (default) or numeric\n"
+          "  --diagnostics <text|json>  Diagnostic output format (default: text)\n"
+          "  --all         Report all errors (TODO: collector)\n"
+          "  --lint        Parse/validate only (no output)\n"
+          "  --tool        Enable filelist + -o output mode\n"
+          "  --print-support  Print supported syntax/features and exit\n"
+          "  --format <text|json>  Output format for --print-support (default: text)\n"
           "  -o <path>     Write output JSONL to a file\n"
           "\n"
           "License: GPLv3+\n"
           "© 2026 Frogfish — Author: Alexander Croft\n");
 }
 
+static void print_support(FILE* out, bool as_json) {
+  if (!out) return;
+  if (as_json) {
+    fputs("{\"tool\":\"sirc\",\"version\":", out);
+    json_write_escaped(out, SIRC_VERSION);
+    fputs(",\"ids_default\":\"string\",\"ids_modes\":[\"string\",\"numeric\"],\"features\":[", out);
+    fputs("\"fun:v1\",\"closure:v1\",\"adt:v1\"", out);
+    fputs("],\"types\":[", out);
+    fputs("\"prim(i8,i16,i32,i64,f32,f64,bool,ptr)\",\"^T\",\"array(T,N)\",\"fn(T,...)->R\",\"fun(Sig)\",\"closure(CallSig,EnvTy)\",\"sum{V, V:Ty,...}\"",
+          out);
+    fputs("],\"expr\":[", out);
+    fputs("\"ident\",\"bool\",\"string\",\"int[:type]\",\"float[:type]\",\"call\",\"call as Type\"", out);
+    fputs("],\"cfg\":[", out);
+    fputs("\"block\",\"term.br\",\"term.cbr\",\"term.switch\",\"term.ret\",\"term.trap\",\"term.unreachable\"", out);
+    fputs("]}\n", out);
+    return;
+  }
+
+  fprintf(out, "sirc %s\n", SIRC_VERSION);
+  fprintf(out, "\n");
+  fprintf(out, "IDs:\n");
+  fprintf(out, "  default: string\n");
+  fprintf(out, "  modes: string, numeric\n");
+  fprintf(out, "\n");
+  fprintf(out, "Features/packs (emittable):\n");
+  fprintf(out, "  - fun:v1\n");
+  fprintf(out, "  - closure:v1\n");
+  fprintf(out, "  - adt:v1\n");
+  fprintf(out, "\n");
+  fprintf(out, "Type constructors:\n");
+  fprintf(out, "  - prims: i8 i16 i32 i64 f32 f64 bool ptr\n");
+  fprintf(out, "  - pointer: ^T\n");
+  fprintf(out, "  - array: array(T, N)\n");
+  fprintf(out, "  - signature: fn(T, ...) -> R\n");
+  fprintf(out, "  - fun type: fun(Sig)\n");
+  fprintf(out, "  - closure type: closure(CallSig, EnvTy)\n");
+  fprintf(out, "  - sum type: sum{None, Some:T, ...}\n");
+  fprintf(out, "\n");
+  fprintf(out, "Typed mnemonic calls:\n");
+  fprintf(out, "  - tag(args...) ... as Type\n");
+}
+
+static int compile_one(const char* in_path, FILE* out) {
+  if (!in_path || !out) return 2;
+
+  diag_reset();
+
+  FILE* in = fopen(in_path, "rb");
+  if (!in) {
+    g_emit.input_path = in_path;
+    diag_setf("sirc.io.open", "%s: %s", in_path, strerror(errno));
+    diag_print_one();
+    return 2;
+  }
+
+  g_emit.input_path = in_path;
+  g_emit.out = out;
+  g_emit.next_type_id = 1;
+  g_emit.next_node_id = 10;
+  g_emit.last_id_line = 0;
+  g_emit.line_id_seq = 0;
+
+  yyin = in;
+  yyrestart(in);
+  const int rc = yyparse();
+  fclose(in);
+
+  if (rc != 0) {
+    if (!g_diag.set) diag_setf("sirc.parse", "parse failed");
+    diag_print_one();
+    return 1;
+  }
+  if (g_diag.set) {
+    diag_print_one();
+    return 1;
+  }
+  return 0;
+}
+
 int main(int argc, char** argv) {
-  const char* in_path = NULL;
   const char* out_path = NULL;
   char* out_path_owned = NULL;
+  bool lint = false;
+  bool tool_mode = false;
+  bool do_print_support = false;
+  bool print_support_json = false;
+
+  const char** inputs = NULL;
+  size_t inputs_len = 0;
+  size_t inputs_cap = 0;
 
   g_emit.ids_mode = SIRC_IDS_STRING;
 
@@ -2091,6 +2341,38 @@ int main(int argc, char** argv) {
       printf("© 2026 Frogfish — Author: Alexander Croft\n");
       return 0;
     }
+    if (strcmp(a, "--print-support") == 0) {
+      do_print_support = true;
+      continue;
+    }
+    if (strcmp(a, "--format") == 0) {
+      if (i + 1 >= argc) die_at_last("sirc: --format requires text|json");
+      const char* f = argv[++i];
+      if (strcmp(f, "text") == 0) print_support_json = false;
+      else if (strcmp(f, "json") == 0) print_support_json = true;
+      else die_at_last("sirc: unknown --format: %s", f);
+      continue;
+    }
+    if (strcmp(a, "--diagnostics") == 0) {
+      if (i + 1 >= argc) die_at_last("sirc: --diagnostics requires text|json");
+      const char* f = argv[++i];
+      if (strcmp(f, "text") == 0) g_diag_format = SIRC_DIAG_TEXT;
+      else if (strcmp(f, "json") == 0) g_diag_format = SIRC_DIAG_JSON;
+      else die_at_last("sirc: unknown --diagnostics format: %s", f);
+      continue;
+    }
+    if (strcmp(a, "--all") == 0) {
+      g_diag_all = true;
+      continue;
+    }
+    if (strcmp(a, "--lint") == 0) {
+      lint = true;
+      continue;
+    }
+    if (strcmp(a, "--tool") == 0) {
+      tool_mode = true;
+      continue;
+    }
     if (strcmp(a, "-o") == 0) {
       if (i + 1 >= argc) die_at_last("sirc: -o requires a path");
       out_path = argv[++i];
@@ -2105,35 +2387,52 @@ int main(int argc, char** argv) {
       continue;
     }
     if (a[0] == '-') die_at_last("sirc: unknown flag: %s", a);
-    if (!in_path) in_path = a;
-    else die_at_last("sirc: unexpected arg: %s", a);
+    if (inputs_len == inputs_cap) {
+      inputs_cap = inputs_cap ? inputs_cap * 2 : 8;
+      inputs = (const char**)realloc((void*)inputs, inputs_cap * sizeof(const char*));
+      if (!inputs) die_at_last("sirc: out of memory");
+    }
+    inputs[inputs_len++] = a;
   }
-  if (!in_path) die_at_last("sirc: missing input .sir path");
-  if (!out_path) {
-    out_path_owned = default_out_path(in_path);
-    out_path = out_path_owned;
+
+  if (do_print_support) {
+    print_support(stdout, print_support_json);
+    free(out_path_owned);
+    free((void*)inputs);
+    return 0;
   }
 
-  FILE* in = fopen(in_path, "rb");
-  if (!in) die_at_last("%s: %s", in_path, strerror(errno));
-  FILE* out = fopen(out_path, "wb");
-  if (!out) die_at_last("%s: %s", out_path, strerror(errno));
+  if (!inputs_len) die_at_last("sirc: missing input .sir path");
+  if (!tool_mode && inputs_len != 1) die_at_last("sirc: multiple inputs require --tool");
 
-  g_emit.out = out;
-  g_emit.input_path = in_path;
-  g_emit.next_type_id = 1;
-  g_emit.next_node_id = 10;
-  g_emit.last_id_line = 0;
-  g_emit.line_id_seq = 0;
+  FILE* out = NULL;
+  if (lint) {
+    out = fopen("/dev/null", "wb");
+    if (!out) die_at_last("sirc: failed to open /dev/null");
+  } else {
+    if (!out_path) {
+      if (tool_mode) die_at_last("sirc: --tool requires -o <output.jsonl>");
+      out_path_owned = default_out_path(inputs[0]);
+      out_path = out_path_owned;
+    }
+    out = fopen(out_path, "wb");
+    if (!out) die_at_last("%s: %s", out_path, strerror(errno));
+  }
 
-  yyin = in;
-  yyrestart(in);
-  int rc = yyparse();
+  int tool_rc = 0;
+  for (size_t fi = 0; fi < inputs_len; fi++) {
+    sirc_reset_compiler_state();
+    const int rc = compile_one(inputs[fi], out);
+    if (rc != 0) {
+      tool_rc = rc;
+      break;
+    }
+  }
 
-  fclose(in);
   fclose(out);
 
   free(out_path_owned);
+  free((void*)inputs);
 
-  return rc == 0 ? 0 : 1;
+  return tool_rc;
 }
