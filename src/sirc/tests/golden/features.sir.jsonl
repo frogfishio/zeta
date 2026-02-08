@@ -7,7 +7,7 @@
 {"ir":"sir-v1.0","k":"type","id":"prim:i32","kind":"prim","prim":"i32","loc":{"line":4,"col":1,"unit":"features.sir"},"src_ref":"src:features.sir:4:1"}
 {"ir":"sir-v1.0","k":"type","id":"fn(ptr(prim:i8))->prim:i32","kind":"fn","params":["ptr(prim:i8)"],"ret":"prim:i32","loc":{"line":4,"col":1,"unit":"features.sir"},"src_ref":"src:features.sir:4:1"}
 {"ir":"sir-v1.0","k":"src","id":"src:features.sir:6:18","file":"features.sir","line":6,"col":18,"text":"  let msg: ptr = \"features ok\""}
-{"ir":"sir-v1.0","k":"node","id":"n:6:0","tag":"cstr","fields":{"value":"features ok"},"loc":{"line":6,"col":18,"unit":"features.sir"},"src_ref":"src:features.sir:6:18"}
+{"ir":"sir-v1.0","k":"node","id":"n:6:0","tag":"cstr","type_ref":"ptr(prim:i8)","fields":{"value":"features ok"},"loc":{"line":6,"col":18,"unit":"features.sir"},"src_ref":"src:features.sir:6:18"}
 {"ir":"sir-v1.0","k":"node","id":"n:6:1","tag":"let","fields":{"name":"msg","value":{"t":"ref","id":"n:6:0"}},"loc":{"line":6,"col":18,"unit":"features.sir"},"src_ref":"src:features.sir:6:18"}
 {"ir":"sir-v1.0","k":"src","id":"src:features.sir:7:24","file":"features.sir","line":7,"col":24,"text":"  let _: i32 = puts(msg)"}
 {"ir":"sir-v1.0","k":"node","id":"n:7:0","tag":"name","type_ref":"ptr(prim:i8)","fields":{"name":"msg"},"loc":{"line":7,"col":24,"unit":"features.sir"},"src_ref":"src:features.sir:7:24"}
@@ -20,4 +20,4 @@
 {"ir":"sir-v1.0","k":"node","id":"n:9:1","tag":"term.ret","fields":{"value":{"t":"ref","id":"n:9:0"}},"loc":{"line":9,"col":1,"unit":"features.sir"},"src_ref":"src:features.sir:9:1"}
 {"ir":"sir-v1.0","k":"type","id":"fn()->prim:i32","kind":"fn","params":[],"ret":"prim:i32","loc":{"line":9,"col":1,"unit":"features.sir"},"src_ref":"src:features.sir:9:1"}
 {"ir":"sir-v1.0","k":"node","id":"n:9:2","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:6:1"},{"t":"ref","id":"n:8:2"},{"t":"ref","id":"n:9:1"}]},"loc":{"line":9,"col":1,"unit":"features.sir"},"src_ref":"src:features.sir:9:1"}
-{"ir":"sir-v1.0","k":"node","id":"n:9:3","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","params":[],"body":{"t":"ref","id":"n:9:2"}},"loc":{"line":9,"col":1,"unit":"features.sir"},"src_ref":"src:features.sir:9:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:9:3","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","linkage":"public","params":[],"body":{"t":"ref","id":"n:9:2"}},"loc":{"line":9,"col":1,"unit":"features.sir"},"src_ref":"src:features.sir:9:1"}

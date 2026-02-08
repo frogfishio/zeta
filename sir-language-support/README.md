@@ -10,11 +10,23 @@ Syntax highlighting + basic editor support for:
 - Language configuration (brackets + `;;` line comments)
 - Snippets (unit header, `fn`, `extern fn`, CFG blocks, `term.*`, `sem.*`)
 - JSON highlighting for `.sir.jsonl` (via embedded `source.json`)
+- Command: `SIR: Verify current file` (runs `sirc` + `sircc --verify-only` and reports JSON diagnostics in Problems)
 
 ## File extensions
 
 - `*.sir` → language id `sir`
 - `*.sir.jsonl` → language id `sirjsonl`
+
+## Diagnostics / verification
+
+The `SIR: Verify current file` command expects `sirc` and/or `sircc` to be available on your `PATH`
+(or configured via settings).
+
+Settings:
+- `sirLanguageSupport.sircPath` (default: `sirc`)
+- `sirLanguageSupport.sirccPath` (default: `sircc`)
+- `sirLanguageSupport.useStrictSirc` (default: `true`)
+- `sirLanguageSupport.useStrictSircc` (default: `true`)
 
 ## Known limitations
 

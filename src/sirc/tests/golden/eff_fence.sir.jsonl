@@ -8,4 +8,4 @@
 {"ir":"sir-v1.0","k":"node","id":"n:6:1","tag":"term.ret","fields":{"value":{"t":"ref","id":"n:6:0"}},"loc":{"line":6,"col":1,"unit":"eff_fence.sir"},"src_ref":"src:eff_fence.sir:6:1"}
 {"ir":"sir-v1.0","k":"type","id":"fn()->prim:i32","kind":"fn","params":[],"ret":"prim:i32","loc":{"line":6,"col":1,"unit":"eff_fence.sir"},"src_ref":"src:eff_fence.sir:6:1"}
 {"ir":"sir-v1.0","k":"node","id":"n:6:2","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:5:0"},{"t":"ref","id":"n:6:1"}]},"loc":{"line":6,"col":1,"unit":"eff_fence.sir"},"src_ref":"src:eff_fence.sir:6:1"}
-{"ir":"sir-v1.0","k":"node","id":"n:6:3","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","params":[],"body":{"t":"ref","id":"n:6:2"}},"loc":{"line":6,"col":1,"unit":"eff_fence.sir"},"src_ref":"src:eff_fence.sir:6:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:6:3","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","linkage":"public","params":[],"body":{"t":"ref","id":"n:6:2"}},"loc":{"line":6,"col":1,"unit":"eff_fence.sir"},"src_ref":"src:eff_fence.sir:6:1"}

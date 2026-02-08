@@ -5,4 +5,4 @@
 {"ir":"sir-v1.0","k":"node","id":"n:5:0","tag":"term.trap","fields":{"code":"bounds","msg":"index out of range"},"loc":{"line":5,"col":1,"unit":"trap.sir"},"src_ref":"src:trap.sir:5:1"}
 {"ir":"sir-v1.0","k":"type","id":"fn()->prim:i32","kind":"fn","params":[],"ret":"prim:i32","loc":{"line":5,"col":1,"unit":"trap.sir"},"src_ref":"src:trap.sir:5:1"}
 {"ir":"sir-v1.0","k":"node","id":"n:5:1","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:5:0"}]},"loc":{"line":5,"col":1,"unit":"trap.sir"},"src_ref":"src:trap.sir:5:1"}
-{"ir":"sir-v1.0","k":"node","id":"n:5:2","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","params":[],"body":{"t":"ref","id":"n:5:1"}},"loc":{"line":5,"col":1,"unit":"trap.sir"},"src_ref":"src:trap.sir:5:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:5:2","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","linkage":"public","params":[],"body":{"t":"ref","id":"n:5:1"}},"loc":{"line":5,"col":1,"unit":"trap.sir"},"src_ref":"src:trap.sir:5:1"}

@@ -89,6 +89,7 @@ void yyerror(const char* s);
 %type <match_case> sem_match_case
 %type <branch_list> branch_list_opt branch_list
 %type <node> block_value
+%type <b> public_opt
 
 %start program
 
@@ -152,16 +153,16 @@ extern_fn_decl
 
 fn_decl
   : T_FN T_ID '(' params_opt ')' T_ARROW type public_opt nl_star stmt_list T_END
-    { sirc_fn_def($2, $4, $7, $10); }
+    { sirc_fn_def($2, $4, $7, $8, $10); }
   | T_FN T_ID '(' params_opt ')' T_ARROW type public_opt nl_star
       { sirc_cfg_begin(); }
     cfg_blocks T_END
-      { sirc_fn_def_cfg($2, $4, $7, sirc_nodelist_first($11), $11); }
+      { sirc_fn_def_cfg($2, $4, $7, $8, sirc_nodelist_first($11), $11); }
   ;
 
 public_opt
-  : /* empty */
-  | T_PUBLIC
+  : /* empty */    { $$ = 0; }
+  | T_PUBLIC       { $$ = 1; }
   ;
 
 params_opt

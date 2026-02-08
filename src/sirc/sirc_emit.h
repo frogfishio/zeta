@@ -4,6 +4,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 
 typedef struct SircParamList SircParamList;
 typedef struct SircNodeList SircNodeList;
@@ -131,7 +132,8 @@ int64_t sirc_term_unreachable(SircAttrList* attrs);
 int64_t sirc_term_trap(SircAttrList* attrs);
 
 int64_t sirc_block_def(char* name, SircParamList* bparams, SircNodeList* stmts); // takes ownership of name
-void sirc_fn_def_cfg(char* name, SircParamList* params, int64_t ret, int64_t entry_block, SircNodeList* blocks); // takes ownership of name
+void sirc_fn_def_cfg(char* name, SircParamList* params, int64_t ret, bool is_public, int64_t entry_block,
+                     SircNodeList* blocks); // takes ownership of name
 
 // Block reference by name (used by sem.scope bodies).
 int64_t sirc_block_ref(char* name); // takes ownership of name
@@ -166,4 +168,4 @@ int64_t sirc_stmt_let(char* name, int64_t ty, int64_t value);
 int64_t sirc_stmt_return(int64_t value);
 
 void sirc_extern_fn(char* name, SircParamList* params, int64_t ret);
-void sirc_fn_def(char* name, SircParamList* params, int64_t ret, SircNodeList* stmts);
+void sirc_fn_def(char* name, SircParamList* params, int64_t ret, bool is_public, SircNodeList* stmts);

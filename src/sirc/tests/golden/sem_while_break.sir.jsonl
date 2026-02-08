@@ -14,12 +14,12 @@
 {"ir":"sir-v1.0","k":"node","id":"n:10:1","tag":"term.ret","fields":{"value":{"t":"ref","id":"n:10:0"}},"loc":{"line":10,"col":10,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:10:10"}
 {"ir":"sir-v1.0","k":"src","id":"src:sem_while_break.sir:11:1","file":"sem_while_break.sir","line":11,"col":1,"text":"end"}
 {"ir":"sir-v1.0","k":"node","id":"n:11:0","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:10:1"}]},"loc":{"line":11,"col":1,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:11:1"}
-{"ir":"sir-v1.0","k":"node","id":"n:11:1","tag":"fn","type_ref":"fn()->prim:bool","fields":{"name":"cond_fn","params":[],"body":{"t":"ref","id":"n:11:0"}},"loc":{"line":11,"col":1,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:11:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:11:1","tag":"fn","type_ref":"fn()->prim:bool","fields":{"name":"cond_fn","linkage":"local","params":[],"body":{"t":"ref","id":"n:11:0"}},"loc":{"line":11,"col":1,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:11:1"}
 {"ir":"sir-v1.0","k":"src","id":"src:sem_while_break.sir:14:3","file":"sem_while_break.sir","line":14,"col":3,"text":"  sem.break"}
 {"ir":"sir-v1.0","k":"node","id":"n:14:0","tag":"sem.break","fields":{},"loc":{"line":14,"col":3,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:14:3"}
 {"ir":"sir-v1.0","k":"src","id":"src:sem_while_break.sir:15:1","file":"sem_while_break.sir","line":15,"col":1,"text":"end"}
 {"ir":"sir-v1.0","k":"node","id":"n:15:0","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:14:0"}]},"loc":{"line":15,"col":1,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:15:1"}
-{"ir":"sir-v1.0","k":"node","id":"n:15:1","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"body","params":[],"body":{"t":"ref","id":"n:15:0"}},"loc":{"line":15,"col":1,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:15:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:15:1","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"body","linkage":"local","params":[],"body":{"t":"ref","id":"n:15:0"}},"loc":{"line":15,"col":1,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:15:1"}
 {"ir":"sir-v1.0","k":"src","id":"src:sem_while_break.sir:19:1","file":"sem_while_break.sir","line":19,"col":1,"text":"  let b: BodyFun = fun.sym() name \"body\" as BodyFun"}
 {"ir":"sir-v1.0","k":"node","id":"n:19:0","tag":"fun.sym","type_ref":"fun(fn()->prim:bool)","fields":{"name":"cond_fn"},"loc":{"line":19,"col":1,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:19:1"}
 {"ir":"sir-v1.0","k":"node","id":"n:19:1","tag":"let","fields":{"name":"c","value":{"t":"ref","id":"n:19:0"}},"loc":{"line":19,"col":1,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:19:1"}
@@ -35,4 +35,4 @@
 {"ir":"sir-v1.0","k":"node","id":"n:22:0","tag":"const.i32","type_ref":"prim:i32","fields":{"value":0},"loc":{"line":22,"col":1,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:22:1"}
 {"ir":"sir-v1.0","k":"node","id":"n:22:1","tag":"term.ret","fields":{"value":{"t":"ref","id":"n:22:0"}},"loc":{"line":22,"col":1,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:22:1"}
 {"ir":"sir-v1.0","k":"node","id":"n:22:2","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:19:1"},{"t":"ref","id":"n:20:1"},{"t":"ref","id":"n:20:4"},{"t":"ref","id":"n:22:1"}]},"loc":{"line":22,"col":1,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:22:1"}
-{"ir":"sir-v1.0","k":"node","id":"n:22:3","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","params":[],"body":{"t":"ref","id":"n:22:2"}},"loc":{"line":22,"col":1,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:22:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:22:3","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","linkage":"public","params":[],"body":{"t":"ref","id":"n:22:2"}},"loc":{"line":22,"col":1,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:22:1"}

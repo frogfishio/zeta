@@ -7,7 +7,7 @@
 {"ir":"sir-v1.0","k":"src","id":"src:sem_scope_cfg.sir:8:1","file":"sem_scope_cfg.sir","line":8,"col":1,"text":"end"}
 {"ir":"sir-v1.0","k":"node","id":"n:8:0","tag":"term.ret","fields":{},"loc":{"line":8,"col":1,"unit":"sem_scope_cfg.sir"},"src_ref":"src:sem_scope_cfg.sir:8:1"}
 {"ir":"sir-v1.0","k":"node","id":"n:8:1","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:8:0"}]},"loc":{"line":8,"col":1,"unit":"sem_scope_cfg.sir"},"src_ref":"src:sem_scope_cfg.sir:8:1"}
-{"ir":"sir-v1.0","k":"node","id":"n:8:2","tag":"fn","type_ref":"fn()->prim:void","fields":{"name":"cleanup","params":[],"body":{"t":"ref","id":"n:8:1"}},"loc":{"line":8,"col":1,"unit":"sem_scope_cfg.sir"},"src_ref":"src:sem_scope_cfg.sir:8:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:8:2","tag":"fn","type_ref":"fn()->prim:void","fields":{"name":"cleanup","linkage":"local","params":[],"body":{"t":"ref","id":"n:8:1"}},"loc":{"line":8,"col":1,"unit":"sem_scope_cfg.sir"},"src_ref":"src:sem_scope_cfg.sir:8:1"}
 {"ir":"sir-v1.0","k":"src","id":"src:sem_scope_cfg.sir:10:18","file":"sem_scope_cfg.sir","line":10,"col":18,"text":"fn main() -> i32 public"}
 {"ir":"sir-v1.0","k":"type","id":"prim:i32","kind":"prim","prim":"i32","loc":{"line":10,"col":18,"unit":"sem_scope_cfg.sir"},"src_ref":"src:sem_scope_cfg.sir:10:18"}
 {"ir":"sir-v1.0","k":"src","id":"src:sem_scope_cfg.sir:13:1","file":"sem_scope_cfg.sir","line":13,"col":1,"text":"    sem.scope(defers: [ thunk f ], body: do"}
@@ -27,4 +27,4 @@
 {"ir":"sir-v1.0","k":"node","id":"n:18:0","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:13:1"},{"t":"ref","id":"n:15:2"},{"t":"ref","id":"n:17:1"}]}}
 {"ir":"sir-v1.0","k":"src","id":"src:sem_scope_cfg.sir:18:1","file":"sem_scope_cfg.sir","line":18,"col":1,"text":"end"}
 {"ir":"sir-v1.0","k":"type","id":"fn()->prim:i32","kind":"fn","params":[],"ret":"prim:i32","loc":{"line":18,"col":1,"unit":"sem_scope_cfg.sir"},"src_ref":"src:sem_scope_cfg.sir:18:1"}
-{"ir":"sir-v1.0","k":"node","id":"n:18:1","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","params":[],"entry":{"t":"ref","id":"n:18:0"},"blocks":[{"t":"ref","id":"n:18:0"}]},"loc":{"line":18,"col":1,"unit":"sem_scope_cfg.sir"},"src_ref":"src:sem_scope_cfg.sir:18:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:18:1","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","linkage":"public","params":[],"entry":{"t":"ref","id":"n:18:0"},"blocks":[{"t":"ref","id":"n:18:0"}]},"loc":{"line":18,"col":1,"unit":"sem_scope_cfg.sir"},"src_ref":"src:sem_scope_cfg.sir:18:1"}

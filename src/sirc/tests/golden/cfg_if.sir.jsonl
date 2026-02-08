@@ -26,4 +26,4 @@
 {"ir":"sir-v1.0","k":"node","id":"n:7:1","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:15:1"}]}}
 {"ir":"sir-v1.0","k":"src","id":"src:cfg_if.sir:16:1","file":"cfg_if.sir","line":16,"col":1,"text":"end"}
 {"ir":"sir-v1.0","k":"type","id":"fn(prim:i32)->prim:i32","kind":"fn","params":["prim:i32"],"ret":"prim:i32","loc":{"line":16,"col":1,"unit":"cfg_if.sir"},"src_ref":"src:cfg_if.sir:16:1"}
-{"ir":"sir-v1.0","k":"node","id":"n:16:0","tag":"fn","type_ref":"fn(prim:i32)->prim:i32","fields":{"name":"main","params":[{"t":"ref","id":"n:3:0"}],"entry":{"t":"ref","id":"n:9:0"},"blocks":[{"t":"ref","id":"n:9:0"},{"t":"ref","id":"n:7:0"},{"t":"ref","id":"n:7:1"}]},"loc":{"line":16,"col":1,"unit":"cfg_if.sir"},"src_ref":"src:cfg_if.sir:16:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:16:0","tag":"fn","type_ref":"fn(prim:i32)->prim:i32","fields":{"name":"main","linkage":"public","params":[{"t":"ref","id":"n:3:0"}],"entry":{"t":"ref","id":"n:9:0"},"blocks":[{"t":"ref","id":"n:9:0"},{"t":"ref","id":"n:7:0"},{"t":"ref","id":"n:7:1"}]},"loc":{"line":16,"col":1,"unit":"cfg_if.sir"},"src_ref":"src:cfg_if.sir:16:1"}

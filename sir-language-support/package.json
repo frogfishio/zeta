@@ -2,7 +2,7 @@
   "name": "sir-language-support",
   "displayName": "SIR Language Support",
   "description": "Syntax highlighting + diagnostics for SIR/SIRC",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "engines": {
     "vscode": "^1.108.1"
   },
@@ -12,7 +12,9 @@
   "activationEvents": [
     "onLanguage:sir",
     "onLanguage:sirjsonl",
-    "onCommand:sir-language-support.helloWorld"
+    "onCommand:sir-language-support.helloWorld",
+    "onCommand:sir-language-support.verifyCurrentFile",
+    "onCommand:sir-language-support.clearDiagnostics"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -62,8 +64,41 @@
       {
         "command": "sir-language-support.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "sir-language-support.verifyCurrentFile",
+        "title": "SIR: Verify current file"
+      },
+      {
+        "command": "sir-language-support.clearDiagnostics",
+        "title": "SIR: Clear diagnostics"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "SIR Language Support",
+      "properties": {
+        "sirLanguageSupport.sircPath": {
+          "type": "string",
+          "default": "sirc",
+          "description": "Path to the `sirc` executable (used to translate .sir → .sir.jsonl for verification)."
+        },
+        "sirLanguageSupport.sirccPath": {
+          "type": "string",
+          "default": "sircc",
+          "description": "Path to the `sircc` executable (used for verification and diagnostics)."
+        },
+        "sirLanguageSupport.useStrictSirc": {
+          "type": "boolean",
+          "default": true,
+          "description": "When verifying .sir, run `sirc` with --strict (reject ignored attrs and enforce conservative arity)."
+        },
+        "sirLanguageSupport.useStrictSircc": {
+          "type": "boolean",
+          "default": true,
+          "description": "When verifying .sir/.sir.jsonl, run `sircc` with --verify-strict."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

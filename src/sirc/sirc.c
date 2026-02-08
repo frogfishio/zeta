@@ -1235,7 +1235,11 @@ static int64_t emit_const_int_node(int64_t value, int64_t type_ref, const char* 
 }
 
 static int64_t emit_cstr_node(const char* s) {
-  int64_t id = emit_node_with_fields_begin("cstr", 0);
+  // `cstr` is a pointer to NUL-terminated bytes; under `--verify-strict` call sites
+  // need a concrete argument type_ref, so we always attach `ptr(i8)`.
+  const int64_t i8 = type_from_name("i8");
+  const int64_t p_i8 = type_ptr(i8);
+  int64_t id = emit_node_with_fields_begin("cstr", p_i8);
   emitf("\"value\":");
   json_write_escaped(g_emit.out, s);
   emit_fields_end();
@@ -1309,10 +1313,12 @@ static int64_t emit_block_node(const int64_t* stmts, size_t n) {
   return id;
 }
 
-static int64_t emit_fn_node(const char* name, int64_t fn_type, const int64_t* params, size_t nparams, int64_t body_block) {
+static int64_t emit_fn_node(const char* name, bool is_public, int64_t fn_type, const int64_t* params, size_t nparams, int64_t body_block) {
   int64_t id = emit_node_with_fields_begin("fn", fn_type);
   emitf("\"name\":");
   json_write_escaped(g_emit.out, name);
+  emitf(",\"linkage\":");
+  json_write_escaped(g_emit.out, is_public ? "public" : "local");
   emitf(",\"params\":[");
   for (size_t i = 0; i < nparams; i++) {
     if (i) emitf(",");
@@ -2455,7 +2461,7 @@ int64_t sirc_block_def(char* name, SircParamList* bparams, SircNodeList* stmts) 
   return bid;
 }
 
-void sirc_fn_def_cfg(char* name, SircParamList* params, int64_t ret, int64_t entry_block, SircNodeList* blocks) {
+void sirc_fn_def_cfg(char* name, SircParamList* params, int64_t ret, bool is_public, int64_t entry_block, SircNodeList* blocks) {
   int64_t* ptys = NULL;
   int64_t* pnodes = NULL;
   size_t nparams = 0;
@@ -2484,6 +2490,8 @@ void sirc_fn_def_cfg(char* name, SircParamList* params, int64_t ret, int64_t ent
   int64_t id = emit_node_with_fields_begin("fn", fn_ty);
   emitf("\"name\":");
   json_write_escaped(g_emit.out, name);
+  emitf(",\"linkage\":");
+  json_write_escaped(g_emit.out, is_public ? "public" : "local");
   emitf(",\"params\":[");
   for (size_t i = 0; i < nparams; i++) {
     if (i) emitf(",");
@@ -2847,7 +2855,7 @@ void sirc_extern_fn(char* name, SircParamList* params, int64_t ret) {
   locals_clear();
 }
 
-void sirc_fn_def(char* name, SircParamList* params, int64_t ret, SircNodeList* stmts) {
+void sirc_fn_def(char* name, SircParamList* params, int64_t ret, bool is_public, SircNodeList* stmts) {
   int64_t* ptys = NULL;
   int64_t* pnodes = NULL;
   size_t nparams = 0;
@@ -2859,7 +2867,7 @@ void sirc_fn_def(char* name, SircParamList* params, int64_t ret, SircNodeList* s
 
   int64_t fn_ty = type_fn(ptys, nparams, ret);
   int64_t block = emit_block_node(stmts ? stmts->nodes : NULL, stmts ? stmts->len : 0);
-  int64_t fn_node = emit_fn_node(name, fn_ty, pnodes, nparams, block);
+  int64_t fn_node = emit_fn_node(name, is_public, fn_ty, pnodes, nparams, block);
   FnEntry* e = fn_find_mut(name);
   if (e) {
     e->sig_type = fn_ty;
