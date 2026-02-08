@@ -1,0 +1,8 @@
+unit bad_strict_alloca_align_flag target host
+
+fn main() -> i32
+  ;; align must be an integer (not a boolean flag).
+  let p:ptr = alloca(i32) +align
+  return 0:i32
+end
+

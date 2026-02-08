@@ -1,0 +1,9 @@
+unit bad_strict_load_unknown_flag target host
+
+fn main() -> i32
+  let p:ptr = ptr.sym(g0)
+  ;; load.* only supports {align:int, vol:bool} scalar fields; flags are rejected in --strict.
+  let x:i32 = load.i32(p) +volatile
+  return x
+end
+

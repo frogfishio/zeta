@@ -141,6 +141,21 @@ function(sirc_add_diag_expect_test name input_rel expect_code expect_line expect
   )
 endfunction()
 
+function(sirc_add_diag_expect_strict_test name input_rel expect_code expect_line expect_col expect_msg_substr)
+  add_test(
+    NAME ${name}
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRC=$<TARGET_FILE:sirc>
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/${input_rel}
+      -DEXTRA_ARGS=--strict
+      -DEXPECT_CODE=${expect_code}
+      -DEXPECT_LINE=${expect_line}
+      -DEXPECT_COL=${expect_col}
+      "-DEXPECT_MSG_SUBSTR=${expect_msg_substr}"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/run_sirc_diag_expect.cmake
+  )
+endfunction()
+
 sirc_add_diag_expect_test(sirc_diag_bad_syntax tests/fixtures/bad_syntax.sir sirc.parse.syntax 4 22 "syntax error")
 sirc_add_diag_expect_test(sirc_diag_bad_sem_if_branch_kind tests/fixtures/bad_sem_if_branch_kind.sir sirc.parse.syntax 5 37 "expected 'val' or 'thunk'")
 sirc_add_diag_expect_test(sirc_diag_bad_sem_scope_keys tests/fixtures/bad_sem_scope_keys.sir sirc.parse.syntax 7 6 "sem.scope: expected 'defers'")
@@ -148,6 +163,11 @@ sirc_add_diag_expect_test(sirc_diag_bad_sem_switch_case_body_key tests/fixtures/
 sirc_add_diag_expect_test(sirc_diag_bad_sem_match_sum_case_variant_key tests/fixtures/bad_sem_match_sum_case_key.sir sirc.parse.syntax 6 34 "sem.match_sum: expected 'variant'")
 sirc_add_diag_expect_test(sirc_diag_bad_type_unknown_name tests/fixtures/bad_type_unknown_name.sir sirc.type.unknown 5 13 "unknown type name")
 sirc_add_diag_expect_test(sirc_diag_bad_type_unknown_ctor tests/fixtures/bad_type_unknown_ctor.sir sirc.parse.syntax 3 17 "unknown type constructor")
+
+sirc_add_diag_expect_strict_test(sirc_diag_strict_alloca_unknown_attr tests/fixtures/bad_strict_alloca_unknown_attr.sir sirc.strict.attr.unknown 6 1 "alloca: unknown attribute")
+sirc_add_diag_expect_strict_test(sirc_diag_strict_alloca_align_flag tests/fixtures/bad_strict_alloca_align_flag.sir sirc.strict.attr.bad_type 6 1 "alloca: align must be an integer")
+sirc_add_diag_expect_strict_test(sirc_diag_strict_load_unknown_flag tests/fixtures/bad_strict_load_unknown_flag.sir sirc.strict.attr.unsupported 7 1 "flags are not supported")
+sirc_add_diag_expect_strict_test(sirc_diag_strict_store_unknown_attr tests/fixtures/bad_strict_store_unknown_attr.sir sirc.strict.attr.unknown 7 1 "store.i32: unknown attribute")
 
 #
 # Tests (require sircc)

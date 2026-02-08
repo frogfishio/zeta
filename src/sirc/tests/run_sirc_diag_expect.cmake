@@ -8,8 +8,13 @@ if(NOT DEFINED EXPECT_CODE OR EXPECT_CODE STREQUAL "")
   message(FATAL_ERROR "run_sirc_diag_expect: missing -DEXPECT_CODE")
 endif()
 
+set(extra_args)
+if(DEFINED EXTRA_ARGS AND NOT EXTRA_ARGS STREQUAL "")
+  set(extra_args ${EXTRA_ARGS})
+endif()
+
 execute_process(
-  COMMAND ${SIRC} --lint --diagnostics json ${INPUT}
+  COMMAND ${SIRC} --lint --diagnostics json ${extra_args} ${INPUT}
   RESULT_VARIABLE rc
   OUTPUT_VARIABLE out
   ERROR_VARIABLE err
@@ -57,4 +62,3 @@ if(DEFINED EXPECT_MSG_SUBSTR AND NOT EXPECT_MSG_SUBSTR STREQUAL "")
     message(FATAL_ERROR "expected msg substring: ${EXPECT_MSG_SUBSTR}")
   endif()
 endif()
-

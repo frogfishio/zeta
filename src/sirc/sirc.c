@@ -162,6 +162,7 @@ typedef struct sirc_diag {
 static sirc_diag_t g_diag = {0};
 static sirc_diag_format_t g_diag_format = SIRC_DIAG_TEXT;
 static bool g_diag_all = false;
+static bool g_strict = false;
 
 typedef struct sirc_diag_entry {
   const char* code;
@@ -348,6 +349,17 @@ static void die_at_last(const char* fmt, ...) {
   vsnprintf(tmp, sizeof(tmp), fmt, ap);
   va_end(ap);
   diag_setf("sirc.error", "%s", tmp);
+  diag_print_one();
+  exit(1);
+}
+
+static void strict_failf(const char* code, const char* fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  char tmp[2048];
+  vsnprintf(tmp, sizeof(tmp), fmt, ap);
+  va_end(ap);
+  diag_setf(code ? code : "sirc.strict", "%s", tmp);
   diag_print_one();
   exit(1);
 }
@@ -2515,6 +2527,26 @@ static int64_t sirc_call_impl(char* name, SircExprList* args, SircAttrList* attr
       align_v = al->scalar.v.i;
     }
 
+    if (g_strict) {
+      if (acc.have_sig) strict_failf("sirc.strict.attr.unsupported", "alloca: 'sig' attribute is not supported");
+      for (size_t i = 0; i < acc.root_len; i++) {
+        AttrItem* it = &acc.root[i];
+        if (!it->key) continue;
+        if (strcmp(it->key, "align") == 0) {
+          if (it->scalar.kind != ATTR_SCALAR_INT) strict_failf("sirc.strict.attr.bad_type", "alloca: align must be an integer");
+          continue;
+        }
+        strict_failf("sirc.strict.attr.unknown", "alloca: unknown attribute '%s'", it->key);
+      }
+      for (size_t i = 0; i < acc.flags_len; i++) {
+        AttrItem* it = &acc.flags[i];
+        if (!it->key) continue;
+        if (strcmp(it->key, "align") == 0 && it->kind != ATTR_FLAGS_SCALAR) {
+          strict_failf("sirc.strict.attr.bad_type", "alloca: align must be an integer");
+        }
+      }
+    }
+
     int64_t id = emit_node_with_fields_begin("alloca", 0);
     emitf("\"ty\":");
     emit_type_ref_obj(ty);
@@ -2585,6 +2617,26 @@ static int64_t sirc_call_impl(char* name, SircExprList* args, SircAttrList* attr
     if (argc != 1) die_at_last("sirc: %s requires 1 arg (addr)", name);
     const char* tname = name + 5;
     int64_t ty = type_from_name(tname);
+
+    if (g_strict) {
+      if (acc.have_sig) strict_failf("sirc.strict.attr.unsupported", "%s: 'sig' attribute is not supported", name);
+      if (acc.have_count) strict_failf("sirc.strict.attr.unsupported", "%s: 'count' attribute is not supported", name);
+      if (acc.flags_len) strict_failf("sirc.strict.attr.unsupported", "%s: flags are not supported", name);
+      for (size_t i = 0; i < acc.root_len; i++) {
+        AttrItem* it = &acc.root[i];
+        if (!it->key) continue;
+        if (strcmp(it->key, "align") == 0) {
+          if (it->scalar.kind != ATTR_SCALAR_INT) strict_failf("sirc.strict.attr.bad_type", "%s: align must be an integer", name);
+          continue;
+        }
+        if (strcmp(it->key, "vol") == 0) {
+          if (it->scalar.kind != ATTR_SCALAR_BOOL) strict_failf("sirc.strict.attr.bad_type", "%s: vol must be a boolean", name);
+          continue;
+        }
+        strict_failf("sirc.strict.attr.unknown", "%s: unknown attribute '%s'", name, it->key);
+      }
+    }
+
     int64_t id = emit_node_with_fields_begin(name, ty);
     emitf("\"addr\":");
     emit_node_ref_obj(argv[0]);
@@ -2599,6 +2651,26 @@ static int64_t sirc_call_impl(char* name, SircExprList* args, SircAttrList* attr
 
   if (strncmp(name, "store.", 6) == 0) {
     if (argc != 2) die_at_last("sirc: %s requires 2 args (addr, value)", name);
+
+    if (g_strict) {
+      if (acc.have_sig) strict_failf("sirc.strict.attr.unsupported", "%s: 'sig' attribute is not supported", name);
+      if (acc.have_count) strict_failf("sirc.strict.attr.unsupported", "%s: 'count' attribute is not supported", name);
+      if (acc.flags_len) strict_failf("sirc.strict.attr.unsupported", "%s: flags are not supported", name);
+      for (size_t i = 0; i < acc.root_len; i++) {
+        AttrItem* it = &acc.root[i];
+        if (!it->key) continue;
+        if (strcmp(it->key, "align") == 0) {
+          if (it->scalar.kind != ATTR_SCALAR_INT) strict_failf("sirc.strict.attr.bad_type", "%s: align must be an integer", name);
+          continue;
+        }
+        if (strcmp(it->key, "vol") == 0) {
+          if (it->scalar.kind != ATTR_SCALAR_BOOL) strict_failf("sirc.strict.attr.bad_type", "%s: vol must be a boolean", name);
+          continue;
+        }
+        strict_failf("sirc.strict.attr.unknown", "%s: unknown attribute '%s'", name, it->key);
+      }
+    }
+
     int64_t id = emit_node_with_fields_begin(name, 0);
     emitf("\"addr\":");
     emit_node_ref_obj(argv[0]);
@@ -2769,6 +2841,7 @@ static void usage(FILE* out) {
           "  --emit-src <none|loc|src_ref|both>  Attach source mapping (default: loc)\n"
           "  --diagnostics <text|json>  Diagnostic output format (default: text)\n"
           "  --all         Report all errors\n"
+          "  --strict      Enable frontend hygiene checks (reject unknown attrs for known constructs)\n"
           "  --lint        Parse/validate only (no output)\n"
           "  --tool        Enable filelist + -o output mode\n"
           "  --print-support  Print supported syntax/features and exit\n"
@@ -2937,6 +3010,10 @@ int main(int argc, char** argv) {
     }
     if (strcmp(a, "--all") == 0) {
       g_diag_all = true;
+      continue;
+    }
+    if (strcmp(a, "--strict") == 0) {
+      g_strict = true;
       continue;
     }
     if (strcmp(a, "--lint") == 0) {

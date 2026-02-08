@@ -28,6 +28,7 @@ Legend:
 - [x] Add `--print-support [--format text|json]` listing exactly what syntax/features/packs `sirc` can emit.
 - [x] Keep `--help` and `--version` up to date.
 - [x] Keep `--ids string|numeric` (`string` default).
+- [x] Add `--strict` for frontend hygiene (reject unknown/ignored attrs on known constructs).
 
 ## P0 — Conformance + regression suite
 
@@ -44,7 +45,8 @@ Legend:
   - [x] Initial fixtures for sem-pack authoring guardrails (bad branch kind, bad keys).
   - [ ] Add “frontend hygiene” fixtures once we add sirc-side checks (unknown type, wrong arg count, bad attrs).
     - [x] Unknown type name (`sirc.type.unknown`).
-    - [ ] Wrong arg count / unknown attrs (needs sirc-side validation policy).
+    - [x] Unknown/ignored attrs on known constructs under `--strict` (`sirc.strict.attr.*`).
+    - [ ] Wrong arg count (decide if `sirc` should enforce beyond existing special cases).
 - [ ] Pipeline fixtures: `sirc` output must pass `sircc --verify-only` (already covered by existing tests; expand).
 - [x] Add minimal CLI regression tests: `--lint`, `--diagnostics json`, and `--tool` multi-input.
 - [ ] Optional runtime smoke: selected fixtures run via `sem` and assert exit code/stdout (when deterministic).
