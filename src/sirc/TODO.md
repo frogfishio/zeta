@@ -34,8 +34,12 @@ Legend:
 - [ ] Golden fixtures: `.sir → .sir.jsonl` exact-match tests for core constructs (and for each supported pack).
   - [x] `sem:v1` fixtures (all `examples/sem_*.sir`).
   - [ ] Base/core v1.0 fixtures (hello/add/mem/cfg/etc.) once we decide the “minimal blessed” set.
+    - [x] `hello`, `add`, `cfg_if` (golden tests).
   - [ ] Pack fixtures (`fun:v1`, `closure:v1`, `adt:v1`) beyond verification-only.
 - [ ] Negative fixtures: assert diagnostic code + span for common failures (unknown type, wrong arg count, bad attrs).
+  - [x] Harness: CTest runner asserts `--diagnostics json` fields (code + loc + msg substring).
+  - [x] Initial fixtures for sem-pack authoring guardrails (bad branch kind, bad keys).
+  - [ ] Add “frontend hygiene” fixtures once we add sirc-side checks (unknown type, wrong arg count, bad attrs).
 - [ ] Pipeline fixtures: `sirc` output must pass `sircc --verify-only` (already covered by existing tests; expand).
 - [x] Add minimal CLI regression tests: `--lint`, `--diagnostics json`, and `--tool` multi-input.
 - [ ] Optional runtime smoke: selected fixtures run via `sem` and assert exit code/stdout (when deterministic).

@@ -1,0 +1,9 @@
+unit bad_sem_switch_missing_body_key target host
+
+fn main() -> i32
+  ;; sem.switch requires `body` key before cases.
+  let x:i32 = sem.switch(0:i32, cases: [
+    { lit: 0:i32, bod: val 1:i32 }
+  ], default: val 2:i32) as i32
+  return x
+end

@@ -1,0 +1,10 @@
+unit bad_sem_match_sum_case_key target host
+
+fn main() -> i32
+  ;; sem.match_sum case requires keys: `variant` and `body`.
+  let x:i32 = sem.match_sum(i32, 0:i32, cases: [
+    { varint: 0, body: val 1:i32 }
+  ], default: val 2:i32) as i32
+  return x
+end
+

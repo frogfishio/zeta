@@ -105,6 +105,30 @@ sirc_add_golden_test(sirc_golden_sem_while_break examples/sem_while_break.sir te
 sirc_add_golden_test(sirc_golden_sem_defer_void examples/sem_defer_void.sir tests/golden/sem_defer_void.sir.jsonl)
 sirc_add_golden_test(sirc_golden_sem_scope_cfg examples/sem_scope_cfg.sir tests/golden/sem_scope_cfg.sir.jsonl)
 
+sirc_add_golden_test(sirc_golden_hello examples/hello.sir tests/golden/hello.sir.jsonl)
+sirc_add_golden_test(sirc_golden_add examples/add.sir tests/golden/add.sir.jsonl)
+sirc_add_golden_test(sirc_golden_cfg_if examples/cfg_if.sir tests/golden/cfg_if.sir.jsonl)
+
+function(sirc_add_diag_expect_test name input_rel expect_code expect_line expect_col expect_msg_substr)
+  add_test(
+    NAME ${name}
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRC=$<TARGET_FILE:sirc>
+      -DINPUT=${CMAKE_CURRENT_LIST_DIR}/${input_rel}
+      -DEXPECT_CODE=${expect_code}
+      -DEXPECT_LINE=${expect_line}
+      -DEXPECT_COL=${expect_col}
+      "-DEXPECT_MSG_SUBSTR=${expect_msg_substr}"
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/run_sirc_diag_expect.cmake
+  )
+endfunction()
+
+sirc_add_diag_expect_test(sirc_diag_bad_syntax tests/fixtures/bad_syntax.sir sirc.parse.syntax 4 22 "syntax error")
+sirc_add_diag_expect_test(sirc_diag_bad_sem_if_branch_kind tests/fixtures/bad_sem_if_branch_kind.sir sirc.parse.syntax 5 37 "expected 'val' or 'thunk'")
+sirc_add_diag_expect_test(sirc_diag_bad_sem_scope_keys tests/fixtures/bad_sem_scope_keys.sir sirc.parse.syntax 7 6 "sem.scope: expected 'defers'")
+sirc_add_diag_expect_test(sirc_diag_bad_sem_switch_case_body_key tests/fixtures/bad_sem_switch_missing_body_key.sir sirc.parse.syntax 6 34 "sem.switch: expected 'body'")
+sirc_add_diag_expect_test(sirc_diag_bad_sem_match_sum_case_variant_key tests/fixtures/bad_sem_match_sum_case_key.sir sirc.parse.syntax 6 34 "sem.match_sum: expected 'variant'")
+
 #
 # Tests (require sircc)
 #

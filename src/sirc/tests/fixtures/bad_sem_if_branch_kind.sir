@@ -1,0 +1,7 @@
+unit bad_sem_if_branch_kind target host
+
+fn main() -> i32
+  ;; First branch operand must begin with `val` or `thunk`.
+  let x:i32 = sem.if(true, foo 1:i32, val 2:i32) as i32
+  return x
+end
