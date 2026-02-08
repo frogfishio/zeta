@@ -59,8 +59,8 @@ Legend:
 
 ## P1 — Language usability + docs
 
-- [ ] Write `docs/sirc.md` as the authoritative reference: syntax, types, attrs, `as Type`, CFG form, ids.
-- [ ] Add a “cookbook” section: extern calls, hello world, closure, ADT, CFG blocks/switch, traps, memory ops.
+- [x] Write `src/sirc/docs/sirc.md` as the authoritative reference: syntax, types, attrs, `as Type`, CFG form, ids.
+- [x] Add a “cookbook” section: extern calls, hello world, closure, ADT, CFG blocks/switch, traps, memory ops.
 - [ ] Document string-id stability + collision/uniqueness rules (what is guaranteed across recompiles).
 
 ## P1 — Sem-pack authoring (avoid “split personality”)

@@ -2936,6 +2936,7 @@ static void print_support(FILE* out, bool as_json) {
     fputs(",\"ids_default\":\"string\",\"ids_modes\":[\"string\",\"numeric\"],\"features\":[", out);
     fputs("\"fun:v1\",\"closure:v1\",\"adt:v1\",\"sem:v1\"", out);
     fputs("],\"emit_src_default\":\"loc\",\"emit_src_modes\":[\"none\",\"loc\",\"src_ref\",\"both\"]", out);
+    fputs(",\"strict\":true", out);
     fputs(",\"types\":[", out);
     fputs("\"prim(i8,i16,i32,i64,f32,f64,bool,void,ptr)\",\"^T\",\"array(T,N)\",\"fn(T,...)->R\",\"fun(Sig)\",\"closure(CallSig,EnvTy)\",\"sum{V, V:Ty,...}\"",
           out);
@@ -2952,6 +2953,9 @@ static void print_support(FILE* out, bool as_json) {
   fprintf(out, "IDs:\n");
   fprintf(out, "  default: string\n");
   fprintf(out, "  modes: string, numeric\n");
+  fprintf(out, "\n");
+  fprintf(out, "Strict mode:\n");
+  fprintf(out, "  --strict: reject unknown/ignored attrs on known constructs; enforce arity on a conservative subset\n");
   fprintf(out, "\n");
   fprintf(out, "Features/packs (emittable):\n");
   fprintf(out, "  - fun:v1\n");

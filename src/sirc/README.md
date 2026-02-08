@@ -130,6 +130,8 @@ Tip: use `target host` in the `unit` header to let the backend pick the default 
 
 This is what we treat as “basic product” right now:
 
+- Reference docs: `src/sirc/docs/sirc.md`
+
 - unit header: `unit <name> target host|<triple> [+feature[:v]]*`
 - ids: emitted as strings by default (`--ids numeric` switches to numeric ids)
 - functions: `extern fn ...`, `fn ... end`, `public`, `let`, `return`
