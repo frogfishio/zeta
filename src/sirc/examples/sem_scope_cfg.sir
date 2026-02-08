@@ -9,7 +9,7 @@ end
 
 fn main() -> i32 public
   block entry
-    let f: VoidFun = fun.sym() name "cleanup" as VoidFun
+    let f: VoidFun = fun.sym() name="cleanup" as VoidFun
     sem.scope(defers: [ thunk f ], body: do
       1:i32
     end)

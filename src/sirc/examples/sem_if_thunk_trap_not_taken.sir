@@ -8,13 +8,12 @@ fn good() -> i32
 end
 
 fn bad() -> i32
-  term.trap code "trap"
+  term.trap code="trap"
 end
 
 fn main() -> i32 public
-  let tg: I32Fun = fun.sym() name "good" as I32Fun
-  let tb: I32Fun = fun.sym() name "bad" as I32Fun
+  let tg: I32Fun = fun.sym() name="good" as I32Fun
+  let tb: I32Fun = fun.sym() name="bad" as I32Fun
   let c: bool = true
   return sem.if(c, thunk tg, thunk tb) as i32
 end
-

@@ -8,8 +8,7 @@ fn cleanup() -> void
 end
 
 fn main() -> i32 public
-  let f: VoidFun = fun.sym() name "cleanup" as VoidFun
+  let f: VoidFun = fun.sym() name="cleanup" as VoidFun
   sem.defer(thunk f)
   return 7:i32
 end
-

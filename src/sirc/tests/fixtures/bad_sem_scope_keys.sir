@@ -3,8 +3,7 @@ unit bad_sem_scope_keys target host
 fn main() -> i32
   ;; sem.scope requires keys: `defers:` and `body:`.
   sem.scope(deferz: [], body: do
-    term.trap code "should_not_parse"
+    term.trap code="should_not_parse"
   end)
   return 0:i32
 end
-

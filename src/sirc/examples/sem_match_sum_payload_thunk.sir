@@ -10,7 +10,7 @@ fn use(x:i32) -> i32
 end
 
 fn main() -> i32 public
-  let f: UseFun = fun.sym() name "use" as UseFun
+  let f: UseFun = fun.sym() name="use" as UseFun
   let v: OptI32 = adt.make(5:i32) flags variant 1 as OptI32
   return sem.match_sum(
     OptI32,
@@ -22,4 +22,3 @@ fn main() -> i32 public
     default: val 0:i32
   ) as i32
 end
-

@@ -2,6 +2,5 @@ unit bad_strict_mnemonic_ty_wrong_type target host
 
 fn main() -> i32
   ;; ty must be a type name string (e.g. ty "i32") when used in attribute tails.
-  return i32.add(1:i32, 2:i32) ty 123
+  return i32.add(1:i32, 2:i32) ty=123
 end
-

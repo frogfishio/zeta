@@ -58,6 +58,7 @@ void yyerror(const char* s);
 %token T_FEATURES T_SIG T_DO
 %token T_TYPE T_CONST T_GLOBAL
 %token T_BLOCK T_TERM T_TO T_ARGS T_COND T_THEN T_ELSE T_VALUE
+%token T_CASE
 
 %destructor { free($$); } T_ID T_STRING
 %destructor { sirc_attrs_free($$); } <attrs>
@@ -357,6 +358,11 @@ sem_switch_case
       $$.lit = $5;
       $$.body = $10;
     }
+  | T_CASE int_lit nl_star T_ARROW nl_star branch_operand
+    {
+      $$.lit = $2;
+      $$.body = $6;
+    }
   ;
 
 sem_match_cases_opt
@@ -462,15 +468,19 @@ attr_tail
 
 attr_item
   : '+' T_ID                    { $$ = sirc_attrs_add_flag(sirc_attrs_empty(), $2); }
+  | '+' T_ID '=' attr_int       { $$ = sirc_attrs_add_flags_scalar_int(sirc_attrs_empty(), $2, $4); }
+  | '+' T_ID '=' T_STRING       { $$ = sirc_attrs_add_flags_scalar_str(sirc_attrs_empty(), $2, $4); }
+  | '+' T_ID '=' attr_bool      { $$ = sirc_attrs_add_flags_scalar_bool(sirc_attrs_empty(), $2, $4); }
+  | '+' T_ID '=' attr_ident     { $$ = sirc_attrs_add_flags_scalar_str(sirc_attrs_empty(), $2, $4); }
   | flags_list                  { $$ = $1; }
   | T_FLAGS T_ID attr_int       { $$ = sirc_attrs_add_flags_scalar_int(sirc_attrs_empty(), $2, $3); }
   | T_FLAGS T_ID T_STRING       { $$ = sirc_attrs_add_flags_scalar_str(sirc_attrs_empty(), $2, $3); }
   | T_FLAGS T_ID attr_bool      { $$ = sirc_attrs_add_flags_scalar_bool(sirc_attrs_empty(), $2, $3); }
   | T_FLAGS T_ID attr_ident     { $$ = sirc_attrs_add_flags_scalar_str(sirc_attrs_empty(), $2, $3); }
-  | T_ID attr_int               { $$ = sirc_attrs_add_field_scalar_int(sirc_attrs_empty(), $1, $2); }
-  | T_ID T_STRING               { $$ = sirc_attrs_add_field_scalar_str(sirc_attrs_empty(), $1, $2); }
-  | T_ID attr_bool              { $$ = sirc_attrs_add_field_scalar_bool(sirc_attrs_empty(), $1, $2); }
-  | T_ID attr_ident             { $$ = sirc_attrs_add_field_scalar_str(sirc_attrs_empty(), $1, $2); }
+  | T_ID '=' attr_int           { $$ = sirc_attrs_add_field_scalar_int(sirc_attrs_empty(), $1, $3); }
+  | T_ID '=' T_STRING           { $$ = sirc_attrs_add_field_scalar_str(sirc_attrs_empty(), $1, $3); }
+  | T_ID '=' attr_bool          { $$ = sirc_attrs_add_field_scalar_bool(sirc_attrs_empty(), $1, $3); }
+  | T_ID '=' attr_ident         { $$ = sirc_attrs_add_field_scalar_str(sirc_attrs_empty(), $1, $3); }
   | T_SIG T_ID                  { $$ = sirc_attrs_add_sig(sirc_attrs_empty(), $2); }
   | T_COUNT expr                { $$ = sirc_attrs_add_count(sirc_attrs_empty(), $2); }
   ;

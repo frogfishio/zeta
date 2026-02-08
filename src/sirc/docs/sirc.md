@@ -133,7 +133,7 @@ return 0:i32
 Expression statement (emit a node record, discard the value):
 
 ```sir
-eff.fence() flags mode seqcst
+eff.fence() +mode=seqcst
 ```
 
 ---
@@ -183,17 +183,18 @@ end
 
 Attribute tails are a sequence of items appended to a call or terminator line:
 
-- `+flag` → boolean flag (under `fields.flags`)
-- `flags key <scalar>` → keyed scalar in `fields.flags`
-- `key <scalar>` → scalar field in `fields`
+- `+flag` → boolean flag in `fields.flags` (value `true`)
+- `+key=<scalar>` → keyed scalar in `fields.flags` (recommended for anything “flags-like”)
+- `key=<scalar>` → scalar field in `fields[key]`
+- `flags key <scalar>` → legacy spelling for forcing a keyed scalar into `fields.flags`
 - `flags [a, b, c]` → sugar for `+a +b +c`
 
 Examples:
 
 ```sir
-mem.copy(dst, src, len) flags alignDst 1 flags alignSrc 1 flags overlap disallow
-eff.fence() flags mode seqcst
-term.trap code "bounds" msg "oob"
+mem.copy(dst, src, len) +alignDst=1 +alignSrc=1 +overlap=disallow
+eff.fence() +mode=seqcst
+term.trap code="bounds" msg="oob"
 ```
 
 Special keys (supported):
@@ -221,14 +222,14 @@ If a mnemonic isn’t in the strict arity table, strict mode does not enforce it
 Stack allocation:
 
 ```sir
-let p:ptr = alloca(i32) count 4:i64 flags align 16 +zero
+let p:ptr = alloca(i32) count 4:i64 +align=16 +zero
 ```
 
 Typed load/store:
 
 ```sir
-let x:i32 = load.i32(p) align 4 vol true
-store.i32(p, x) align 4
+let x:i32 = load.i32(p) align=4 vol=true
+store.i32(p, x) align=4
 ```
 
 ---
@@ -287,7 +288,7 @@ let c:bool = sem.or_sc(lhs, thunk rhs)
 
 ```sir
 let x:i32 = sem.switch(scrut, cases: [
-  { lit: 0:i32, body: val 10:i32 }
+  case 0:i32 -> val 10:i32
 ], default: val 0:i32) as i32
 ```
 
@@ -319,4 +320,3 @@ See:
 - `src/sirc/examples/*.sir` (authoring examples)
 - `src/sirc/tests/golden/*.sir.jsonl` (exact expected emission)
 - `src/sirc/tests/fixtures/*.sir` (negative diagnostics, incl. `--strict`)
-

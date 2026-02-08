@@ -39,26 +39,26 @@ fn zir_main() -> i64 public
   end
 
   block case0(i:i32, buf0:ptr, buf1:ptr)
-    mem.fill(buf0, 65:i8, 1:i64) flags alignDst 8
-    mem.copy(buf1, buf0, 1:i64) flags alignDst 8 flags alignSrc 8 flags overlap disallow
+    mem.fill(buf0, 65:i8, 1:i64) +alignDst=8
+    mem.copy(buf1, buf0, 1:i64) +alignDst=8 +alignSrc=8 +overlap=disallow
     term.br to cont args:[i, buf0, buf1]
   end
 
   block case1(i:i32, buf0:ptr, buf1:ptr)
-    mem.fill(buf0, 66:i8, 2:i64) flags alignDst 8
-    mem.copy(buf1, buf0, 2:i64) flags alignDst 8 flags alignSrc 8 flags overlap disallow
+    mem.fill(buf0, 66:i8, 2:i64) +alignDst=8
+    mem.copy(buf1, buf0, 2:i64) +alignDst=8 +alignSrc=8 +overlap=disallow
     term.br to cont args:[i, buf0, buf1]
   end
 
   block case2(i:i32, buf0:ptr, buf1:ptr)
-    mem.fill(buf0, 67:i8, 4:i64) flags alignDst 8
-    mem.copy(buf1, buf0, 4:i64) flags alignDst 8 flags alignSrc 8 flags overlap disallow
+    mem.fill(buf0, 67:i8, 4:i64) +alignDst=8
+    mem.copy(buf1, buf0, 4:i64) +alignDst=8 +alignSrc=8 +overlap=disallow
     term.br to cont args:[i, buf0, buf1]
   end
 
   block case3(i:i32, buf0:ptr, buf1:ptr)
-    mem.fill(buf0, 68:i8, 8:i64) flags alignDst 8
-    mem.copy(buf1, buf0, 8:i64) flags alignDst 8 flags alignSrc 8 flags overlap disallow
+    mem.fill(buf0, 68:i8, 8:i64) +alignDst=8
+    mem.copy(buf1, buf0, 8:i64) +alignDst=8 +alignSrc=8 +overlap=disallow
     term.br to cont args:[i, buf0, buf1]
   end
 

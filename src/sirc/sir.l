@@ -233,6 +233,7 @@ STR_UNTERM1  \"([^\"\\\n]|\\.)*\n
 "sem.scope"                 { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_SEM_SCOPE; }
 
 "scrut"                     { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_SCRUT; }
+"case"                      { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_CASE; }
 "flags"                     { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_FLAGS; }
 "count"                     { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_COUNT; }
 "cases"                     { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_CASES; }

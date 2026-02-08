@@ -10,7 +10,7 @@ fn sir_add_env(env:i32, x:i32) -> i32
 end
 
 fn main() -> i32 public
-  let code: CodeFun = fun.sym() name "sir_add_env" as CodeFun
+  let code: CodeFun = fun.sym() name="sir_add_env" as CodeFun
   let env: i32 = 5:i32
   let cls: Cls = closure.make(code, env) as Cls
   let x: i32 = 7:i32

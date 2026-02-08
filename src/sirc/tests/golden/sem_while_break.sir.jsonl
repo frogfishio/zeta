@@ -20,7 +20,7 @@
 {"ir":"sir-v1.0","k":"src","id":"src:sem_while_break.sir:15:1","file":"sem_while_break.sir","line":15,"col":1,"text":"end"}
 {"ir":"sir-v1.0","k":"node","id":"n:15:0","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:14:0"}]},"loc":{"line":15,"col":1,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:15:1"}
 {"ir":"sir-v1.0","k":"node","id":"n:15:1","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"body","linkage":"local","params":[],"body":{"t":"ref","id":"n:15:0"}},"loc":{"line":15,"col":1,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:15:1"}
-{"ir":"sir-v1.0","k":"src","id":"src:sem_while_break.sir:19:1","file":"sem_while_break.sir","line":19,"col":1,"text":"  let b: BodyFun = fun.sym() name \"body\" as BodyFun"}
+{"ir":"sir-v1.0","k":"src","id":"src:sem_while_break.sir:19:1","file":"sem_while_break.sir","line":19,"col":1,"text":"  let b: BodyFun = fun.sym() name=\"body\" as BodyFun"}
 {"ir":"sir-v1.0","k":"node","id":"n:19:0","tag":"fun.sym","type_ref":"fun(fn()->prim:bool)","fields":{"name":"cond_fn"},"loc":{"line":19,"col":1,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:19:1"}
 {"ir":"sir-v1.0","k":"node","id":"n:19:1","tag":"let","fields":{"name":"c","value":{"t":"ref","id":"n:19:0"}},"loc":{"line":19,"col":1,"unit":"sem_while_break.sir"},"src_ref":"src:sem_while_break.sir:19:1"}
 {"ir":"sir-v1.0","k":"src","id":"src:sem_while_break.sir:20:1","file":"sem_while_break.sir","line":20,"col":1,"text":"  sem.while(thunk c, thunk b)"}

@@ -2,7 +2,6 @@ unit bad_strict_alloca_unknown_attr target host
 
 fn main() -> i32
   ;; Under --strict, known constructs reject unknown attrs (alloca ignores root attrs otherwise).
-  let p:ptr = alloca(i32) foo 1
+  let p:ptr = alloca(i32) foo=1
   return 0:i32
 end
-

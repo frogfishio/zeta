@@ -13,7 +13,7 @@
 {"ir":"sir-v1.0","k":"node","id":"n:12:0","tag":"term.trap","fields":{"code":"trap"},"loc":{"line":12,"col":1,"unit":"sem_if_thunk_trap_not_taken.sir"},"src_ref":"src:sem_if_thunk_trap_not_taken.sir:12:1"}
 {"ir":"sir-v1.0","k":"node","id":"n:12:1","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:12:0"}]},"loc":{"line":12,"col":1,"unit":"sem_if_thunk_trap_not_taken.sir"},"src_ref":"src:sem_if_thunk_trap_not_taken.sir:12:1"}
 {"ir":"sir-v1.0","k":"node","id":"n:12:2","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"bad","linkage":"local","params":[],"body":{"t":"ref","id":"n:12:1"}},"loc":{"line":12,"col":1,"unit":"sem_if_thunk_trap_not_taken.sir"},"src_ref":"src:sem_if_thunk_trap_not_taken.sir:12:1"}
-{"ir":"sir-v1.0","k":"src","id":"src:sem_if_thunk_trap_not_taken.sir:16:1","file":"sem_if_thunk_trap_not_taken.sir","line":16,"col":1,"text":"  let tb: I32Fun = fun.sym() name \"bad\" as I32Fun"}
+{"ir":"sir-v1.0","k":"src","id":"src:sem_if_thunk_trap_not_taken.sir:16:1","file":"sem_if_thunk_trap_not_taken.sir","line":16,"col":1,"text":"  let tb: I32Fun = fun.sym() name=\"bad\" as I32Fun"}
 {"ir":"sir-v1.0","k":"node","id":"n:16:0","tag":"fun.sym","type_ref":"fun(fn()->prim:i32)","fields":{"name":"good"},"loc":{"line":16,"col":1,"unit":"sem_if_thunk_trap_not_taken.sir"},"src_ref":"src:sem_if_thunk_trap_not_taken.sir:16:1"}
 {"ir":"sir-v1.0","k":"node","id":"n:16:1","tag":"let","fields":{"name":"tg","value":{"t":"ref","id":"n:16:0"}},"loc":{"line":16,"col":1,"unit":"sem_if_thunk_trap_not_taken.sir"},"src_ref":"src:sem_if_thunk_trap_not_taken.sir:16:1"}
 {"ir":"sir-v1.0","k":"src","id":"src:sem_if_thunk_trap_not_taken.sir:17:1","file":"sem_if_thunk_trap_not_taken.sir","line":17,"col":1,"text":"  let c: bool = true"}

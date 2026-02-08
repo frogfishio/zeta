@@ -5,7 +5,6 @@ extern fn add_sig(a:i32, b:i32) -> i32
 fn main() -> i32
   ;; call.indirect allows extra attrs/flags in non-strict mode; --strict should reject them.
   let fp:ptr = ptr.sym(hello)
-  let r:i32 = call.indirect(fp, 1:i32, 2:i32) sig add_sig foo 1
+  let r:i32 = call.indirect(fp, 1:i32, 2:i32) sig add_sig foo=1
   return r
 end
-

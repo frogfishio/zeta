@@ -15,8 +15,8 @@ fn body() -> i32
 end
 
 fn main() -> i32 public
-  let c: CondFun = fun.sym() name "cond_fn" as CondFun
-  let b: BodyFun = fun.sym() name "body" as BodyFun
+  let c: CondFun = fun.sym() name="cond_fn" as CondFun
+  let b: BodyFun = fun.sym() name="body" as BodyFun
   sem.while(thunk c, thunk b)
   return 0:i32
 end
