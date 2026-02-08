@@ -84,7 +84,7 @@ Work items:
   - [x] Match the normative layout/semantics contract used by `sircc` (MVP: `{tag:i32,payload}` in guest memory)
 - [ ] `fun:v1` execution parity
   - [x] `fun.sym` (MVP: only in-module function symbols)
-  - [ ] `fun.cmp.eq`, `fun.cmp.ne`
+  - [x] `fun.cmp.eq`, `fun.cmp.ne`
   - [x] `call.fun` (MVP: callee must be `fun.sym`)
 - [ ] `closure:v1` execution parity
   - [ ] `closure.make`, `closure.env`, `closure.code`
@@ -93,7 +93,7 @@ Work items:
 - [ ] `sem:v1` parity (avoid IR drift)
   - [x] Decide: implement lowering rules in SEM (MVP, inline control-flow in sircore bytecode)
   - [x] Support runnable intent set (MVP): `sem.if`, `sem.and_sc`, `sem.or_sc`, `sem.switch`, `sem.while`, `sem.continue`, `sem.defer`, `sem.scope`
-  - [ ] Remaining intent set: `sem.cond`
+  - [x] Remaining intent set: `sem.cond`
 
 ### Stage D — CI-grade emulator “superpowers” (optional, makes SEM a platform)
 

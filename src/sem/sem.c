@@ -342,6 +342,7 @@ static void sem_print_support(FILE* out, bool json) {
       "sym (globals)",
       "ptr.sym (in-module fn by name, or global addr)",
       "fun.sym (fun:v1, MVP)",
+      "fun.cmp.eq / fun.cmp.ne (fun:v1)",
       "call.fun (fun:v1, MVP)",
       "call",
       "call.indirect",
@@ -354,6 +355,7 @@ static void sem_print_support(FILE* out, bool json) {
 
       // sem intent (sem:v1)
       "sem.if",
+      "sem.cond",
       "sem.and_sc / sem.or_sc",
       "sem.switch",
       "sem.match_sum",

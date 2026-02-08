@@ -2835,6 +2835,17 @@ static bool eval_sem_switch(sirj_ctx_t* c, uint32_t node_id, const node_info_t* 
   return true;
 }
 
+static bool eval_sem_cond(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  // `sem.cond` is intentionally the same contract as `sem.if`:
+  //   args:[cond, then_branch, else_branch] where branches are {kind:val|thunk,...}.
+  // It exists as a more expression-oriented spelling for frontends.
+  const bool ok = eval_sem_if(c, node_id, n, out_slot, out_kind);
+  if (!ok && c && !c->diag.set) {
+    sirj_diag_setf(c, "sem.sem.cond", c->cur_path, n ? n->loc_line : 0, node_id, n ? n->tag : "sem.cond", "sem.cond failed");
+  }
+  return ok;
+}
+
 static bool eval_ptr_addsub(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, bool is_sub, sir_val_id_t* out_slot, val_kind_t* out_kind) {
   if (!c || !n || !out_slot || !out_kind) return false;
   if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
@@ -3476,6 +3487,67 @@ static bool resolve_internal_func_by_name(const sirj_ctx_t* c, const char* nm, s
   return false;
 }
 
+static bool eval_fun_cmp(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, bool is_ne, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) {
+    sirj_diag_setf(c, "sem.fun.cmp.bad_fields", c->cur_path, n->loc_line, node_id, n->tag, "fun.cmp.* missing fields");
+    return false;
+  }
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 2) {
+    sirj_diag_setf(c, "sem.fun.cmp.bad_args", c->cur_path, n->loc_line, node_id, n->tag, "fun.cmp.* expects args:[a,b]");
+    return false;
+  }
+
+  uint32_t a_id = 0, b_id = 0;
+  if (!parse_ref_id(av->v.arr.items[0], &a_id)) return false;
+  if (!parse_ref_id(av->v.arr.items[1], &b_id)) return false;
+  if (a_id >= c->node_cap || b_id >= c->node_cap) return false;
+  if (!c->nodes[a_id].present || !c->nodes[b_id].present) return false;
+
+  const node_info_t* an = &c->nodes[a_id];
+  const node_info_t* bn = &c->nodes[b_id];
+
+  // Type rule: both operands must be fun(sig) with the same sig.
+  if (!an->type_ref || !bn->type_ref) {
+    sirj_diag_setf(c, "sem.fun.cmp.missing_type", c->cur_path, n->loc_line, node_id, n->tag, "fun.cmp.* requires operand type_ref");
+    return false;
+  }
+  if (an->type_ref >= c->type_cap || bn->type_ref >= c->type_cap) return false;
+  if (!c->types[an->type_ref].present || !c->types[bn->type_ref].present) return false;
+  if (!c->types[an->type_ref].is_fun || !c->types[bn->type_ref].is_fun) {
+    sirj_diag_setf(c, "sem.fun.cmp.bad_type", c->cur_path, n->loc_line, node_id, n->tag, "fun.cmp.* operands must be fun types");
+    return false;
+  }
+  const uint32_t asig = c->types[an->type_ref].fun_sig;
+  const uint32_t bsig = c->types[bn->type_ref].fun_sig;
+  if (!asig || !bsig || asig != bsig) {
+    sirj_diag_setf(c, "sem.fun.cmp.sig_mismatch", c->cur_path, n->loc_line, node_id, n->tag, "fun.cmp.* operands must have the same sig");
+    return false;
+  }
+
+  sir_val_id_t a_slot = 0, b_slot = 0;
+  val_kind_t ak = VK_INVALID, bk = VK_INVALID;
+  if (!eval_node(c, a_id, &a_slot, &ak)) return false;
+  if (!eval_node(c, b_id, &b_slot, &bk)) return false;
+  if (ak != VK_PTR || bk != VK_PTR) {
+    sirj_diag_setf(c, "sem.fun.cmp.bad_kind", c->cur_path, n->loc_line, node_id, n->tag, "fun.cmp.* operands must be represented as ptr (MVP)");
+    return false;
+  }
+
+  const sir_val_id_t dst = alloc_slot(c, VK_BOOL);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  const bool ok_emit =
+      is_ne ? sir_mb_emit_ptr_cmp_ne(c->mb, c->fn, dst, a_slot, b_slot) : sir_mb_emit_ptr_cmp_eq(c->mb, c->fn, dst, a_slot, b_slot);
+  sir_mb_clear_src(c->mb);
+  if (!ok_emit) return false;
+
+  if (!set_node_val(c, node_id, dst, VK_BOOL)) return false;
+  *out_slot = dst;
+  *out_kind = VK_BOOL;
+  return true;
+}
+
 static bool eval_fun_sym(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
   if (!c || !n || !out_slot || !out_kind) return false;
   if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
@@ -4104,7 +4176,10 @@ static bool eval_node(sirj_ctx_t* c, uint32_t node_id, sir_val_id_t* out_slot, v
   if (strcmp(n->tag, "name") == 0) return eval_name(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "ptr.sym") == 0) return eval_ptr_sym(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "fun.sym") == 0) return eval_fun_sym(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "fun.cmp.eq") == 0) return eval_fun_cmp(c, node_id, n, false, out_slot, out_kind);
+  if (strcmp(n->tag, "fun.cmp.ne") == 0) return eval_fun_cmp(c, node_id, n, true, out_slot, out_kind);
   if (strcmp(n->tag, "sem.if") == 0) return eval_sem_if(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "sem.cond") == 0) return eval_sem_cond(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "sem.and_sc") == 0) return eval_sem_and_or_sc(c, node_id, n, false, out_slot, out_kind);
   if (strcmp(n->tag, "sem.or_sc") == 0) return eval_sem_and_or_sc(c, node_id, n, true, out_slot, out_kind);
   if (strcmp(n->tag, "sem.switch") == 0) return eval_sem_switch(c, node_id, n, out_slot, out_kind);

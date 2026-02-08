@@ -604,6 +604,70 @@ target_compile_options(sem_unit_run_sem_while_body_bad_code_traps PRIVATE -Wall 
 
 add_test(NAME sem_run_sem_while_body_bad_code_traps COMMAND sem_unit_run_sem_while_body_bad_code_traps)
 
+add_executable(sem_unit_run_sem_cond_thunk_trap_not_taken
+  tests/test_run_sem_cond_thunk_trap_not_taken.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_sem_cond_thunk_trap_not_taken PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_sem_cond_thunk_trap_not_taken PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_sem_cond_thunk_trap_not_taken PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_sem_cond_thunk_trap_not_taken PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_sem_cond_thunk_trap_not_taken PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_sem_cond_thunk_trap_not_taken COMMAND sem_unit_run_sem_cond_thunk_trap_not_taken)
+
+add_executable(sem_unit_run_fun_cmp_eq_true
+  tests/test_run_fun_cmp_eq_true.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_fun_cmp_eq_true PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_fun_cmp_eq_true PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_fun_cmp_eq_true PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_fun_cmp_eq_true PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_fun_cmp_eq_true PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_fun_cmp_eq_true COMMAND sem_unit_run_fun_cmp_eq_true)
+
+add_executable(sem_unit_run_fun_cmp_ne_true
+  tests/test_run_fun_cmp_ne_true.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_fun_cmp_ne_true PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_fun_cmp_ne_true PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_fun_cmp_ne_true PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_fun_cmp_ne_true PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_fun_cmp_ne_true PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_fun_cmp_ne_true COMMAND sem_unit_run_fun_cmp_ne_true)
+
+add_executable(sem_unit_verify_fun_cmp_sig_mismatch
+  tests/test_verify_fun_cmp_sig_mismatch.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_verify_fun_cmp_sig_mismatch PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_verify_fun_cmp_sig_mismatch PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_verify_fun_cmp_sig_mismatch PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_verify_fun_cmp_sig_mismatch PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_verify_fun_cmp_sig_mismatch PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_verify_fun_cmp_sig_mismatch COMMAND sem_unit_verify_fun_cmp_sig_mismatch)
+
 add_executable(sem_unit_run_sem_while_global_counter
   tests/test_run_sem_while_global_counter.c
   sem_hosted.c
