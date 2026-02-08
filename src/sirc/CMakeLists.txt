@@ -120,6 +120,12 @@ sirc_add_golden_test(sirc_golden_call_indirect_ptrsym examples/call_indirect_ptr
 sirc_add_golden_test(sirc_golden_fun_sym_call examples/fun_sym_call.sir tests/golden/fun_sym_call.sir.jsonl)
 sirc_add_golden_test(sirc_golden_closure_make_call examples/closure_make_call.sir tests/golden/closure_make_call.sir.jsonl)
 sirc_add_golden_test(sirc_golden_adt_make_get examples/adt_make_get.sir tests/golden/adt_make_get.sir.jsonl)
+sirc_add_golden_test(sirc_golden_abs_i32 examples/abs_i32.sir tests/golden/abs_i32.sir.jsonl)
+sirc_add_golden_test(sirc_golden_eff_fence examples/eff_fence.sir tests/golden/eff_fence.sir.jsonl)
+sirc_add_golden_test(sirc_golden_features examples/features.sir tests/golden/features.sir.jsonl)
+sirc_add_golden_test(sirc_golden_float_trunc examples/float_trunc.sir tests/golden/float_trunc.sir.jsonl)
+sirc_add_golden_test(sirc_golden_sendloop_mono examples/sendloop_mono.sir tests/golden/sendloop_mono.sir.jsonl)
+sirc_add_golden_test(sirc_golden_sendloop_uniform examples/sendloop_uniform.sir tests/golden/sendloop_uniform.sir.jsonl)
 
 function(sirc_add_diag_expect_test name input_rel expect_code expect_line expect_col expect_msg_substr)
   add_test(
