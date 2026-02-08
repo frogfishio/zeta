@@ -684,6 +684,22 @@ target_compile_options(sem_unit_coverage_srcmap_smoke PRIVATE -Wall -Wextra -Wpe
 
 add_test(NAME sem_coverage_srcmap_smoke COMMAND sem_unit_coverage_srcmap_smoke)
 
+add_executable(sem_unit_verify_validate_diag_fields_json
+  tests/test_verify_validate_diag_fields_json.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_verify_validate_diag_fields_json PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_verify_validate_diag_fields_json PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_verify_validate_diag_fields_json PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_verify_validate_diag_fields_json PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_verify_validate_diag_fields_json PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_verify_validate_diag_fields_json COMMAND sem_unit_verify_validate_diag_fields_json)
+
 add_test(
   NAME sem_check_smoke
   COMMAND $<TARGET_FILE:sem> --check

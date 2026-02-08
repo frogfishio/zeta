@@ -119,6 +119,9 @@ typedef struct sirj_ctx {
     uint32_t line;
     uint32_t node_id;
     const char* tag;
+    uint32_t fid;
+    uint32_t ip;
+    const char* op;
   } diags[16];
   uint32_t diag_count;
   struct {
@@ -129,6 +132,9 @@ typedef struct sirj_ctx {
     uint32_t line;
     uint32_t node_id;
     const char* tag;
+    uint32_t fid;
+    uint32_t ip;
+    const char* op;
   } diag;
 } sirj_ctx_t;
 
@@ -148,6 +154,9 @@ static void sirj_diag_setf(sirj_ctx_t* c, const char* code, const char* path, ui
     c->diag.line = line;
     c->diag.node_id = node_id;
     c->diag.tag = tag;
+    c->diag.fid = 0;
+    c->diag.ip = 0;
+    c->diag.op = NULL;
     memcpy(c->diag.msg, tmp, sizeof(tmp));
   }
 
@@ -158,6 +167,45 @@ static void sirj_diag_setf(sirj_ctx_t* c, const char* code, const char* path, ui
     c->diags[i].line = line;
     c->diags[i].node_id = node_id;
     c->diags[i].tag = tag;
+    c->diags[i].fid = 0;
+    c->diags[i].ip = 0;
+    c->diags[i].op = NULL;
+    memcpy(c->diags[i].msg, tmp, sizeof(tmp));
+  }
+}
+
+static void sirj_diag_setf_ex(sirj_ctx_t* c, const char* code, const char* path, uint32_t line, uint32_t node_id, const char* tag, uint32_t fid,
+                              uint32_t ip, const char* op, const char* fmt, ...) {
+  if (!c) return;
+  va_list ap;
+  va_start(ap, fmt);
+  char tmp[256];
+  (void)vsnprintf(tmp, sizeof(tmp), fmt ? fmt : "error", ap);
+  va_end(ap);
+
+  if (!c->diag.set) {
+    c->diag.set = true;
+    c->diag.code = code ? code : "sem.error";
+    c->diag.path = path;
+    c->diag.line = line;
+    c->diag.node_id = node_id;
+    c->diag.tag = tag;
+    c->diag.fid = fid;
+    c->diag.ip = ip;
+    c->diag.op = op;
+    memcpy(c->diag.msg, tmp, sizeof(tmp));
+  }
+
+  if (c->diag_all && c->diag_count < (uint32_t)(sizeof(c->diags) / sizeof(c->diags[0]))) {
+    const uint32_t i = c->diag_count++;
+    c->diags[i].code = code ? code : "sem.error";
+    c->diags[i].path = path;
+    c->diags[i].line = line;
+    c->diags[i].node_id = node_id;
+    c->diags[i].tag = tag;
+    c->diags[i].fid = fid;
+    c->diags[i].ip = ip;
+    c->diags[i].op = op;
     memcpy(c->diags[i].msg, tmp, sizeof(tmp));
   }
 }
@@ -185,11 +233,12 @@ static void sem_json_write_escaped(FILE* out, const char* s) {
 }
 
 static void sem_print_one_diag(sem_diag_format_t fmt, const char* code, const char* msg, const char* path, uint32_t line, uint32_t node,
-                               const char* tag) {
+                               const char* tag, uint32_t fid, uint32_t ip, const char* op) {
   if (!code) code = "sem.error";
   if (!msg || !msg[0]) msg = "error";
   if (!path) path = "";
   if (!tag) tag = "";
+  if (!op) op = "";
 
   if (fmt == SEM_DIAG_JSON) {
     fprintf(stderr, "{\"tool\":\"sem\",\"code\":\"");
@@ -204,6 +253,13 @@ static void sem_print_one_diag(sem_diag_format_t fmt, const char* code, const ch
     }
     if (line) fprintf(stderr, ",\"line\":%u", (unsigned)line);
     if (node) fprintf(stderr, ",\"node\":%u", (unsigned)node);
+    if (fid) fprintf(stderr, ",\"fid\":%u", (unsigned)fid);
+    if (fid) fprintf(stderr, ",\"ip\":%u", (unsigned)ip);
+    if (op[0]) {
+      fprintf(stderr, ",\"op\":\"");
+      sem_json_write_escaped(stderr, op);
+      fprintf(stderr, "\"");
+    }
     if (tag[0]) {
       fprintf(stderr, ",\"tag\":\"");
       sem_json_write_escaped(stderr, tag);
@@ -223,6 +279,9 @@ static void sem_print_one_diag(sem_diag_format_t fmt, const char* code, const ch
   if (node || tag[0]) {
     fprintf(stderr, "sem:   at node=%u tag=%s\n", (unsigned)node, tag);
   }
+  if (fid) {
+    fprintf(stderr, "sem:   at fid=%u ip=%u op=%s\n", (unsigned)fid, (unsigned)ip, op[0] ? op : "?");
+  }
 }
 
 static void sem_print_diag(const sirj_ctx_t* c) {
@@ -230,11 +289,12 @@ static void sem_print_diag(const sirj_ctx_t* c) {
   if (c->diag_all && c->diag_count) {
     for (uint32_t i = 0; i < c->diag_count; i++) {
       sem_print_one_diag(c->diag_format, c->diags[i].code, c->diags[i].msg, c->diags[i].path, c->diags[i].line, c->diags[i].node_id,
-                         c->diags[i].tag);
+                         c->diags[i].tag, c->diags[i].fid, c->diags[i].ip, c->diags[i].op);
     }
     return;
   }
-  sem_print_one_diag(c->diag_format, c->diag.code, c->diag.msg, c->diag.path, c->diag.line, c->diag.node_id, c->diag.tag);
+  sem_print_one_diag(c->diag_format, c->diag.code, c->diag.msg, c->diag.path, c->diag.line, c->diag.node_id, c->diag.tag, c->diag.fid, c->diag.ip,
+                     c->diag.op);
 }
 
 static void ctx_dispose(sirj_ctx_t* c) {
@@ -3017,9 +3077,9 @@ static int sem_run_or_verify_sir_jsonl_impl(const char* path, const sem_cap_t* c
     const uint32_t diag_line = vd.src_line ? vd.src_line : 0;
     const uint32_t diag_node = vd.src_node_id ? vd.src_node_id : 0;
     if (vd.fid && vd.op != SIR_INST_INVALID) {
-      sirj_diag_setf(&c, vd.code ? vd.code : "sem.validate", path, diag_line, diag_node, NULL,
-                     "module validate failed at fid=%u ip=%u op=%s: %s", (unsigned)vd.fid, (unsigned)vd.ip, sir_inst_kind_name(vd.op),
-                     vd.message[0] ? vd.message : "invalid");
+      const char* op = sir_inst_kind_name(vd.op);
+      sirj_diag_setf_ex(&c, vd.code ? vd.code : "sem.validate", path, diag_line, diag_node, NULL, (uint32_t)vd.fid, (uint32_t)vd.ip, op,
+                        "module validate failed: %s", vd.message[0] ? vd.message : "invalid");
     } else {
       sirj_diag_setf(&c, vd.code ? vd.code : "sem.validate", path, diag_line, diag_node, NULL, "module validate failed: %s",
                      vd.message[0] ? vd.message : "invalid");
