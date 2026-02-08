@@ -341,8 +341,19 @@ static void sem_print_support(FILE* out, bool json) {
       "decl.fn (extern import)",
       "sym (globals)",
       "ptr.sym (in-module fn by name, or global addr)",
+      "fun.sym (fun:v1, MVP)",
+      "call.fun (fun:v1, MVP)",
       "call",
       "call.indirect",
+
+      // sem intent (sem:v1)
+      "sem.if",
+      "sem.and_sc / sem.or_sc",
+      "sem.switch",
+      "sem.defer",
+      "sem.scope",
+      "sem.while",
+      "sem.continue (MVP)",
 
       // statements
       "let",

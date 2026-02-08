@@ -83,15 +83,17 @@ Work items:
   - [ ] `adt.make`, `adt.tag`, `adt.is`, `adt.get`
   - [ ] Match the normative layout/semantics contract used by `sircc`
 - [ ] `fun:v1` execution parity
-  - [ ] `fun.sym`, `fun.cmp.eq`, `fun.cmp.ne`
-  - [ ] `call.fun`
+  - [x] `fun.sym` (MVP: only in-module function symbols)
+  - [ ] `fun.cmp.eq`, `fun.cmp.ne`
+  - [x] `call.fun` (MVP: callee must be `fun.sym`)
 - [ ] `closure:v1` execution parity
   - [ ] `closure.make`, `closure.env`, `closure.code`
   - [ ] `closure.cmp.eq`, `closure.cmp.ne`
   - [ ] `call.closure`
 - [ ] `sem:v1` parity (avoid IR drift)
-  - [ ] Decide: implement lowering rules in SEM vs share the lowering implementation with `sircc`
-  - [ ] Support at least the blessed intent set: `sem.if`, `sem.cond`, `sem.and_sc`, `sem.or_sc`, `sem.switch`, `sem.match_sum`, `sem.while`, `sem.break`, `sem.continue`, `sem.defer`, `sem.scope`
+  - [x] Decide: implement lowering rules in SEM (MVP, inline control-flow in sircore bytecode)
+  - [x] Support runnable intent set (MVP): `sem.if`, `sem.and_sc`, `sem.or_sc`, `sem.switch`, `sem.while`, `sem.continue`, `sem.defer`, `sem.scope`
+  - [ ] Remaining intent set: `sem.cond`, `sem.match_sum`, `sem.break`
 
 ### Stage D — CI-grade emulator “superpowers” (optional, makes SEM a platform)
 
@@ -215,9 +217,13 @@ Work items:
 - [ ] Normative layout contract for sums (size/align/payload rules) for SEM execution
 
 ### `sem:*` intent mnemonics (semantic desugaring)
-- [ ] `sem.if` (desugar to base blocks/terms + validate)
-- [ ] `sem.and_sc` (short-circuit)
-- [ ] `sem.or_sc` (short-circuit)
+- [x] `sem.if` (MVP: value-only lowers to `select`, thunk branches use inline control-flow)
+- [x] `sem.and_sc` (short-circuit)
+- [x] `sem.or_sc` (short-circuit)
+- [x] `sem.switch` (MVP: i32 scrutinee, const.i32 lits, thunk/val bodies)
+- [x] `sem.while` (MVP: thunk(cond)->bool + thunk(body)->any, lowered as loop in bytecode)
+- [x] `sem.defer` / `sem.scope` (MVP: stack of fun.sym thunks, runs on return + fallthrough)
+- [x] `sem.continue` (MVP: allowed in legacy thunk bodies; treated as `return 0`)
 - [ ] `sem.match_sum` (desugar to `adt.tag` + `term.switch` + join-args)
 
 ## P4 (later / optional packs)
