@@ -60,14 +60,14 @@ Work items:
   - [x] `type.kind:"ptr"` treated consistently (typed ptr, but no host pointers)
   - [x] `type.kind:"array"` basics (size/stride) for `ptr.offset` and init data
   - [x] `type.kind:"struct"` (enough for by-pointer access; no “peek” contracts)
-- [ ] Core memory parity (execution)
+- [x] Core memory parity (execution)
   - [x] `load.i16` / `store.i16`
   - [x] `load.f32` / `store.f32`
   - [x] `load.f64` / `store.f64`
   - [x] Alignment rules and deterministic misalignment traps match the `sircc` contract
-- [ ] Core calls parity (execution)
+- [x] Core calls parity (execution)
   - [x] `call` (direct call) if required by producers (or document “use call.indirect only”)
-- [ ] Diagnostics parity (developer UX)
+- [x] Diagnostics parity (developer UX)
   - [x] When unsupported: emit “what to do instead” hints (e.g. for extern calls, point to `decl.fn`)
   - [x] Ensure `--diagnostics json` includes stable fields for CI parsing (code/path/line/node/tag/fid/ip/op when available)
 
@@ -79,18 +79,19 @@ Acceptance:
 - [ ] For each pack: add a positive + negative fixture pair and run them in `sem --check`
 
 Work items:
-- [ ] `adt:v1` execution parity
+- [x] `adt:v1` execution parity
   - [x] `adt.make`, `adt.tag`, `adt.is`, `adt.get`
   - [x] Match the normative layout/semantics contract used by `sircc` (MVP: `{tag:i32,payload}` in guest memory)
-- [ ] `fun:v1` execution parity
+- [x] `fun:v1` execution parity
   - [x] `fun.sym` (MVP: only in-module function symbols)
   - [x] `fun.cmp.eq`, `fun.cmp.ne`
   - [x] `call.fun` (MVP: callee must be `fun.sym`)
-- [ ] `closure:v1` execution parity
-  - [ ] `closure.make`, `closure.env`, `closure.code`
-  - [ ] `closure.cmp.eq`, `closure.cmp.ne`
-  - [ ] `call.closure`
-- [ ] `sem:v1` parity (avoid IR drift)
+- [x] `closure:v1` execution parity
+  - [x] `closure.sym`
+  - [x] `closure.make`, `closure.env`, `closure.code`
+  - [x] `closure.cmp.eq`, `closure.cmp.ne`
+  - [x] `call.closure`
+- [x] `sem:v1` parity (avoid IR drift)
   - [x] Decide: implement lowering rules in SEM (MVP, inline control-flow in sircore bytecode)
   - [x] Support runnable intent set (MVP): `sem.if`, `sem.and_sc`, `sem.or_sc`, `sem.switch`, `sem.while`, `sem.continue`, `sem.defer`, `sem.scope`
   - [x] Remaining intent set: `sem.cond`
@@ -187,7 +188,7 @@ Work items:
 - [x] Globals via `sym` records (module-level data)
   - [x] Define execution-time memory model for globals in SEM (deterministic alloc at module start)
   - [x] `ptr.sym` to globals (address-of) for lowered globals
-- [ ] `const` records / structured constants (agg:v1 style)
+- [x] `const` records / structured constants (agg:v1 style)
   - [x] `const.zero`
   - [x] `const.array`
   - [x] `const.repeat`
@@ -202,12 +203,12 @@ Work items:
 - [x] `call.fun`
 
 ### Closures (closure:v1)
-- [ ] `closure.sym`
-- [ ] `closure.make`
-- [ ] `closure.code`
-- [ ] `closure.env`
-- [ ] `closure.cmp.eq / closure.cmp.ne`
-- [ ] `call.closure`
+- [x] `closure.sym`
+- [x] `closure.make`
+- [x] `closure.code`
+- [x] `closure.env`
+- [x] `closure.cmp.eq / closure.cmp.ne`
+- [x] `call.closure`
 
 ### ADTs / sums (adt:v1)
 - [x] `adt.make`

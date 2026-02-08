@@ -176,6 +176,10 @@ typedef enum sir_inst_kind {
   SIR_INST_LOAD_F64,
   SIR_INST_CALL_EXTERN, // currently supports zi_write/zi_end/zi_alloc/zi_free/zi_telemetry
   SIR_INST_CALL_FUNC,
+  // Calls an in-module function via a tagged function pointer value:
+  //   ptr = 0xF000... | fid  (same encoding used by sem's fun.sym)
+  // This is the minimal "indirect call" needed for closure:v1 in `sem`.
+  SIR_INST_CALL_FUNC_PTR,
   SIR_INST_RET,
   SIR_INST_RET_VAL,
   SIR_INST_EXIT,
@@ -373,6 +377,11 @@ typedef struct sir_inst {
       uint32_t arg_count;
     } call_func;
     struct {
+      sir_val_id_t callee_ptr;   // SIR_VAL_PTR holding a tagged fid
+      const sir_val_id_t* args;  // module-owned
+      uint32_t arg_count;
+    } call_func_ptr;
+    struct {
       // no payload
       uint8_t _unused;
     } ret_;
@@ -536,6 +545,8 @@ bool sir_mb_emit_call_extern_res(sir_module_builder_t* b, sir_func_id_t f, sir_s
                                  const sir_val_id_t* results, uint8_t result_count);
 bool sir_mb_emit_call_func_res(sir_module_builder_t* b, sir_func_id_t f, sir_func_id_t callee, const sir_val_id_t* args, uint32_t arg_count,
                                const sir_val_id_t* results, uint8_t result_count);
+bool sir_mb_emit_call_func_ptr_res(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t callee_ptr, const sir_val_id_t* args, uint32_t arg_count,
+                                   const sir_val_id_t* results, uint8_t result_count);
 bool sir_mb_emit_exit(sir_module_builder_t* b, sir_func_id_t f, int32_t code);
 bool sir_mb_emit_exit_val(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t code);
 bool sir_mb_emit_ret(sir_module_builder_t* b, sir_func_id_t f);

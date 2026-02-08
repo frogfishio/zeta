@@ -23,6 +23,7 @@ typedef struct type_info {
   bool is_struct;
   bool is_fun;
   bool is_sum;
+  bool is_closure;
   bool layout_visiting;
   sir_prim_type_t prim; // for prim
   uint32_t* params;     // for fn, arena-owned
@@ -32,6 +33,8 @@ typedef struct type_info {
   uint32_t array_len;
   uint32_t ptr_of;
   uint32_t fun_sig; // for fun: SIR type id of underlying fn signature
+  uint32_t closure_call_sig; // for closure: SIR type id of callSig (fn)
+  uint32_t closure_env;      // for closure: SIR type id of envTy
   uint32_t* struct_fields;         // arena-owned; SIR type ids
   uint32_t* struct_field_align;    // arena-owned; 0 means default
   uint32_t struct_field_count;
@@ -76,6 +79,7 @@ typedef enum val_kind {
   VK_I32,
   VK_I64,
   VK_PTR,
+  VK_CLOSURE, // represented as ptr but treated as opaque in SEM type-checking
   VK_BOOL,
   VK_F32,
   VK_F64,
@@ -130,6 +134,9 @@ typedef struct sirj_ctx {
   sir_type_id_t ty_bool;
   sir_type_id_t ty_f32;
   sir_type_id_t ty_f64;
+
+  // Cached extern symbols (module-local)
+  sir_sym_id_t sym_zi_alloc;
 
   // Current-function param bindings (name -> slot).
   struct {
@@ -466,6 +473,18 @@ static bool parse_ref_id(const JsonValue* v, uint32_t* out_id) {
   return json_get_u32(idv, out_id);
 }
 
+static bool parse_sym_value(const JsonValue* v, const char** out_name) {
+  if (!out_name) return false;
+  *out_name = NULL;
+  if (!json_is_object(v)) return false;
+  const char* t = json_get_string(json_obj_get(v, "t"));
+  if (!t || strcmp(t, "sym") != 0) return false;
+  const char* nm = json_get_string(json_obj_get(v, "v"));
+  if (!nm || !nm[0]) return false;
+  *out_name = nm;
+  return true;
+}
+
 static bool parse_u32_array(const JsonValue* v, uint32_t** out, uint32_t* out_n, Arena* arena) {
   if (!out || !out_n || !arena) return false;
   if (!json_is_array(v)) return false;
@@ -633,6 +652,10 @@ static bool type_to_val_kind(const sirj_ctx_t* c, uint32_t type_id, val_kind_t* 
   // SEM only executes prim-like value kinds.
   if (t->is_ptr || t->prim == SIR_PRIM_PTR) {
     *out = VK_PTR;
+    return true;
+  }
+  if (t->is_closure) {
+    *out = VK_CLOSURE;
     return true;
   }
   if (t->is_sum) {
@@ -2215,7 +2238,12 @@ static bool eval_ptr_to_i64_passthrough(sirj_ctx_t* c, uint32_t node_id, const n
   sir_val_id_t arg_slot = 0;
   val_kind_t ak = VK_INVALID;
   if (!eval_node(c, arg_id, &arg_slot, &ak)) return false;
-  if (ak != VK_PTR) return false;
+  if (ak != VK_PTR) {
+    if (ak == VK_CLOSURE) {
+      sirj_diag_setf(c, "sem.ptr.to_i64.opaque", c->cur_path, n->loc_line, node_id, n->tag, "ptr.to_i64 operand must not be a closure");
+    }
+    return false;
+  }
   const sir_val_id_t dst = alloc_slot(c, VK_I64);
   sir_mb_set_src(c->mb, node_id, n->loc_line);
   if (!sir_mb_emit_ptr_to_i64(c->mb, c->fn, dst, arg_slot)) return false;
@@ -3719,6 +3747,630 @@ static bool eval_call_fun(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n,
   return true;
 }
 
+static bool ensure_sym_zi_alloc(sirj_ctx_t* c, sir_sym_id_t* out) {
+  if (!c || !out) return false;
+  if (c->sym_zi_alloc) {
+    *out = c->sym_zi_alloc;
+    return true;
+  }
+  if (!ensure_prim_types(c)) return false;
+  const sir_type_id_t params[] = {c->ty_i32};
+  const sir_type_id_t results[] = {c->ty_ptr};
+  const sir_sig_t sig = {
+      .params = params,
+      .param_count = 1,
+      .results = results,
+      .result_count = 1,
+  };
+  const sir_sym_id_t sid = sir_mb_sym_extern_fn(c->mb, "zi_alloc", sig);
+  if (!sid) return false;
+  c->sym_zi_alloc = sid;
+  *out = sid;
+  return true;
+}
+
+static bool closure_code_sig_matches_fun_sig(const sirj_ctx_t* c, uint32_t closure_ty, uint32_t fun_ty) {
+  if (!c) return false;
+  if (closure_ty == 0 || closure_ty >= c->type_cap) return false;
+  if (fun_ty == 0 || fun_ty >= c->type_cap) return false;
+  const type_info_t* ct = &c->types[closure_ty];
+  const type_info_t* ft = &c->types[fun_ty];
+  if (!ct->present || !ct->is_closure) return false;
+  if (!ft->present || !ft->is_fun) return false;
+
+  const uint32_t call_sig_tid = ct->closure_call_sig;
+  const uint32_t env_tid = ct->closure_env;
+  if (call_sig_tid == 0 || call_sig_tid >= c->type_cap) return false;
+  if (env_tid == 0 || env_tid >= c->type_cap) return false;
+  const type_info_t* call_sig = &c->types[call_sig_tid];
+  if (!call_sig->present || !call_sig->is_fn) return false;
+
+  const uint32_t code_sig_tid = ft->fun_sig;
+  if (code_sig_tid == 0 || code_sig_tid >= c->type_cap) return false;
+  const type_info_t* code_sig = &c->types[code_sig_tid];
+  if (!code_sig->present || !code_sig->is_fn) return false;
+
+  if (code_sig->param_count != call_sig->param_count + 1u) return false;
+  if (code_sig->params[0] != env_tid) return false;
+  for (uint32_t i = 0; i < call_sig->param_count; i++) {
+    if (code_sig->params[i + 1u] != call_sig->params[i]) return false;
+  }
+  if (code_sig->ret != call_sig->ret) return false;
+  return true;
+}
+
+static bool closure_code_sig_matches_fn_type(const sirj_ctx_t* c, uint32_t closure_ty, uint32_t fn_ty) {
+  if (!c) return false;
+  if (closure_ty == 0 || closure_ty >= c->type_cap) return false;
+  if (fn_ty == 0 || fn_ty >= c->type_cap) return false;
+  const type_info_t* ct = &c->types[closure_ty];
+  const type_info_t* fn = &c->types[fn_ty];
+  if (!ct->present || !ct->is_closure) return false;
+  if (!fn->present || !fn->is_fn) return false;
+
+  const uint32_t call_sig_tid = ct->closure_call_sig;
+  const uint32_t env_tid = ct->closure_env;
+  if (call_sig_tid == 0 || call_sig_tid >= c->type_cap) return false;
+  if (env_tid == 0 || env_tid >= c->type_cap) return false;
+  const type_info_t* call_sig = &c->types[call_sig_tid];
+  if (!call_sig->present || !call_sig->is_fn) return false;
+
+  if (fn->param_count != call_sig->param_count + 1u) return false;
+  if (fn->params[0] != env_tid) return false;
+  for (uint32_t i = 0; i < call_sig->param_count; i++) {
+    if (fn->params[i + 1u] != call_sig->params[i]) return false;
+  }
+  if (fn->ret != call_sig->ret) return false;
+  return true;
+}
+
+static bool closure_layout(const sirj_ctx_t* c, uint32_t closure_ty, uint32_t* out_size, uint32_t* out_align, uint32_t* out_env_off) {
+  if (!c || !out_size || !out_align || !out_env_off) return false;
+  if (closure_ty == 0 || closure_ty >= c->type_cap) return false;
+  const type_info_t* ct = &c->types[closure_ty];
+  if (!ct->present || !ct->is_closure) return false;
+  uint32_t env_size = 0, env_align = 1;
+  if (!type_layout((sirj_ctx_t*)c, ct->closure_env, &env_size, &env_align)) return false;
+  if (env_size == 0) return false;
+  if (env_align == 0) env_align = 1;
+  if (env_align > (1u << 20)) return false;
+
+  uint32_t env_off = 0;
+  if (!round_up_u32(8u, env_align, &env_off)) return false;
+  const uint64_t end64 = (uint64_t)env_off + (uint64_t)env_size;
+  if (end64 > 0x7FFFFFFFull) return false;
+  uint32_t size0 = (uint32_t)end64;
+  const uint32_t align = (env_align > 8u) ? env_align : 8u;
+  uint32_t size = 0;
+  if (!round_up_u32(size0, align, &size)) return false;
+  *out_size = size;
+  *out_align = align;
+  *out_env_off = env_off;
+  return true;
+}
+
+static bool emit_store_env_value(sirj_ctx_t* c, uint32_t node_id, uint32_t loc_line, val_kind_t k, sir_val_id_t addr, sir_val_id_t v,
+                                 uint32_t align) {
+  if (!c) return false;
+  bool ok = false;
+  switch (k) {
+    case VK_I8:
+      ok = sir_mb_emit_store_i8(c->mb, c->fn, addr, v, align ? align : 1);
+      break;
+    case VK_I16:
+      ok = sir_mb_emit_store_i16(c->mb, c->fn, addr, v, align ? align : 2);
+      break;
+    case VK_I32:
+      ok = sir_mb_emit_store_i32(c->mb, c->fn, addr, v, align ? align : 4);
+      break;
+    case VK_I64:
+      ok = sir_mb_emit_store_i64(c->mb, c->fn, addr, v, align ? align : 8);
+      break;
+    case VK_PTR:
+    case VK_CLOSURE:
+      ok = sir_mb_emit_store_ptr(c->mb, c->fn, addr, v, align ? align : 8);
+      break;
+    case VK_F32:
+      ok = sir_mb_emit_store_f32(c->mb, c->fn, addr, v, align ? align : 4);
+      break;
+    case VK_F64:
+      ok = sir_mb_emit_store_f64(c->mb, c->fn, addr, v, align ? align : 8);
+      break;
+    case VK_BOOL: {
+      const sir_val_id_t one = alloc_slot(c, VK_I8);
+      const sir_val_id_t zero = alloc_slot(c, VK_I8);
+      const sir_val_id_t b8 = alloc_slot(c, VK_I8);
+      if (!sir_mb_emit_const_i8(c->mb, c->fn, one, 1)) return false;
+      if (!sir_mb_emit_const_i8(c->mb, c->fn, zero, 0)) return false;
+      if (!sir_mb_emit_select(c->mb, c->fn, b8, v, one, zero)) return false;
+      ok = sir_mb_emit_store_i8(c->mb, c->fn, addr, b8, align ? align : 1);
+      break;
+    }
+    default:
+      sirj_diag_setf(c, "sem.closure.env.bad_kind", c->cur_path, loc_line, node_id, "closure.make", "unsupported closure env value kind");
+      ok = false;
+      break;
+  }
+  return ok;
+}
+
+static bool emit_load_env_value(sirj_ctx_t* c, uint32_t node_id, uint32_t loc_line, val_kind_t k, sir_val_id_t addr, uint32_t align,
+                                sir_val_id_t* out_slot) {
+  if (!c || !out_slot) return false;
+  bool ok = false;
+  const sir_val_id_t dst = alloc_slot(c, k == VK_CLOSURE ? VK_PTR : k);
+  switch (k) {
+    case VK_I8:
+      ok = sir_mb_emit_load_i8(c->mb, c->fn, dst, addr, align ? align : 1);
+      break;
+    case VK_I16:
+      ok = sir_mb_emit_load_i16(c->mb, c->fn, dst, addr, align ? align : 2);
+      break;
+    case VK_I32:
+      ok = sir_mb_emit_load_i32(c->mb, c->fn, dst, addr, align ? align : 4);
+      break;
+    case VK_I64:
+      ok = sir_mb_emit_load_i64(c->mb, c->fn, dst, addr, align ? align : 8);
+      break;
+    case VK_PTR:
+    case VK_CLOSURE:
+      ok = sir_mb_emit_load_ptr(c->mb, c->fn, dst, addr, align ? align : 8);
+      break;
+    case VK_F32:
+      ok = sir_mb_emit_load_f32(c->mb, c->fn, dst, addr, align ? align : 4);
+      break;
+    case VK_F64:
+      ok = sir_mb_emit_load_f64(c->mb, c->fn, dst, addr, align ? align : 8);
+      break;
+    case VK_BOOL: {
+      const sir_val_id_t b8 = alloc_slot(c, VK_I8);
+      const sir_val_id_t bi32 = alloc_slot(c, VK_I32);
+      const sir_val_id_t zi32 = alloc_slot(c, VK_I32);
+      const sir_val_id_t t = alloc_slot(c, VK_BOOL);
+      if (!sir_mb_emit_load_i8(c->mb, c->fn, b8, addr, align ? align : 1)) return false;
+      if (!sir_mb_emit_i32_zext_i8(c->mb, c->fn, bi32, b8)) return false;
+      if (!sir_mb_emit_const_i32(c->mb, c->fn, zi32, 0)) return false;
+      if (!sir_mb_emit_i32_cmp_ne(c->mb, c->fn, t, bi32, zi32)) return false;
+      if (!emit_copy_slot(c, dst, t)) return false;
+      ok = true;
+      break;
+    }
+    default:
+      sirj_diag_setf(c, "sem.closure.env.bad_kind", c->cur_path, loc_line, node_id, "closure.env", "unsupported closure env value kind");
+      ok = false;
+      break;
+  }
+  if (!ok) return false;
+  *out_slot = dst;
+  return true;
+}
+
+static bool eval_closure_make(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const uint32_t closure_ty = n->type_ref;
+  if (closure_ty == 0 || closure_ty >= c->type_cap || !c->types[closure_ty].present || !c->types[closure_ty].is_closure) {
+    sirj_diag_setf(c, "sem.closure.make.bad_type", c->cur_path, n->loc_line, node_id, n->tag, "closure.make requires closure type_ref");
+    return false;
+  }
+
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 2) {
+    sirj_diag_setf(c, "sem.closure.make.bad_args", c->cur_path, n->loc_line, node_id, n->tag, "closure.make expects args:[code, env]");
+    return false;
+  }
+  uint32_t code_id = 0, env_id = 0;
+  if (!parse_ref_id(av->v.arr.items[0], &code_id)) return false;
+  if (!parse_ref_id(av->v.arr.items[1], &env_id)) return false;
+  if (code_id >= c->node_cap || env_id >= c->node_cap) return false;
+  if (!c->nodes[code_id].present || !c->nodes[env_id].present) return false;
+
+  const node_info_t* code_n = &c->nodes[code_id];
+  if (code_n->type_ref == 0 || code_n->type_ref >= c->type_cap || !c->types[code_n->type_ref].present || !c->types[code_n->type_ref].is_fun) {
+    sirj_diag_setf(c, "sem.closure.make.bad_code", c->cur_path, n->loc_line, node_id, n->tag, "closure.make code must be fun(codeSig)");
+    return false;
+  }
+  if (!closure_code_sig_matches_fun_sig(c, closure_ty, code_n->type_ref)) {
+    sirj_diag_setf(c, "sem.closure.make.sig_mismatch", c->cur_path, n->loc_line, node_id, n->tag, "closure.make code signature mismatch");
+    return false;
+  }
+
+  // Evaluate code/env values.
+  sir_val_id_t code_slot = 0, env_slot = 0;
+  val_kind_t ck = VK_INVALID, ek = VK_INVALID;
+  if (!eval_node(c, code_id, &code_slot, &ck)) return false;
+  if (!eval_node(c, env_id, &env_slot, &ek)) return false;
+  if (ck != VK_PTR) {
+    sirj_diag_setf(c, "sem.closure.make.bad_code_kind", c->cur_path, n->loc_line, node_id, n->tag, "closure.make code must be ptr (MVP)");
+    return false;
+  }
+
+  val_kind_t expect_env = VK_INVALID;
+  if (!type_to_val_kind(c, c->types[closure_ty].closure_env, &expect_env)) return false;
+  if (expect_env == VK_I1) {
+    sirj_diag_setf(c, "sem.closure.make.bad_env", c->cur_path, n->loc_line, node_id, n->tag, "closure envTy i1 is not supported");
+    return false;
+  }
+  if (ek != expect_env) {
+    sirj_diag_setf(c, "sem.closure.make.env_type_mismatch", c->cur_path, n->loc_line, node_id, n->tag, "closure.make env type mismatch");
+    return false;
+  }
+
+  uint32_t size = 0, align = 0, env_off = 0;
+  if (!closure_layout(c, closure_ty, &size, &align, &env_off)) return false;
+
+  // Allocate closure object on guest heap for stable identity.
+  sir_sym_id_t sym_alloc = 0;
+  if (!ensure_sym_zi_alloc(c, &sym_alloc)) return false;
+  const sir_val_id_t size_i32 = alloc_slot(c, VK_I32);
+  const sir_val_id_t clo_ptr = alloc_slot(c, VK_PTR);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_const_i32(c->mb, c->fn, size_i32, (int32_t)size)) return false;
+  const sir_val_id_t alloc_args[] = {size_i32};
+  if (!sir_mb_emit_call_extern_res(c->mb, c->fn, sym_alloc, alloc_args, 1, &clo_ptr, 1)) return false;
+
+  // Zero-init entire blob for determinism.
+  const sir_val_id_t zbyte = alloc_slot(c, VK_I8);
+  const sir_val_id_t zlen = alloc_slot(c, VK_I32);
+  if (!sir_mb_emit_const_i8(c->mb, c->fn, zbyte, 0)) return false;
+  if (!sir_mb_emit_const_i32(c->mb, c->fn, zlen, (int32_t)size)) return false;
+  if (!sir_mb_emit_mem_fill(c->mb, c->fn, clo_ptr, zbyte, zlen)) return false;
+
+  // Store code pointer.
+  if (!sir_mb_emit_store_ptr(c->mb, c->fn, clo_ptr, code_slot, 8)) return false;
+
+  // Store env at env_off.
+  sir_val_id_t env_ptr = clo_ptr;
+  if (env_off) {
+    if (!emit_ptr_add_i32_imm(c, node_id, n->loc_line, clo_ptr, (int32_t)env_off, &env_ptr)) return false;
+  }
+  uint32_t env_size = 0, env_align = 1;
+  if (!type_layout(c, c->types[closure_ty].closure_env, &env_size, &env_align)) return false;
+  if (!emit_store_env_value(c, node_id, n->loc_line, ek, env_ptr, env_slot, env_align)) return false;
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, clo_ptr, VK_CLOSURE)) return false;
+  *out_slot = clo_ptr;
+  *out_kind = VK_CLOSURE;
+  return true;
+}
+
+static bool eval_closure_sym(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const uint32_t closure_ty = n->type_ref;
+  if (closure_ty == 0 || closure_ty >= c->type_cap || !c->types[closure_ty].present || !c->types[closure_ty].is_closure) {
+    sirj_diag_setf(c, "sem.closure.sym.bad_type", c->cur_path, n->loc_line, node_id, n->tag, "closure.sym requires closure type_ref");
+    return false;
+  }
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 2) {
+    sirj_diag_setf(c, "sem.closure.sym.bad_args", c->cur_path, n->loc_line, node_id, n->tag, "closure.sym expects args:[sym, env]");
+    return false;
+  }
+
+  const char* sym_name = NULL;
+  if (!parse_sym_value(av->v.arr.items[0], &sym_name)) {
+    sirj_diag_setf(c, "sem.closure.sym.bad_sym", c->cur_path, n->loc_line, node_id, n->tag, "closure.sym arg0 must be a sym");
+    return false;
+  }
+
+  uint32_t env_id = 0;
+  if (!parse_ref_id(av->v.arr.items[1], &env_id)) return false;
+  if (env_id >= c->node_cap || !c->nodes[env_id].present) return false;
+  const node_info_t* env_n = &c->nodes[env_id];
+  if (env_n->type_ref != c->types[closure_ty].closure_env) {
+    sirj_diag_setf(c, "sem.closure.sym.env_type_mismatch", c->cur_path, n->loc_line, node_id, n->tag, "closure.sym env type_ref mismatch");
+    return false;
+  }
+
+  sir_func_id_t fid = 0;
+  if (!resolve_internal_func_by_name(c, sym_name, &fid)) {
+    sirj_diag_setf(c, "sem.closure.sym.unknown", c->cur_path, n->loc_line, node_id, n->tag, "closure.sym unknown function: %s", sym_name);
+    return false;
+  }
+
+  // Validate that the named function matches the derived code signature.
+  uint32_t fn_type = 0;
+  bool found = false;
+  for (uint32_t i = 0; i < c->node_cap; i++) {
+    if (!c->nodes[i].present) continue;
+    if (!c->nodes[i].tag || strcmp(c->nodes[i].tag, "fn") != 0) continue;
+    if (!c->nodes[i].fields_obj || c->nodes[i].fields_obj->type != JSON_OBJECT) continue;
+    const char* nm = json_get_string(json_obj_get(c->nodes[i].fields_obj, "name"));
+    if (nm && strcmp(nm, sym_name) == 0) {
+      fn_type = c->nodes[i].type_ref;
+      found = true;
+      break;
+    }
+  }
+  if (!found || fn_type == 0 || fn_type >= c->type_cap || !c->types[fn_type].present || !c->types[fn_type].is_fn) return false;
+  if (!closure_code_sig_matches_fn_type(c, closure_ty, fn_type)) {
+    sirj_diag_setf(c, "sem.closure.sym.sig_mismatch", c->cur_path, n->loc_line, node_id, n->tag, "closure.sym code signature mismatch");
+    return false;
+  }
+
+  // Materialize code pointer as a tagged constant and reuse closure.make storage path.
+  const uint64_t tag = UINT64_C(0xF000000000000000);
+  const zi_ptr_t p = (zi_ptr_t)(tag | (uint64_t)fid);
+  const sir_val_id_t code_slot = alloc_slot(c, VK_PTR);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_const_ptr(c->mb, c->fn, code_slot, p)) return false;
+  sir_mb_clear_src(c->mb);
+
+  // Evaluate env value.
+  sir_val_id_t env_slot = 0;
+  val_kind_t ek = VK_INVALID;
+  if (!eval_node(c, env_id, &env_slot, &ek)) return false;
+
+  // Build a closure object by "pretending" code is a fun value of the right signature.
+  // (The runtime representation is identical: a tagged pointer.)
+  // We do this by synthesizing a closure.make-like record in-place.
+  node_info_t tmp = *n;
+  // Use existing closure.make implementation by setting up a fake node that uses the closure type_ref.
+  (void)tmp;
+
+  // Allocate and store using the same layout as closure.make.
+  val_kind_t expect_env = VK_INVALID;
+  if (!type_to_val_kind(c, c->types[closure_ty].closure_env, &expect_env)) return false;
+  if (ek != expect_env) return false;
+
+  uint32_t size = 0, align = 0, env_off = 0;
+  if (!closure_layout(c, closure_ty, &size, &align, &env_off)) return false;
+
+  sir_sym_id_t sym_alloc = 0;
+  if (!ensure_sym_zi_alloc(c, &sym_alloc)) return false;
+  const sir_val_id_t size_i32 = alloc_slot(c, VK_I32);
+  const sir_val_id_t clo_ptr = alloc_slot(c, VK_PTR);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_const_i32(c->mb, c->fn, size_i32, (int32_t)size)) return false;
+  const sir_val_id_t alloc_args[] = {size_i32};
+  if (!sir_mb_emit_call_extern_res(c->mb, c->fn, sym_alloc, alloc_args, 1, &clo_ptr, 1)) return false;
+
+  const sir_val_id_t zbyte = alloc_slot(c, VK_I8);
+  const sir_val_id_t zlen = alloc_slot(c, VK_I32);
+  if (!sir_mb_emit_const_i8(c->mb, c->fn, zbyte, 0)) return false;
+  if (!sir_mb_emit_const_i32(c->mb, c->fn, zlen, (int32_t)size)) return false;
+  if (!sir_mb_emit_mem_fill(c->mb, c->fn, clo_ptr, zbyte, zlen)) return false;
+
+  if (!sir_mb_emit_store_ptr(c->mb, c->fn, clo_ptr, code_slot, 8)) return false;
+  sir_val_id_t env_ptr = clo_ptr;
+  if (env_off) {
+    if (!emit_ptr_add_i32_imm(c, node_id, n->loc_line, clo_ptr, (int32_t)env_off, &env_ptr)) return false;
+  }
+  uint32_t env_size = 0, env_align = 1;
+  if (!type_layout(c, c->types[closure_ty].closure_env, &env_size, &env_align)) return false;
+  if (!emit_store_env_value(c, node_id, n->loc_line, ek, env_ptr, env_slot, env_align)) return false;
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, clo_ptr, VK_CLOSURE)) return false;
+  *out_slot = clo_ptr;
+  *out_kind = VK_CLOSURE;
+  return true;
+}
+
+static bool eval_closure_code(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 1) return false;
+  uint32_t cid = 0;
+  if (!parse_ref_id(av->v.arr.items[0], &cid)) return false;
+  if (cid >= c->node_cap || !c->nodes[cid].present) return false;
+  const node_info_t* cn = &c->nodes[cid];
+  const uint32_t closure_ty = cn->type_ref;
+  if (closure_ty == 0 || closure_ty >= c->type_cap || !c->types[closure_ty].present || !c->types[closure_ty].is_closure) return false;
+
+  sir_val_id_t clo = 0;
+  val_kind_t ck = VK_INVALID;
+  if (!eval_node(c, cid, &clo, &ck)) return false;
+  if (ck != VK_CLOSURE) return false;
+
+  // Validate declared output type (fun) if present.
+  if (!n->type_ref || n->type_ref >= c->type_cap || !c->types[n->type_ref].present || !c->types[n->type_ref].is_fun) return false;
+  if (!closure_code_sig_matches_fun_sig(c, closure_ty, n->type_ref)) return false;
+
+  const sir_val_id_t code = alloc_slot(c, VK_PTR);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_load_ptr(c->mb, c->fn, code, clo, 8)) return false;
+  sir_mb_clear_src(c->mb);
+  if (!set_node_val(c, node_id, code, VK_PTR)) return false;
+  *out_slot = code;
+  *out_kind = VK_PTR;
+  return true;
+}
+
+static bool eval_closure_env(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 1) return false;
+  uint32_t cid = 0;
+  if (!parse_ref_id(av->v.arr.items[0], &cid)) return false;
+  if (cid >= c->node_cap || !c->nodes[cid].present) return false;
+  const node_info_t* cn = &c->nodes[cid];
+  const uint32_t closure_ty = cn->type_ref;
+  if (closure_ty == 0 || closure_ty >= c->type_cap || !c->types[closure_ty].present || !c->types[closure_ty].is_closure) return false;
+
+  const uint32_t env_ty = c->types[closure_ty].closure_env;
+  if (n->type_ref != env_ty) return false;
+
+  sir_val_id_t clo = 0;
+  val_kind_t ck = VK_INVALID;
+  if (!eval_node(c, cid, &clo, &ck)) return false;
+  if (ck != VK_CLOSURE) return false;
+
+  uint32_t size = 0, align = 0, env_off = 0;
+  if (!closure_layout(c, closure_ty, &size, &align, &env_off)) return false;
+  (void)size;
+  sir_val_id_t env_ptr = clo;
+  if (env_off) {
+    if (!emit_ptr_add_i32_imm(c, node_id, n->loc_line, clo, (int32_t)env_off, &env_ptr)) return false;
+  }
+
+  val_kind_t ek = VK_INVALID;
+  if (!type_to_val_kind(c, env_ty, &ek)) return false;
+  uint32_t env_size = 0, env_align = 1;
+  if (!type_layout(c, env_ty, &env_size, &env_align)) return false;
+  sir_val_id_t env_val = 0;
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!emit_load_env_value(c, node_id, n->loc_line, ek, env_ptr, env_align, &env_val)) return false;
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, env_val, ek)) return false;
+  *out_slot = env_val;
+  *out_kind = ek;
+  return true;
+}
+
+static bool eval_closure_cmp(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, bool is_ne, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 2) return false;
+  uint32_t a_id = 0, b_id = 0;
+  if (!parse_ref_id(av->v.arr.items[0], &a_id)) return false;
+  if (!parse_ref_id(av->v.arr.items[1], &b_id)) return false;
+  if (a_id >= c->node_cap || b_id >= c->node_cap) return false;
+  if (!c->nodes[a_id].present || !c->nodes[b_id].present) return false;
+  const node_info_t* an = &c->nodes[a_id];
+  const node_info_t* bn = &c->nodes[b_id];
+  if (!an->type_ref || !bn->type_ref) return false;
+  if (an->type_ref != bn->type_ref) return false;
+  if (an->type_ref >= c->type_cap || !c->types[an->type_ref].present || !c->types[an->type_ref].is_closure) return false;
+
+  sir_val_id_t a = 0, b = 0;
+  val_kind_t ak = VK_INVALID, bk = VK_INVALID;
+  if (!eval_node(c, a_id, &a, &ak)) return false;
+  if (!eval_node(c, b_id, &b, &bk)) return false;
+  if (ak != VK_CLOSURE || bk != VK_CLOSURE) return false;
+
+  const sir_val_id_t dst = alloc_slot(c, VK_BOOL);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  const bool ok = is_ne ? sir_mb_emit_ptr_cmp_ne(c->mb, c->fn, dst, a, b) : sir_mb_emit_ptr_cmp_eq(c->mb, c->fn, dst, a, b);
+  sir_mb_clear_src(c->mb);
+  if (!ok) return false;
+  if (!set_node_val(c, node_id, dst, VK_BOOL)) return false;
+  *out_slot = dst;
+  *out_kind = VK_BOOL;
+  return true;
+}
+
+static bool eval_call_closure(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len < 1) return false;
+
+  uint32_t callee_id = 0;
+  if (!parse_ref_id(av->v.arr.items[0], &callee_id)) return false;
+  if (callee_id >= c->node_cap || !c->nodes[callee_id].present) return false;
+  const node_info_t* cn = &c->nodes[callee_id];
+  const uint32_t closure_ty = cn->type_ref;
+  if (closure_ty == 0 || closure_ty >= c->type_cap || !c->types[closure_ty].present || !c->types[closure_ty].is_closure) return false;
+  const type_info_t* ct = &c->types[closure_ty];
+  const uint32_t call_sig_tid = ct->closure_call_sig;
+  if (call_sig_tid == 0 || call_sig_tid >= c->type_cap || !c->types[call_sig_tid].present || !c->types[call_sig_tid].is_fn) return false;
+  const type_info_t* call_sig = &c->types[call_sig_tid];
+
+  const uint32_t argc = (uint32_t)(av->v.arr.len - 1u);
+  if (argc != call_sig->param_count) {
+    sirj_diag_setf(c, "sem.call.argc_mismatch", c->cur_path, n->loc_line, node_id, n->tag, "call.closure argc mismatch (got %u expected %u)",
+                   (unsigned)argc, (unsigned)call_sig->param_count);
+    return false;
+  }
+  if (argc > 15) return false; // +1 for env
+
+  // Evaluate callee closure.
+  sir_val_id_t clo = 0;
+  val_kind_t ck = VK_INVALID;
+  if (!eval_node(c, callee_id, &clo, &ck)) return false;
+  if (ck != VK_CLOSURE) return false;
+
+  // Load code pointer.
+  const sir_val_id_t code_ptr = alloc_slot(c, VK_PTR);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_load_ptr(c->mb, c->fn, code_ptr, clo, 8)) return false;
+
+  // Load env value.
+  uint32_t size = 0, align = 0, env_off = 0;
+  if (!closure_layout(c, closure_ty, &size, &align, &env_off)) return false;
+  (void)size;
+  sir_val_id_t env_ptr = clo;
+  if (env_off) {
+    if (!emit_ptr_add_i32_imm(c, node_id, n->loc_line, clo, (int32_t)env_off, &env_ptr)) return false;
+  }
+  val_kind_t envk = VK_INVALID;
+  if (!type_to_val_kind(c, ct->closure_env, &envk)) return false;
+  uint32_t env_size = 0, env_align = 1;
+  if (!type_layout(c, ct->closure_env, &env_size, &env_align)) return false;
+  sir_val_id_t env_val = 0;
+  if (!emit_load_env_value(c, node_id, n->loc_line, envk, env_ptr, env_align, &env_val)) return false;
+
+  // Evaluate args.
+  sir_val_id_t args_slots[16];
+  val_kind_t args_kinds[16];
+  for (uint32_t i = 0; i < argc; i++) {
+    uint32_t arg_id = 0;
+    if (!parse_ref_id(av->v.arr.items[i + 1u], &arg_id)) return false;
+    sir_val_id_t s = 0;
+    val_kind_t k = VK_INVALID;
+    if (!eval_node(c, arg_id, &s, &k)) return false;
+    args_slots[i] = s;
+    args_kinds[i] = k;
+  }
+  // Type-check args.
+  for (uint32_t i = 0; i < argc; i++) {
+    const uint32_t pid = call_sig->params[i];
+    val_kind_t expect = VK_INVALID;
+    if (!type_to_val_kind(c, pid, &expect)) return false;
+    if (args_kinds[i] != expect) {
+      sirj_diag_setf(c, "sem.call.arg_type_mismatch", c->cur_path, n->loc_line, node_id, n->tag, "call.closure arg %u type mismatch",
+                     (unsigned)i);
+      return false;
+    }
+  }
+
+  // Prepare final arg list for codeSig: [env, args...]
+  sir_val_id_t final_args[16];
+  final_args[0] = env_val;
+  for (uint32_t i = 0; i < argc; i++) final_args[i + 1u] = args_slots[i];
+  const uint32_t final_argc = argc + 1u;
+
+  // Return kind from callSig.ret.
+  const uint32_t ret_tid = call_sig->ret;
+  uint8_t result_count = 0;
+  sir_val_id_t res_slots[1];
+  val_kind_t rk = VK_INVALID;
+  if (ret_tid != 0) {
+    if (ret_tid >= c->type_cap || !c->types[ret_tid].present || c->types[ret_tid].is_fn) return false;
+    if (c->types[ret_tid].prim == SIR_PRIM_VOID) {
+      result_count = 0;
+    } else {
+      if (!type_to_val_kind(c, ret_tid, &rk) || rk == VK_INVALID) return false;
+      // fun values are not supported as direct results in SEM; closures and prim-like are OK.
+      res_slots[0] = alloc_slot(c, rk == VK_CLOSURE ? VK_PTR : rk);
+      result_count = 1;
+    }
+  }
+  if (result_count && n->type_ref && n->type_ref != ret_tid) return false;
+
+  if (result_count) {
+    if (!sir_mb_emit_call_func_ptr_res(c->mb, c->fn, code_ptr, final_args, final_argc, res_slots, result_count)) return false;
+    sir_mb_clear_src(c->mb);
+    if (!set_node_val(c, node_id, res_slots[0], rk)) return false;
+    *out_slot = res_slots[0];
+    *out_kind = rk;
+    return true;
+  }
+
+  if (!sir_mb_emit_call_func_ptr_res(c->mb, c->fn, code_ptr, final_args, final_argc, NULL, 0)) return false;
+  sir_mb_clear_src(c->mb);
+  *out_slot = 0;
+  *out_kind = VK_INVALID;
+  return true;
+}
+
 static bool eval_call_indirect(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
   if (!c || !n || !out_slot || !out_kind) return false;
   if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) {
@@ -4248,6 +4900,13 @@ static bool eval_node(sirj_ctx_t* c, uint32_t node_id, sir_val_id_t* out_slot, v
   if (strcmp(n->tag, "load.ptr") == 0) return eval_load_mnemonic(c, node_id, n, SIR_INST_LOAD_PTR, VK_PTR, out_slot, out_kind);
   if (strcmp(n->tag, "load.f32") == 0) return eval_load_mnemonic(c, node_id, n, SIR_INST_LOAD_F32, VK_F32, out_slot, out_kind);
   if (strcmp(n->tag, "load.f64") == 0) return eval_load_mnemonic(c, node_id, n, SIR_INST_LOAD_F64, VK_F64, out_slot, out_kind);
+  if (strcmp(n->tag, "closure.sym") == 0) return eval_closure_sym(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "closure.make") == 0) return eval_closure_make(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "closure.code") == 0) return eval_closure_code(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "closure.env") == 0) return eval_closure_env(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "closure.cmp.eq") == 0) return eval_closure_cmp(c, node_id, n, false, out_slot, out_kind);
+  if (strcmp(n->tag, "closure.cmp.ne") == 0) return eval_closure_cmp(c, node_id, n, true, out_slot, out_kind);
+  if (strcmp(n->tag, "call.closure") == 0) return eval_call_closure(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "call.fun") == 0) return eval_call_fun(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "call") == 0) return eval_call_direct(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "call.indirect") == 0) return eval_call_indirect(c, node_id, n, out_slot, out_kind);
@@ -5199,6 +5858,24 @@ static bool parse_file(sirj_ctx_t* c, const char* path) {
             return false;
           }
           ti.fun_sig = sig;
+        } else if (strcmp(kind, "closure") == 0) {
+          ti.is_closure = true;
+          uint32_t call_sig = 0;
+          uint32_t env = 0;
+          if (!json_get_u32(json_obj_get(root, "callSig"), &call_sig)) {
+            sirj_diag_setf(c, "sem.parse.type.closure.callSig", diag_path, loc_line, 0, NULL, "bad closure.callSig");
+            free(line);
+            fclose(f);
+            return false;
+          }
+          if (!json_get_u32(json_obj_get(root, "env"), &env)) {
+            sirj_diag_setf(c, "sem.parse.type.closure.env", diag_path, loc_line, 0, NULL, "bad closure.env");
+            free(line);
+            fclose(f);
+            return false;
+          }
+          ti.closure_call_sig = call_sig;
+          ti.closure_env = env;
         } else if (strcmp(kind, "sum") == 0) {
           ti.is_sum = true;
           const JsonValue* vv = json_obj_get(root, "variants");

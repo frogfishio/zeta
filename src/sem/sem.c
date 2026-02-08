@@ -344,6 +344,10 @@ static void sem_print_support(FILE* out, bool json) {
       "fun.sym (fun:v1, MVP)",
       "fun.cmp.eq / fun.cmp.ne (fun:v1)",
       "call.fun (fun:v1, MVP)",
+      "closure.sym / closure.make (closure:v1, MVP)",
+      "closure.code / closure.env (closure:v1)",
+      "closure.cmp.eq / closure.cmp.ne (closure:v1)",
+      "call.closure (closure:v1, MVP)",
       "call",
       "call.indirect",
 

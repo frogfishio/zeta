@@ -396,6 +396,22 @@ target_compile_options(sem_unit_run_fun_sym_call PRIVATE -Wall -Wextra -Wpedanti
 
 add_test(NAME sem_run_fun_sym_call COMMAND sem_unit_run_fun_sym_call)
 
+add_executable(sem_unit_run_closure_make_call
+  tests/test_run_closure_make_call.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_closure_make_call PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_closure_make_call PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_closure_make_call PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_closure_make_call PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_closure_make_call PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_closure_make_call COMMAND sem_unit_run_closure_make_call)
+
 add_executable(sem_unit_run_sem_ptr_add_sub_cmp
   tests/test_run_sem_ptr_add_sub_cmp.c
   sem_hosted.c
@@ -667,6 +683,22 @@ target_link_libraries(sem_unit_verify_fun_cmp_sig_mismatch PRIVATE sircore_hoste
 target_compile_options(sem_unit_verify_fun_cmp_sig_mismatch PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 add_test(NAME sem_verify_fun_cmp_sig_mismatch COMMAND sem_unit_verify_fun_cmp_sig_mismatch)
+
+add_executable(sem_unit_verify_bad_closure_make_code_sig_mismatch
+  tests/test_verify_bad_closure_make_code_sig_mismatch.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_verify_bad_closure_make_code_sig_mismatch PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_verify_bad_closure_make_code_sig_mismatch PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_verify_bad_closure_make_code_sig_mismatch PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_verify_bad_closure_make_code_sig_mismatch PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_verify_bad_closure_make_code_sig_mismatch PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_verify_bad_closure_make_code_sig_mismatch COMMAND sem_unit_verify_bad_closure_make_code_sig_mismatch)
 
 add_executable(sem_unit_run_sem_while_global_counter
   tests/test_run_sem_while_global_counter.c
