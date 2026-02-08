@@ -29,10 +29,10 @@ Design goal:
 **Goal:** `sem --check dist/test/examples` passes the same normative corpus shipped in `dist/` (or we explicitly split the corpus into “compile-only” vs “run in sem”).
 
 Acceptance:
-- [ ] `cmake --build build --target dist` produces `dist/` and then:
-  - [ ] `./dist/bin/<os>/sircc --check` passes
-  - [ ] `./dist/bin/<os>/sem --check ./dist/test/sem/examples` passes (verify-only)
-  - [ ] `./dist/bin/<os>/sem --check --check-run ./dist/test/sem/run` passes (run)
+- [x] `cmake --build build --target dist` produces `dist/` and then:
+  - [x] `./dist/bin/<os>/sircc --check` passes
+  - [x] `./dist/bin/<os>/sem --check ./dist/test/sem/examples` passes (verify-only)
+  - [x] `./dist/bin/<os>/sem --check --check-run ./dist/test/sem/run` passes (run)
 
 Work items:
 - [x] Fix `sem --check` CLI flag parsing (so `--diagnostics json --all` works as flags, not paths)
@@ -197,9 +197,9 @@ Work items:
 ## P3 (language power): functions, closures, ADTs, and SEM intent nodes
 
 ### First-class functions (fun:v1)
-- [ ] `fun.sym`
-- [ ] `fun.cmp.eq / fun.cmp.ne`
-- [ ] `call.fun`
+- [x] `fun.sym`
+- [x] `fun.cmp.eq / fun.cmp.ne`
+- [x] `call.fun`
 
 ### Closures (closure:v1)
 - [ ] `closure.sym`
