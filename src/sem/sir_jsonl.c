@@ -2457,6 +2457,245 @@ static bool eval_call_indirect(sirj_ctx_t* c, uint32_t node_id, const node_info_
   return true;
 }
 
+static bool eval_call_direct(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) {
+    sirj_diag_setf(c, "sem.call.bad_fields", c->cur_path, n->loc_line, node_id, n->tag, "call missing fields");
+    return false;
+  }
+
+  // Preferred shape:
+  //   fields: { callee: {t:"ref",id:...}, args: [ {t:"ref",id:...}, ... ] }
+  // Legacy tolerated shape:
+  //   fields: { args: [ callee, ... ] }.
+  uint32_t callee_id = 0;
+  const JsonValue* callee_v = json_obj_get(n->fields_obj, "callee");
+  const JsonValue* args_v = json_obj_get(n->fields_obj, "args");
+
+  if (callee_v) {
+    if (!parse_ref_id(callee_v, &callee_id)) {
+      sirj_diag_setf(c, "sem.call.bad_callee", c->cur_path, n->loc_line, node_id, n->tag, "call callee is not a ref");
+      return false;
+    }
+    if (args_v && !json_is_array(args_v)) {
+      sirj_diag_setf(c, "sem.call.bad_args", c->cur_path, n->loc_line, node_id, n->tag, "call args must be an array");
+      return false;
+    }
+  } else {
+    if (!json_is_array(args_v) || args_v->v.arr.len < 1) {
+      sirj_diag_setf(c, "sem.call.bad_args", c->cur_path, n->loc_line, node_id, n->tag, "call requires callee and args");
+      return false;
+    }
+    if (!parse_ref_id(args_v->v.arr.items[0], &callee_id)) {
+      sirj_diag_setf(c, "sem.call.bad_callee", c->cur_path, n->loc_line, node_id, n->tag, "call callee is not a ref");
+      return false;
+    }
+  }
+
+  if (callee_id >= c->node_cap || !c->nodes[callee_id].present) {
+    sirj_diag_setf(c, "sem.call.bad_callee", c->cur_path, n->loc_line, node_id, n->tag, "call callee ref missing");
+    return false;
+  }
+
+  // Collect arg ids.
+  uint32_t arg_node_ids[16];
+  uint32_t argc = 0;
+  if (callee_v) {
+    if (args_v) {
+      const JsonArray* a = &args_v->v.arr;
+      argc = (uint32_t)a->len;
+      if (argc != a->len) return false;
+      if (argc > (uint32_t)(sizeof(arg_node_ids) / sizeof(arg_node_ids[0]))) {
+        sirj_diag_setf(c, "sem.call.too_many_args", c->cur_path, n->loc_line, node_id, n->tag, "call too many args");
+        return false;
+      }
+      for (uint32_t i = 0; i < argc; i++) {
+        uint32_t rid = 0;
+        if (!parse_ref_id(a->items[i], &rid)) {
+          sirj_diag_setf(c, "sem.call.bad_arg", c->cur_path, n->loc_line, node_id, n->tag, "call arg %u is not a ref", (unsigned)i);
+          return false;
+        }
+        arg_node_ids[i] = rid;
+      }
+    } else {
+      argc = 0;
+    }
+  } else {
+    const JsonArray* a = &args_v->v.arr;
+    if (a->len - 1 > (size_t)(sizeof(arg_node_ids) / sizeof(arg_node_ids[0]))) {
+      sirj_diag_setf(c, "sem.call.too_many_args", c->cur_path, n->loc_line, node_id, n->tag, "call too many args");
+      return false;
+    }
+    for (size_t i = 1; i < a->len; i++) {
+      uint32_t rid = 0;
+      if (!parse_ref_id(a->items[i], &rid)) {
+        sirj_diag_setf(c, "sem.call.bad_arg", c->cur_path, n->loc_line, node_id, n->tag, "call arg %u is not a ref", (unsigned)(i - 1));
+        return false;
+      }
+      arg_node_ids[i - 1] = rid;
+    }
+    argc = (uint32_t)(a->len - 1);
+  }
+
+  // Resolve callee.
+  sir_sym_id_t callee_sym = 0;
+  sir_func_id_t callee_fn = 0;
+  const node_info_t* cn = &c->nodes[callee_id];
+  if (cn->tag && strcmp(cn->tag, "decl.fn") == 0) {
+    if (!resolve_decl_fn_sym(c, callee_id, &callee_sym)) {
+      sirj_diag_setf(c, "sem.call.bad_decl_fn", c->cur_path, n->loc_line, node_id, n->tag, "call callee decl.fn invalid");
+      return false;
+    }
+  } else if (cn->tag && strcmp(cn->tag, "fn") == 0) {
+    if (callee_id >= c->func_by_node_cap || c->func_by_node[callee_id] == 0) {
+      sirj_diag_setf(c, "sem.call.bad_fn", c->cur_path, n->loc_line, node_id, n->tag, "call callee fn is not lowered");
+      return false;
+    }
+    callee_fn = c->func_by_node[callee_id];
+  } else if (cn->tag && strcmp(cn->tag, "ptr.sym") == 0) {
+    if (!cn->fields_obj || cn->fields_obj->type != JSON_OBJECT) return false;
+    const char* nm = json_get_string(json_obj_get(cn->fields_obj, "name"));
+    if (!nm) return false;
+    if (!resolve_internal_func_by_name(c, nm, &callee_fn)) {
+      sirj_diag_setf(c, "sem.call.ptrsym_not_fn", c->cur_path, n->loc_line, node_id, n->tag, "ptr.sym does not resolve to an in-module fn: %s",
+                     nm);
+      return false;
+    }
+  } else {
+    sirj_diag_setf(c, "sem.call.bad_callee_tag", c->cur_path, n->loc_line, node_id, n->tag, "call callee must be fn or decl.fn");
+    return false;
+  }
+
+  // Signature from callee's type_ref.
+  const uint32_t sig_tid = cn->type_ref;
+  if (sig_tid == 0 || sig_tid >= c->type_cap || !c->types[sig_tid].present || !c->types[sig_tid].is_fn) {
+    sirj_diag_setf(c, "sem.call.bad_sig", c->cur_path, n->loc_line, node_id, n->tag, "call callee missing/invalid fn type_ref");
+    return false;
+  }
+  const type_info_t* sti = &c->types[sig_tid];
+  if (sti->param_count != argc) {
+    sirj_diag_setf(c, "sem.call.argc_mismatch", c->cur_path, n->loc_line, node_id, n->tag, "call argc mismatch (got %u expected %u)",
+                   (unsigned)argc, (unsigned)sti->param_count);
+    return false;
+  }
+
+  // Evaluate args.
+  sir_val_id_t args_slots[16];
+  val_kind_t args_kinds[16];
+  if (argc > (uint32_t)(sizeof(args_slots) / sizeof(args_slots[0]))) return false;
+
+  for (uint32_t i = 0; i < argc; i++) {
+    const uint32_t arg_id = arg_node_ids[i];
+    sir_val_id_t arg_slot = 0;
+    val_kind_t ak = VK_INVALID;
+    if (!eval_node(c, arg_id, &arg_slot, &ak)) {
+      sirj_diag_setf(c, "sem.call.bad_arg", c->cur_path, n->loc_line, node_id, n->tag, "call failed to evaluate arg %u", (unsigned)i);
+      return false;
+    }
+    args_slots[i] = arg_slot;
+    args_kinds[i] = ak;
+  }
+
+  // Type-check args (primitive-only).
+  for (uint32_t i = 0; i < argc; i++) {
+    const uint32_t pid = sti->params[i];
+    if (pid == 0 || pid >= c->type_cap || !c->types[pid].present || c->types[pid].is_fn) {
+      sirj_diag_setf(c, "sem.call.bad_sig", c->cur_path, n->loc_line, node_id, n->tag, "call sig has invalid param type");
+      return false;
+    }
+    val_kind_t expect = VK_INVALID;
+    switch (c->types[pid].prim) {
+      case SIR_PRIM_I1:
+        expect = VK_I1;
+        break;
+      case SIR_PRIM_I8:
+        expect = VK_I8;
+        break;
+      case SIR_PRIM_I16:
+        expect = VK_I16;
+        break;
+      case SIR_PRIM_I32:
+        expect = VK_I32;
+        break;
+      case SIR_PRIM_I64:
+        expect = VK_I64;
+        break;
+      case SIR_PRIM_PTR:
+        expect = VK_PTR;
+        break;
+      case SIR_PRIM_BOOL:
+        expect = VK_BOOL;
+        break;
+      case SIR_PRIM_F32:
+        expect = VK_F32;
+        break;
+      case SIR_PRIM_F64:
+        expect = VK_F64;
+        break;
+      default:
+        sirj_diag_setf(c, "sem.call.bad_sig", c->cur_path, n->loc_line, node_id, n->tag, "call sig has unsupported param type");
+        return false;
+    }
+    if (args_kinds[i] != expect) {
+      sirj_diag_setf(c, "sem.call.arg_type_mismatch", c->cur_path, n->loc_line, node_id, n->tag, "call arg %u type mismatch", (unsigned)i);
+      return false;
+    }
+  }
+
+  // Return.
+  const uint32_t ret_tid = sti->ret;
+  uint8_t result_count = 0;
+  sir_val_id_t res_slots[1];
+  val_kind_t rk = VK_INVALID;
+  if (ret_tid != 0) {
+    if (ret_tid >= c->type_cap || !c->types[ret_tid].present || c->types[ret_tid].is_fn) return false;
+    const sir_prim_type_t rp = c->types[ret_tid].prim;
+    if (rp == SIR_PRIM_VOID) {
+      result_count = 0;
+    } else if (rp == SIR_PRIM_I1) rk = VK_I1;
+    else if (rp == SIR_PRIM_I8) rk = VK_I8;
+    else if (rp == SIR_PRIM_I16) rk = VK_I16;
+    else if (rp == SIR_PRIM_I32) rk = VK_I32;
+    else if (rp == SIR_PRIM_I64) rk = VK_I64;
+    else if (rp == SIR_PRIM_PTR) rk = VK_PTR;
+    else if (rp == SIR_PRIM_BOOL) rk = VK_BOOL;
+    else if (rp == SIR_PRIM_F32) rk = VK_F32;
+    else if (rp == SIR_PRIM_F64) rk = VK_F64;
+    else return false;
+    if (rk != VK_INVALID) {
+      res_slots[0] = alloc_slot(c, rk);
+      result_count = 1;
+    }
+  }
+
+  if (result_count && n->type_ref && n->type_ref != ret_tid) {
+    sirj_diag_setf(c, "sem.call.ret_type_mismatch", c->cur_path, n->loc_line, node_id, n->tag, "call return type_ref mismatch");
+    return false;
+  }
+
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (result_count) {
+    if (callee_sym) {
+      if (!sir_mb_emit_call_extern_res(c->mb, c->fn, callee_sym, args_slots, argc, res_slots, result_count)) return false;
+    } else {
+      if (!sir_mb_emit_call_func_res(c->mb, c->fn, callee_fn, args_slots, argc, res_slots, result_count)) return false;
+    }
+    if (!set_node_val(c, node_id, res_slots[0], rk)) return false;
+    *out_slot = res_slots[0];
+    *out_kind = rk;
+    return true;
+  }
+
+  if (callee_sym) {
+    if (!sir_mb_emit_call_extern(c->mb, c->fn, callee_sym, args_slots, argc)) return false;
+  } else {
+    if (!sir_mb_emit_call_func_res(c->mb, c->fn, callee_fn, args_slots, argc, NULL, 0)) return false;
+  }
+  *out_slot = 0;
+  *out_kind = VK_INVALID;
+  return true;
+}
+
 static bool eval_node(sirj_ctx_t* c, uint32_t node_id, sir_val_id_t* out_slot, val_kind_t* out_kind) {
   if (!c || !out_slot || !out_kind) return false;
   sir_val_id_t cached = 0;
@@ -2543,6 +2782,7 @@ static bool eval_node(sirj_ctx_t* c, uint32_t node_id, sir_val_id_t* out_slot, v
   if (strcmp(n->tag, "load.ptr") == 0) return eval_load_mnemonic(c, node_id, n, SIR_INST_LOAD_PTR, VK_PTR, out_slot, out_kind);
   if (strcmp(n->tag, "load.f32") == 0) return eval_load_mnemonic(c, node_id, n, SIR_INST_LOAD_F32, VK_F32, out_slot, out_kind);
   if (strcmp(n->tag, "load.f64") == 0) return eval_load_mnemonic(c, node_id, n, SIR_INST_LOAD_F64, VK_F64, out_slot, out_kind);
+  if (strcmp(n->tag, "call") == 0) return eval_call_direct(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "call.indirect") == 0) return eval_call_indirect(c, node_id, n, out_slot, out_kind);
 
   sirj_diag_setf(c, "sem.unsupported.node", c->cur_path, n->loc_line, node_id, n->tag, "unsupported node tag: %s", n->tag);
@@ -2579,6 +2819,15 @@ static bool exec_stmt(sirj_ctx_t* c, uint32_t stmt_id, bool* out_did_return, sir
   if (strcmp(n->tag, "store.f64") == 0) return eval_store_mnemonic(c, stmt_id, n, SIR_INST_STORE_F64);
   if (strcmp(n->tag, "mem.copy") == 0) return eval_mem_copy_stmt(c, stmt_id, n);
   if (strcmp(n->tag, "mem.fill") == 0) return eval_mem_fill_stmt(c, stmt_id, n);
+  if (strcmp(n->tag, "call") == 0) {
+    // Calls are expression nodes in SIR, but they often appear in block.stmts for side effects.
+    sir_val_id_t tmp = 0;
+    val_kind_t tk = VK_INVALID;
+    if (!eval_node(c, stmt_id, &tmp, &tk)) return false;
+    (void)tmp;
+    (void)tk;
+    return true;
+  }
   if (strcmp(n->tag, "call.indirect") == 0) {
     // Calls are expression nodes in SIR, but they often appear in block.stmts for side effects.
     sir_val_id_t tmp = 0;

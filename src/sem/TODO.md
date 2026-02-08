@@ -66,7 +66,7 @@ Work items:
   - [x] `load.f64` / `store.f64`
   - [x] Alignment rules and deterministic misalignment traps match the `sircc` contract
 - [ ] Core calls parity (execution)
-  - [ ] `call` (direct call) if required by producers (or document “use call.indirect only”)
+  - [x] `call` (direct call) if required by producers (or document “use call.indirect only”)
 - [ ] Diagnostics parity (developer UX)
   - [ ] When unsupported: emit “what to do instead” hints (e.g. for extern calls, point to `decl.fn`)
   - [x] Ensure `--diagnostics json` includes stable fields for CI parsing (code/path/line/node/tag/fid/ip/op when available)
