@@ -188,10 +188,14 @@ if(TARGET sirc)
     COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_DOC}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_TEST_EXAMPLES}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_DOC}/editors
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_ROOT}/starter
 
     # binary + docs
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:sirc> ${SIR_DIST_BIN_OS}/sirc
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/README.md ${SIR_DIST_DOC}/sirc.md
+
+    # starter project (package.toml + @include)
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/src/sirc/starter/hello_zeta ${SIR_DIST_ROOT}/starter/hello_zeta
 
     # sugar examples (.sir) that mirror the JSONL examples where possible
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/hello.sir ${SIR_DIST_TEST_EXAMPLES}/hello.sir

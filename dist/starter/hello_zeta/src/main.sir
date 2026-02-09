@@ -1,0 +1,10 @@
+unit hello_zeta target host
+@mod main
+
+;; Include resolves via package.toml root (not src/ directory).
+@include "include/defs.sir.inc"
+
+fn main() -> i32 public
+  return add2(40:i32, 2:i32)
+end
+
