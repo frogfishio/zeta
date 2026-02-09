@@ -1,0 +1,50 @@
+unit simd_gather_scatter_masked target host +simd:v1
+
+type V4i32 = vec(i32, 4)
+type V4b = vec(bool, 4)
+type buf4 = array(i32, 4)
+
+fn main() -> i32 public
+  let p: ptr = alloca(buf4) +align=16 +zero=true
+
+  ;; store [1,2,3,4]
+  store.i32(ptr.offset(i32, p, 0:i64), 1:i32) +align=4
+  store.i32(ptr.offset(i32, p, 1:i64), 2:i32) +align=4
+  store.i32(ptr.offset(i32, p, 2:i64), 3:i32) +align=4
+  store.i32(ptr.offset(i32, p, 3:i64), 4:i32) +align=4
+
+  ;; gather (scalar loads + pack)
+  let x0: i32 = load.i32(ptr.offset(i32, p, 0:i64)) +align=4
+  let x1: i32 = load.i32(ptr.offset(i32, p, 1:i64)) +align=4
+  let x2: i32 = load.i32(ptr.offset(i32, p, 2:i64)) +align=4
+  let x3: i32 = load.i32(ptr.offset(i32, p, 3:i64)) +align=4
+  let v0: V4i32 = vec.splat(x0) as V4i32
+  let v1: V4i32 = vec.replace(v0, 1:i32, x1) as V4i32
+  let v2: V4i32 = vec.replace(v1, 2:i32, x2) as V4i32
+  let v: V4i32 = vec.replace(v2, 3:i32, x3) as V4i32
+
+  ;; mask: lanes [true,false,true,false]
+  let m0: V4b = vec.splat(true) as V4b
+  let m1: V4b = vec.replace(m0, 1:i32, false) as V4b
+  let m2: V4b = vec.replace(m1, 2:i32, true) as V4b
+  let m: V4b = vec.replace(m2, 3:i32, false) as V4b
+
+  ;; add 10 where masked
+  let add10: V4i32 = vec.add(v, vec.splat(10:i32) as V4i32) as V4i32
+  let w: V4i32 = vec.select(m, add10, v) as V4i32
+
+  ;; masked scatter: per-lane select(old/new) then store
+  let w0: i32 = vec.extract(w, 0:i32) as i32
+  let w1: i32 = vec.extract(w, 1:i32) as i32
+  let w2: i32 = vec.extract(w, 2:i32) as i32
+  let w3: i32 = vec.extract(w, 3:i32) as i32
+
+  store.i32(ptr.offset(i32, p, 0:i64), w0) +align=4
+  store.i32(ptr.offset(i32, p, 1:i64), w1) +align=4
+  store.i32(ptr.offset(i32, p, 2:i64), w2) +align=4
+  store.i32(ptr.offset(i32, p, 3:i64), w3) +align=4
+
+  ;; return p[2] (3+10)
+  return load.i32(ptr.offset(i32, p, 2:i64)) +align=4
+end
+
