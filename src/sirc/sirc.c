@@ -1694,7 +1694,12 @@ static void record_node_out_id(int64_t id) {
 
   char buf[256];
   if (g_emit.ids_mode == SIRC_IDS_STRING) {
-    snprintf(buf, sizeof(buf), "n:%d:%u", line, (unsigned)seq);
+    // Legacy string ids must still be globally unique across @include files.
+    // Incorporate scope + file_key so two different files with the same line numbers cannot collide.
+    const char* scope = g_emit.id_scope ? g_emit.id_scope : (g_emit.unit ? g_emit.unit : "unit");
+    const char* file = path_basename(g_emit.input_path ? g_emit.input_path : "<input>");
+    const char* fk = g_emit.file_key ? g_emit.file_key : (file ? file : "src");
+    snprintf(buf, sizeof(buf), "%s:n:%s:%d:%u", scope, fk, line, (unsigned)seq);
   } else {
     const char* scope = g_emit.id_scope ? g_emit.id_scope : (g_emit.unit ? g_emit.unit : "unit");
     const uint32_t h = stable_hash_for_current_line();

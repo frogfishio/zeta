@@ -12,7 +12,7 @@ if(NOT DEFINED OUT)
 endif()
 
 execute_process(
-  COMMAND "${SIRC}" "${INPUT}" -o "${OUT}"
+  COMMAND "${SIRC}" ${SIRC_ARGS} "${INPUT}" -o "${OUT}"
   RESULT_VARIABLE rc
   OUTPUT_VARIABLE out
   ERROR_VARIABLE err

@@ -210,9 +210,23 @@ if(TARGET sircc)
     )
   endfunction()
 
+  function(sirc_add_verify_test_with_args name input_rel)
+    add_test(
+      NAME ${name}
+      COMMAND ${CMAKE_COMMAND}
+        -DSIRC=$<TARGET_FILE:sirc>
+        -DSIRCC=$<TARGET_FILE:sircc>
+        -DINPUT=${CMAKE_CURRENT_LIST_DIR}/${input_rel}
+        -DOUT=${CMAKE_CURRENT_BINARY_DIR}/${name}.sir.jsonl
+        -DSIRC_ARGS=--ids\;string
+        -P ${CMAKE_CURRENT_LIST_DIR}/tests/run_sirc_then_sircc_verify.cmake
+    )
+  endfunction()
+
   sirc_add_verify_test(sirc_verify_hello examples/hello.sir)
 	  sirc_add_verify_test(sirc_verify_add examples/add.sir)
 	  sirc_add_verify_test(sirc_verify_include_basic examples/include_basic.sir)
+    sirc_add_verify_test_with_args(sirc_verify_include_multi_nested_ids_string examples/include_multi_nested.sir)
 	  sirc_add_verify_test(sirc_verify_pkg_demo_main examples/pkg_demo/src/main.sir)
 		  sirc_add_verify_test(sirc_verify_mem_stack examples/mem_stack.sir)
 	  sirc_add_verify_test(sirc_verify_mem_copy_fill examples/mem_copy_fill.sir)
