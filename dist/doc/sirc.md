@@ -146,7 +146,7 @@ This is what we treat as “basic product” right now:
 - Reference docs: `src/sirc/docs/sirc.md`
 
 - unit header: `unit <name> target host|<triple> [+feature[:v]]*`
-- ids: emitted as strings by default (`--ids numeric` switches to numeric ids)
+- ids: emitted as stable strings by default (`--ids stable|string|numeric`)
 - functions: `extern fn ...`, `fn ... end`, `public`, `let`, `return`
 - values: identifiers, `true/false`, string literals
 - values: integer literals (`3` and `3:i32`)

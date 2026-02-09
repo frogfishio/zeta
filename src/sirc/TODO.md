@@ -28,7 +28,7 @@ Legend:
 - [x] Add `--lint` (parse/validate only; no output JSONL).
 - [x] Add `--print-support [--format text|json]` listing exactly what syntax/features/packs `sirc` can emit.
 - [x] Keep `--help` and `--version` up to date.
-- [x] Keep `--ids string|numeric` (`string` default).
+- [x] Keep `--ids stable|string|numeric` (`stable` default).
 - [x] Add `--strict` for frontend hygiene (reject unknown/ignored attrs on known constructs).
 
 ## P0 — Conformance + regression suite
@@ -87,6 +87,6 @@ Legend:
 
 ## Status snapshot (today)
 
-- [x] String ids emitted by default in `sirc`; numeric ids available via `--ids numeric`.
+- [x] Stable ids emitted by default in `sirc`; legacy string ids available via `--ids string`; numeric ids via `--ids numeric`.
 - [x] `sem` can parse numeric or string ids (interned).
 - [x] `sirc` can author: `fun:v1`, `closure:v1`, `adt:v1` (examples exist and pass `sircc --verify-only`).

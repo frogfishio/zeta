@@ -25,7 +25,7 @@ Diagnostics:
 - Exit codes: `0` ok, `1` compile error, `2` tool error (I/O, OOM, internal)
 
 IDs and source mapping:
-- `--ids string|numeric` (default: `string`)
+- `--ids stable|string|numeric` (default: `stable`)
 - `--emit-src none|loc|src_ref|both` (default: `loc`)
 
 Frontend hygiene:
@@ -52,6 +52,32 @@ unit u0 target wasm32 +sem:v1 +adt:v1
 ```
 
 `target host` means “use the backend default host triple”.
+
+### Compile-time directives
+
+`sirc` supports a tiny set of directives that affect compilation but **do not emit JSONL records**.
+
+#### `@mod <scope>`
+
+Sets the scope prefix used for stable node ids.
+
+Example:
+
+```sir
+unit u0 target host
+@mod core
+```
+
+In `--ids stable` mode, node ids are emitted as:
+
+`<scope>:n:<hash8>:<occ4>:<seq4>`
+
+- `<hash8>` is a 32-bit hash of a normalized form of the originating `.sir` source line
+  (whitespace collapsed; `;;` comments stripped outside string literals).
+- `<occ4>` is the occurrence index of that hash within the stream (disambiguates identical lines).
+- `<seq4>` is the per-line sequence index (because one `.sir` line can emit multiple SIR nodes).
+
+This keeps ids stable under insertions elsewhere in the file while still remaining deterministic.
 
 ---
 

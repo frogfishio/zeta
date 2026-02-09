@@ -2,7 +2,7 @@
 {"ir":"sir-v1.0","k":"src","id":"src:trap.sir:3:18","file":"trap.sir","line":3,"col":18,"text":"fn main() -> i32 public"}
 {"ir":"sir-v1.0","k":"type","id":"prim:i32","kind":"prim","prim":"i32","loc":{"line":3,"col":18,"unit":"trap.sir"},"src_ref":"src:trap.sir:3:18"}
 {"ir":"sir-v1.0","k":"src","id":"src:trap.sir:5:1","file":"trap.sir","line":5,"col":1,"text":"end"}
-{"ir":"sir-v1.0","k":"node","id":"n:5:0","tag":"term.trap","fields":{"code":"bounds","msg":"index out of range"},"loc":{"line":5,"col":1,"unit":"trap.sir"},"src_ref":"src:trap.sir:5:1"}
+{"ir":"sir-v1.0","k":"node","id":"trap:n:6a8e75aa:0000:0000","tag":"term.trap","fields":{"code":"bounds","msg":"index out of range"},"loc":{"line":5,"col":1,"unit":"trap.sir"},"src_ref":"src:trap.sir:5:1"}
 {"ir":"sir-v1.0","k":"type","id":"fn()->prim:i32","kind":"fn","params":[],"ret":"prim:i32","loc":{"line":5,"col":1,"unit":"trap.sir"},"src_ref":"src:trap.sir:5:1"}
-{"ir":"sir-v1.0","k":"node","id":"n:5:1","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:5:0"}]},"loc":{"line":5,"col":1,"unit":"trap.sir"},"src_ref":"src:trap.sir:5:1"}
-{"ir":"sir-v1.0","k":"node","id":"n:5:2","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","linkage":"public","params":[],"body":{"t":"ref","id":"n:5:1"}},"loc":{"line":5,"col":1,"unit":"trap.sir"},"src_ref":"src:trap.sir:5:1"}
+{"ir":"sir-v1.0","k":"node","id":"trap:n:6a8e75aa:0000:0001","tag":"block","fields":{"stmts":[{"t":"ref","id":"trap:n:6a8e75aa:0000:0000"}]},"loc":{"line":5,"col":1,"unit":"trap.sir"},"src_ref":"src:trap.sir:5:1"}
+{"ir":"sir-v1.0","k":"node","id":"trap:n:6a8e75aa:0000:0002","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","linkage":"public","params":[],"body":{"t":"ref","id":"trap:n:6a8e75aa:0000:0001"}},"loc":{"line":5,"col":1,"unit":"trap.sir"},"src_ref":"src:trap.sir:5:1"}

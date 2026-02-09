@@ -2,12 +2,12 @@
 {"ir":"sir-v1.0","k":"src","id":"src:add.sir:3:18","file":"add.sir","line":3,"col":18,"text":"fn main() -> i32 public"}
 {"ir":"sir-v1.0","k":"type","id":"prim:i32","kind":"prim","prim":"i32","loc":{"line":3,"col":18,"unit":"add.sir"},"src_ref":"src:add.sir:3:18"}
 {"ir":"sir-v1.0","k":"src","id":"src:add.sir:4:24","file":"add.sir","line":4,"col":24,"text":"  return i32.add(40:i32, 2:i32)"}
-{"ir":"sir-v1.0","k":"node","id":"n:4:0","tag":"const.i32","type_ref":"prim:i32","fields":{"value":40},"loc":{"line":4,"col":24,"unit":"add.sir"},"src_ref":"src:add.sir:4:24"}
+{"ir":"sir-v1.0","k":"node","id":"add:n:6c2ff0e9:0000:0000","tag":"const.i32","type_ref":"prim:i32","fields":{"value":40},"loc":{"line":4,"col":24,"unit":"add.sir"},"src_ref":"src:add.sir:4:24"}
 {"ir":"sir-v1.0","k":"src","id":"src:add.sir:4:31","file":"add.sir","line":4,"col":31,"text":"  return i32.add(40:i32, 2:i32)"}
-{"ir":"sir-v1.0","k":"node","id":"n:4:1","tag":"const.i32","type_ref":"prim:i32","fields":{"value":2},"loc":{"line":4,"col":31,"unit":"add.sir"},"src_ref":"src:add.sir:4:31"}
+{"ir":"sir-v1.0","k":"node","id":"add:n:6c2ff0e9:0000:0001","tag":"const.i32","type_ref":"prim:i32","fields":{"value":2},"loc":{"line":4,"col":31,"unit":"add.sir"},"src_ref":"src:add.sir:4:31"}
 {"ir":"sir-v1.0","k":"src","id":"src:add.sir:5:1","file":"add.sir","line":5,"col":1,"text":"end"}
-{"ir":"sir-v1.0","k":"node","id":"n:5:0","tag":"i32.add","fields":{"args":[{"t":"ref","id":"n:4:0"},{"t":"ref","id":"n:4:1"}]},"loc":{"line":5,"col":1,"unit":"add.sir"},"src_ref":"src:add.sir:5:1"}
-{"ir":"sir-v1.0","k":"node","id":"n:5:1","tag":"term.ret","fields":{"value":{"t":"ref","id":"n:5:0"}},"loc":{"line":5,"col":1,"unit":"add.sir"},"src_ref":"src:add.sir:5:1"}
+{"ir":"sir-v1.0","k":"node","id":"add:n:6a8e75aa:0000:0000","tag":"i32.add","fields":{"args":[{"t":"ref","id":"add:n:6c2ff0e9:0000:0000"},{"t":"ref","id":"add:n:6c2ff0e9:0000:0001"}]},"loc":{"line":5,"col":1,"unit":"add.sir"},"src_ref":"src:add.sir:5:1"}
+{"ir":"sir-v1.0","k":"node","id":"add:n:6a8e75aa:0000:0001","tag":"term.ret","fields":{"value":{"t":"ref","id":"add:n:6a8e75aa:0000:0000"}},"loc":{"line":5,"col":1,"unit":"add.sir"},"src_ref":"src:add.sir:5:1"}
 {"ir":"sir-v1.0","k":"type","id":"fn()->prim:i32","kind":"fn","params":[],"ret":"prim:i32","loc":{"line":5,"col":1,"unit":"add.sir"},"src_ref":"src:add.sir:5:1"}
-{"ir":"sir-v1.0","k":"node","id":"n:5:2","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:5:1"}]},"loc":{"line":5,"col":1,"unit":"add.sir"},"src_ref":"src:add.sir:5:1"}
-{"ir":"sir-v1.0","k":"node","id":"n:5:3","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","linkage":"public","params":[],"body":{"t":"ref","id":"n:5:2"}},"loc":{"line":5,"col":1,"unit":"add.sir"},"src_ref":"src:add.sir:5:1"}
+{"ir":"sir-v1.0","k":"node","id":"add:n:6a8e75aa:0000:0002","tag":"block","fields":{"stmts":[{"t":"ref","id":"add:n:6a8e75aa:0000:0001"}]},"loc":{"line":5,"col":1,"unit":"add.sir"},"src_ref":"src:add.sir:5:1"}
+{"ir":"sir-v1.0","k":"node","id":"add:n:6a8e75aa:0000:0003","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","linkage":"public","params":[],"body":{"t":"ref","id":"add:n:6a8e75aa:0000:0002"}},"loc":{"line":5,"col":1,"unit":"add.sir"},"src_ref":"src:add.sir:5:1"}

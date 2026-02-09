@@ -195,6 +195,7 @@ STR_UNTERM1  \"([^\"\\\n]|\\.)*\n
 {INT10}                      { sirc_mark(yytext, yylineno, yycolumn); yylval.i = parse_int_literal(yytext); col_advance(); return T_INT; }
 
 "unit"                      { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_UNIT; }
+"@mod"                      { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_ATMOD; }
 "target"                    { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_TARGET; }
 "features"                  { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_FEATURES; }
 "type"                      { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_TYPE; }

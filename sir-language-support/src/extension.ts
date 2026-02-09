@@ -267,7 +267,7 @@ export function activate(context: vscode.ExtensionContext) {
 						const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
 						if (isSir) {
-							const sircArgs = ['--diagnostics', 'json', '--all', '--emit-src', 'both', '--ids', 'string'];
+							const sircArgs = ['--diagnostics', 'json', '--all', '--emit-src', 'both', '--ids', 'stable'];
 							if (useStrictSirc) sircArgs.push('--strict');
 							sircArgs.push(tmpInput, '-o', tmpJsonl);
 							const r = await runTool(sircPath, sircArgs, cwd);

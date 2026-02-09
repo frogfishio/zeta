@@ -46,6 +46,7 @@ typedef struct LocalEntry {
 typedef enum sirc_ids_mode {
   SIRC_IDS_NUMERIC = 0,
   SIRC_IDS_STRING = 1,
+  SIRC_IDS_STABLE = 2,
 } sirc_ids_mode_t;
 
 typedef enum sirc_emit_src_mode {
@@ -62,6 +63,11 @@ typedef struct SrcMapEntry {
   char* id_str;
   bool emitted;
 } SrcMapEntry;
+
+typedef struct StableHashCount {
+  uint32_t h;
+  uint32_t count;
+} StableHashCount;
 
 typedef struct Emitter {
   FILE* out;
@@ -91,6 +97,17 @@ typedef struct Emitter {
   // Source-scoped node-id generation (multiple emitted nodes can originate from one .sir line).
   int last_id_line;
   uint32_t line_id_seq;
+
+  // Stable ids (@mod scope + per-line hash cache).
+  char* id_scope;          // owned
+  int last_hash_line;
+  uint32_t last_line_hash;
+  char* last_line_norm;    // owned
+  uint32_t last_line_occ;
+
+  StableHashCount* stable_hash_counts;
+  size_t stable_hash_counts_len;
+  size_t stable_hash_counts_cap;
 
   char** node_name_by_id;
   size_t node_name_cap;
@@ -388,6 +405,117 @@ static char* xstrdup(const char* s) {
   return out;
 }
 
+void sirc_set_id_scope(char* scope) {
+  if (!scope || !scope[0]) {
+    free(scope);
+    return;
+  }
+  free(g_emit.id_scope);
+  g_emit.id_scope = scope;
+}
+
+static uint32_t fnv1a32(const void* data, size_t n) {
+  const unsigned char* p = (const unsigned char*)data;
+  uint32_t h = 2166136261u;
+  for (size_t i = 0; i < n; i++) {
+    h ^= (uint32_t)p[i];
+    h *= 16777619u;
+  }
+  return h;
+}
+
+static bool is_space_byte(unsigned char c) {
+  return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+static char* normalize_id_line(const char* raw) {
+  if (!raw) return xstrdup("");
+  const size_t n = strlen(raw);
+
+  // Trim leading/trailing whitespace.
+  size_t a = 0;
+  while (a < n && is_space_byte((unsigned char)raw[a])) a++;
+  size_t b = n;
+  while (b > a && is_space_byte((unsigned char)raw[b - 1])) b--;
+
+  // Strip ";;" comment to EOL, but only when not inside a string literal.
+  bool in_str = false;
+  size_t cut = b;
+  for (size_t i = a; i + 1 < b; i++) {
+    const unsigned char c = (unsigned char)raw[i];
+    if (c == '"' && (i == a || raw[i - 1] != '\\')) {
+      in_str = !in_str;
+      continue;
+    }
+    if (!in_str && raw[i] == ';' && raw[i + 1] == ';') {
+      cut = i;
+      break;
+    }
+  }
+
+  // Re-trim trailing whitespace after comment strip.
+  size_t bb = cut;
+  while (bb > a && is_space_byte((unsigned char)raw[bb - 1])) bb--;
+
+  // Collapse runs of whitespace into a single space (stabilize formatting edits).
+  char* out = (char*)xmalloc((bb - a) + 1);
+  size_t j = 0;
+  bool prev_ws = false;
+  for (size_t i = a; i < bb; i++) {
+    const unsigned char c = (unsigned char)raw[i];
+    const bool ws = is_space_byte(c);
+    if (ws) {
+      if (!prev_ws) out[j++] = ' ';
+      prev_ws = true;
+    } else {
+      out[j++] = (char)c;
+      prev_ws = false;
+    }
+  }
+  if (j && out[j - 1] == ' ') j--;
+  out[j] = 0;
+  return out;
+}
+
+static uint32_t stable_hash_for_current_line(void) {
+  const int line = sirc_last_line > 0 ? sirc_last_line : 1;
+  if (g_emit.last_hash_line == line && g_emit.last_line_norm) return g_emit.last_line_hash;
+
+  free(g_emit.last_line_norm);
+  g_emit.last_line_norm = NULL;
+  g_emit.last_hash_line = line;
+  g_emit.last_line_hash = 0;
+  g_emit.last_line_occ = 0;
+
+  // Prefer reading the source line (works for file inputs, and keeps ids stable under insertions).
+  char* raw = read_source_line(g_emit.input_path, line);
+  if (!raw) {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "<line:%d>", line);
+    g_emit.last_line_norm = xstrdup(buf);
+  } else {
+    g_emit.last_line_norm = normalize_id_line(raw);
+    free(raw);
+  }
+
+  g_emit.last_line_hash = fnv1a32(g_emit.last_line_norm, strlen(g_emit.last_line_norm));
+
+  // Disambiguate identical lines: assign a per-hash occurrence index.
+  for (size_t i = 0; i < g_emit.stable_hash_counts_len; i++) {
+    if (g_emit.stable_hash_counts[i].h == g_emit.last_line_hash) {
+      g_emit.last_line_occ = g_emit.stable_hash_counts[i].count++;
+      return g_emit.last_line_hash;
+    }
+  }
+  if (g_emit.stable_hash_counts_len == g_emit.stable_hash_counts_cap) {
+    g_emit.stable_hash_counts_cap = g_emit.stable_hash_counts_cap ? g_emit.stable_hash_counts_cap * 2 : 64;
+    g_emit.stable_hash_counts = xrealloc(g_emit.stable_hash_counts, g_emit.stable_hash_counts_cap * sizeof(*g_emit.stable_hash_counts));
+  }
+  g_emit.stable_hash_counts[g_emit.stable_hash_counts_len++] = (StableHashCount){.h = g_emit.last_line_hash, .count = 1};
+  g_emit.last_line_occ = 0;
+  return g_emit.last_line_hash;
+}
+
 static void sirc_reset_compiler_state(void) {
   // Output + input path are managed by the caller.
   // ids_mode is managed by main().
@@ -457,6 +585,19 @@ static void sirc_reset_compiler_state(void) {
   g_emit.unit = NULL;
   g_emit.target = NULL;
 
+  // Stable id state.
+  free(g_emit.id_scope);
+  g_emit.id_scope = NULL;
+  free(g_emit.last_line_norm);
+  g_emit.last_line_norm = NULL;
+  g_emit.last_hash_line = 0;
+  g_emit.last_line_hash = 0;
+  g_emit.last_line_occ = 0;
+  free(g_emit.stable_hash_counts);
+  g_emit.stable_hash_counts = NULL;
+  g_emit.stable_hash_counts_len = 0;
+  g_emit.stable_hash_counts_cap = 0;
+
   // Src map.
   for (size_t i = 0; i < g_emit.srcs_len; i++) free(g_emit.srcs[i].id_str);
   free(g_emit.srcs);
@@ -509,12 +650,12 @@ static const char* pretty_basename(const char* p) {
 }
 
 static const char* pretty_node_id_str(int64_t id) {
-  if (g_emit.ids_mode != SIRC_IDS_STRING) return NULL;
+  if (g_emit.ids_mode != SIRC_IDS_STRING && g_emit.ids_mode != SIRC_IDS_STABLE) return NULL;
   return ((size_t)id < g_emit.node_id_cap) ? g_emit.node_id_by_id[id] : NULL;
 }
 
 static const char* pretty_type_id_str(int64_t id) {
-  if (g_emit.ids_mode != SIRC_IDS_STRING) return NULL;
+  if (g_emit.ids_mode != SIRC_IDS_STRING && g_emit.ids_mode != SIRC_IDS_STABLE) return NULL;
   return ((size_t)id < g_emit.type_id_cap) ? g_emit.type_id_by_id[id] : NULL;
 }
 
@@ -564,6 +705,7 @@ static void pretty_node_record(int64_t id, const char* tag, int64_t type_ref) {
 
 static void emit_meta(void) {
   if (!g_emit.unit) g_emit.unit = xstrdup("unit");
+  if (!g_emit.id_scope) g_emit.id_scope = xstrdup(g_emit.unit);
   pretty_meta();
   emitf("{\"ir\":\"sir-v1.0\",\"k\":\"meta\",\"producer\":\"sirc\",\"unit\":");
   json_write_escaped(g_emit.out, g_emit.unit);
@@ -1184,7 +1326,7 @@ static void ensure_type_id_slot(int64_t id) {
 }
 
 static void record_node_out_id(int64_t id) {
-  if (g_emit.ids_mode != SIRC_IDS_STRING) return;
+  if (g_emit.ids_mode != SIRC_IDS_STRING && g_emit.ids_mode != SIRC_IDS_STABLE) return;
   if (id <= 0) return;
   ensure_node_id_slot(id);
   if ((size_t)id < g_emit.node_id_cap && g_emit.node_id_by_id[id]) return;
@@ -1196,20 +1338,27 @@ static void record_node_out_id(int64_t id) {
   }
   const uint32_t seq = g_emit.line_id_seq++;
 
-  char buf[64];
-  snprintf(buf, sizeof(buf), "n:%d:%u", line, (unsigned)seq);
+  char buf[256];
+  if (g_emit.ids_mode == SIRC_IDS_STRING) {
+    snprintf(buf, sizeof(buf), "n:%d:%u", line, (unsigned)seq);
+  } else {
+    const char* scope = g_emit.id_scope ? g_emit.id_scope : (g_emit.unit ? g_emit.unit : "unit");
+    const uint32_t h = stable_hash_for_current_line();
+    const uint32_t occ = g_emit.last_line_occ;
+    snprintf(buf, sizeof(buf), "%s:n:%08x:%04x:%04x", scope, (unsigned)h, (unsigned)(occ & 0xffffu), (unsigned)(seq & 0xffffu));
+  }
   g_emit.node_id_by_id[id] = xstrdup(buf);
 }
 
 static void record_type_out_id(int64_t id, const char* key) {
-  if (g_emit.ids_mode != SIRC_IDS_STRING) return;
+  if (g_emit.ids_mode != SIRC_IDS_STRING && g_emit.ids_mode != SIRC_IDS_STABLE) return;
   if (id <= 0 || !key) return;
   ensure_type_id_slot(id);
   if ((size_t)id < g_emit.type_id_cap) g_emit.type_id_by_id[id] = (char*)key; // owned by TypeEntry
 }
 
 static void emit_node_id_value(int64_t id) {
-  if (g_emit.ids_mode == SIRC_IDS_STRING) {
+  if (g_emit.ids_mode == SIRC_IDS_STRING || g_emit.ids_mode == SIRC_IDS_STABLE) {
     ensure_node_id_slot(id);
     const char* s = ((size_t)id < g_emit.node_id_cap) ? g_emit.node_id_by_id[id] : NULL;
     if (!s) die_at_last("sirc: internal error: missing string id for node %lld", (long long)id);
@@ -1220,7 +1369,7 @@ static void emit_node_id_value(int64_t id) {
 }
 
 static void emit_type_id_value(int64_t id) {
-  if (g_emit.ids_mode == SIRC_IDS_STRING) {
+  if (g_emit.ids_mode == SIRC_IDS_STRING || g_emit.ids_mode == SIRC_IDS_STABLE) {
     ensure_type_id_slot(id);
     const char* s = ((size_t)id < g_emit.type_id_cap) ? g_emit.type_id_by_id[id] : NULL;
     if (!s) die_at_last("sirc: internal error: missing string id for type %lld", (long long)id);
@@ -3224,7 +3373,7 @@ static void usage(FILE* out) {
           "Options:\n"
           "  --help, -h    Show this help message\n"
           "  --version     Show version information\n"
-          "  --ids <mode>  Id mode: string (default) or numeric\n"
+          "  --ids <mode>  Id mode: stable (default), string (legacy), or numeric\n"
           "  --emit-src <none|loc|src_ref|both>  Attach source mapping (default: loc)\n"
           "  --diagnostics <text|json>  Diagnostic output format (default: text)\n"
           "  --all         Report all errors\n"
@@ -3245,7 +3394,7 @@ static void print_support(FILE* out, bool as_json) {
   if (as_json) {
     fputs("{\"tool\":\"sirc\",\"version\":", out);
     json_write_escaped(out, SIRC_VERSION);
-    fputs(",\"ids_default\":\"string\",\"ids_modes\":[\"string\",\"numeric\"],\"features\":[", out);
+    fputs(",\"ids_default\":\"stable\",\"ids_modes\":[\"stable\",\"string\",\"numeric\"],\"features\":[", out);
     fputs("\"fun:v1\",\"closure:v1\",\"adt:v1\",\"sem:v1\"", out);
     fputs("],\"emit_src_default\":\"loc\",\"emit_src_modes\":[\"none\",\"loc\",\"src_ref\",\"both\"]", out);
     fputs(",\"strict\":true", out);
@@ -3263,8 +3412,8 @@ static void print_support(FILE* out, bool as_json) {
   fprintf(out, "sirc %s\n", SIRC_VERSION);
   fprintf(out, "\n");
   fprintf(out, "IDs:\n");
-  fprintf(out, "  default: string\n");
-  fprintf(out, "  modes: string, numeric\n");
+  fprintf(out, "  default: stable\n");
+  fprintf(out, "  modes: stable, string, numeric\n");
   fprintf(out, "\n");
   fprintf(out, "Strict mode:\n");
   fprintf(out, "  --strict: reject unknown/ignored attrs on known constructs; enforce arity on a conservative subset\n");
@@ -3356,7 +3505,7 @@ int main(int argc, char** argv) {
   size_t inputs_len = 0;
   size_t inputs_cap = 0;
 
-  g_emit.ids_mode = SIRC_IDS_STRING;
+  g_emit.ids_mode = SIRC_IDS_STABLE;
   g_emit.emit_src = SIRC_EMIT_SRC_LOC;
 
   for (int i = 1; i < argc; i++) {
@@ -3420,9 +3569,10 @@ int main(int argc, char** argv) {
       continue;
     }
     if (strcmp(a, "--ids") == 0) {
-      if (i + 1 >= argc) die_at_last("sirc: --ids requires a mode (string|numeric)");
+      if (i + 1 >= argc) die_at_last("sirc: --ids requires a mode (stable|string|numeric)");
       const char* m = argv[++i];
-      if (strcmp(m, "string") == 0) g_emit.ids_mode = SIRC_IDS_STRING;
+      if (strcmp(m, "stable") == 0) g_emit.ids_mode = SIRC_IDS_STABLE;
+      else if (strcmp(m, "string") == 0) g_emit.ids_mode = SIRC_IDS_STRING;
       else if (strcmp(m, "numeric") == 0) g_emit.ids_mode = SIRC_IDS_NUMERIC;
       else die_at_last("sirc: unknown --ids mode: %s", m);
       continue;

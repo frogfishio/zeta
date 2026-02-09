@@ -14,7 +14,7 @@ endif()
 file(REMOVE "${OUT}")
 
 execute_process(
-  COMMAND ${SIRC} --emit-src both --ids string ${INPUT} -o ${OUT}
+  COMMAND ${SIRC} --emit-src both --ids stable ${INPUT} -o ${OUT}
   RESULT_VARIABLE rc
   OUTPUT_VARIABLE out
   ERROR_VARIABLE err
@@ -49,4 +49,3 @@ if(NOT same EQUAL 0)
   message(STATUS "---- want ----\n${want}")
   message(FATAL_ERROR "golden mismatch: ${INPUT}")
 endif()
-

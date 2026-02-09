@@ -48,6 +48,9 @@ const char* sirc_input_path(void);
 void sirc_emit_unit(char* unit, char* target);
 void sirc_add_feature(char* feature); // takes ownership
 
+// Compile-time directives (no emitted records).
+void sirc_set_id_scope(char* scope); // takes ownership
+
 // Types (return type ids)
 int64_t sirc_type_from_name(char* name); // takes ownership of name
 int64_t sirc_type_ptr_of(int64_t of);

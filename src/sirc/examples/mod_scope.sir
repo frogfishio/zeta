@@ -1,0 +1,7 @@
+unit mod_scope target host
+@mod core
+
+fn main() -> i32 public
+  return 0:i32
+end
+

@@ -54,6 +54,7 @@ void yyerror(const char* s);
 %token T_FLAGS T_COUNT
 %token T_SEM_IF T_SEM_COND T_SEM_AND_SC T_SEM_OR_SC T_SEM_SWITCH T_SEM_MATCH_SUM
 %token T_SEM_WHILE T_SEM_BREAK T_SEM_CONTINUE T_SEM_DEFER T_SEM_SCOPE
+%token T_ATMOD
 
 /* declared in lexer (unused for now, but must exist) */
 %token T_FEATURES T_SIG T_DO
@@ -100,7 +101,24 @@ void yyerror(const char* s);
 %%
 
 program
-  : unit_header nl_star decls_opt nl_star
+  : unit_header nl_star directives_opt decls_opt nl_star
+  ;
+
+directives_opt
+  : /* empty */
+  | directives
+  ;
+
+directives
+  : directive
+  | directives nl_plus directive
+  | directives nl_plus
+  ;
+
+directive
+  : T_ATMOD T_ID          { sirc_set_id_scope($2); }
+  | T_ATMOD T_STRING      { sirc_set_id_scope($2); }
+  | error nl_plus         { yyerrok; }
   ;
 
 unit_header
