@@ -4,14 +4,14 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-type DiagJson = {
-	k: string;
+type NormalizedDiag = {
 	tool?: string;
 	code?: string;
 	path?: string;
 	line?: number;
 	col?: number;
-	msg?: string;
+	level?: string;
+	message: string;
 };
 
 async function runTool(cmd: string, args: string[], cwd?: string): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -28,17 +28,59 @@ async function runTool(cmd: string, args: string[], cwd?: string): Promise<{ cod
 	});
 }
 
-function parseDiagJsonLines(stderr: string): DiagJson[] {
-	const out: DiagJson[] = [];
+function asString(v: unknown): string | undefined {
+	return typeof v === 'string' ? v : undefined;
+}
+
+function asNumber(v: unknown): number | undefined {
+	return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
+function asRecord(v: unknown): Record<string, unknown> | undefined {
+	return typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : undefined;
+}
+
+function normalizeDiag(v: Record<string, unknown>): NormalizedDiag | undefined {
+	// Accept multiple diagnostic JSON shapes:
+	// - sirc: {"k":"diag","tool":"sirc","code":"...","path":"...","line":N,"col":N,"msg":"..."}
+	// - sircc: {"k":"diag","level":"error","msg":"...","code":"...","loc":{"unit":"...","line":N,"col":N}}
+	// - sem: {"tool":"sem","code":"...","message":"...","path":"...","line":N,"col":N}
+	const k = asString(v.k);
+
+	const tool = asString(v.tool);
+	const code = asString(v.code);
+	const level = asString(v.level) ?? asString(v.severity);
+
+	const msg = asString(v.message) ?? asString(v.msg);
+
+	let p = asString(v.path);
+	let line = asNumber(v.line);
+	let col = asNumber(v.col);
+
+	const loc = asRecord(v.loc);
+	if (!p && loc) p = asString(loc.unit) ?? asString(loc.path) ?? asString(loc.file);
+	if (line === undefined && loc) line = asNumber(loc.line);
+	if (col === undefined && loc) col = asNumber(loc.col);
+
+	if (msg && (k === 'diag' || tool || code || p || line !== undefined)) {
+		return { tool, code, level, path: p, line, col, message: msg };
+	}
+
+	// If it's a JSON object but doesn't match a diag schema, ignore it.
+	return undefined;
+}
+
+function parseDiagJsonLines(stderr: string): NormalizedDiag[] {
+	const out: NormalizedDiag[] = [];
 	for (const line of stderr.split(/\r?\n/)) {
 		const t = line.trim();
 		if (!t.startsWith('{') || !t.endsWith('}')) continue;
 		try {
 			const v = JSON.parse(t) as unknown;
-			if (typeof v === 'object' && v !== null) {
-				const dj = v as DiagJson;
-				if (dj.k === 'diag') out.push(dj);
-			}
+			const rec = asRecord(v);
+			if (!rec) continue;
+			const nd = normalizeDiag(rec);
+			if (nd) out.push(nd);
 		} catch {
 			// ignore non-json / partial lines
 		}
@@ -46,14 +88,21 @@ function parseDiagJsonLines(stderr: string): DiagJson[] {
 	return out;
 }
 
-function diagToVscodeDiagnostic(d: DiagJson): vscode.Diagnostic {
+function diagSeverity(level: string | undefined): vscode.DiagnosticSeverity {
+	const l = (level ?? '').toLowerCase();
+	if (l === 'warn' || l === 'warning') return vscode.DiagnosticSeverity.Warning;
+	if (l === 'info' || l === 'note') return vscode.DiagnosticSeverity.Information;
+	return vscode.DiagnosticSeverity.Error;
+}
+
+function diagToVscodeDiagnostic(d: NormalizedDiag): vscode.Diagnostic {
 	const line = typeof d.line === 'number' && d.line > 0 ? d.line - 1 : 0;
 	const col = typeof d.col === 'number' && d.col > 0 ? d.col - 1 : 0;
 	const range = new vscode.Range(new vscode.Position(line, col), new vscode.Position(line, col + 1));
 	const code = d.code ?? 'sir.diag';
-	const msg = d.msg ?? 'diagnostic';
+	const msg = d.message || 'diagnostic';
 	const tool = d.tool ? `[${d.tool}] ` : '';
-	const diag = new vscode.Diagnostic(range, `${tool}${msg}`, vscode.DiagnosticSeverity.Error);
+	const diag = new vscode.Diagnostic(range, `${tool}${msg}`, diagSeverity(d.level));
 	diag.code = code;
 	return diag;
 }
@@ -74,6 +123,22 @@ async function ensureDir(p: string): Promise<void> {
 	await fs.mkdir(p, { recursive: true });
 }
 
+function isSirDoc(doc: vscode.TextDocument): boolean {
+	return doc.languageId === 'sir' || doc.uri.path.endsWith('.sir');
+}
+
+function isSirJsonlDoc(doc: vscode.TextDocument): boolean {
+	return doc.languageId === 'sirjsonl' || doc.uri.path.endsWith('.sir.jsonl');
+}
+
+async function writeDocToTemp(doc: vscode.TextDocument, tmpRoot: string): Promise<{ tmpInput: string }> {
+	const inputBase = path.basename(doc.uri.fsPath || 'untitled.sir');
+	const tmpInput = path.join(tmpRoot, inputBase);
+	await ensureDir(tmpRoot);
+	await fs.writeFile(tmpInput, doc.getText(), 'utf8');
+	return { tmpInput };
+}
+
 export function activate(context: vscode.ExtensionContext) {
 	const diags = vscode.languages.createDiagnosticCollection('sir');
 	context.subscriptions.push(diags);
@@ -82,6 +147,78 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('sir-language-support.clearDiagnostics', () => {
 			diags.clear();
 			vscode.window.setStatusBarMessage('SIR: diagnostics cleared', 1500);
+		})
+	);
+
+	// Lightweight lint-on-save / lint-on-type for .sir documents (sirc only).
+	const lintSeq = new Map<string, number>();
+	const lintTimers = new Map<string, NodeJS.Timeout>();
+
+	const runLint = async (doc: vscode.TextDocument) => {
+		if (!isSirDoc(doc)) return;
+		const cfg = vscode.workspace.getConfiguration('sirLanguageSupport');
+		const sircPath = cfg.get<string>('sircPath', 'sirc') || 'sirc';
+		const useStrictSirc = cfg.get<boolean>('useStrictSirc', true);
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+		const key = doc.uri.toString();
+		const seq = (lintSeq.get(key) ?? 0) + 1;
+		lintSeq.set(key, seq);
+
+		// Prefer linting the on-disk file when available; otherwise fall back to a temp copy.
+		let tmpRoot: string | undefined;
+		let inputPath: string;
+		try {
+			if (doc.uri.scheme === 'file' && doc.uri.fsPath) {
+				inputPath = doc.uri.fsPath;
+			} else {
+				tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'sir-vscode-lint-'));
+				const { tmpInput } = await writeDocToTemp(doc, tmpRoot);
+				inputPath = tmpInput;
+			}
+
+			const args = ['--lint', '--diagnostics', 'json', '--all'];
+			if (useStrictSirc) args.push('--strict');
+			args.push(inputPath);
+
+			const r = await runTool(sircPath, args, cwd);
+			if ((lintSeq.get(key) ?? 0) !== seq) return; // stale run
+
+			const dj = parseDiagJsonLines(r.stderr);
+			const vd = dj.map(diagToVscodeDiagnostic);
+			diags.set(doc.uri, vd);
+		} finally {
+			if (tmpRoot) await fs.rm(tmpRoot, { recursive: true, force: true });
+		}
+	};
+
+	context.subscriptions.push(
+		vscode.workspace.onDidSaveTextDocument((doc) => {
+			const cfg = vscode.workspace.getConfiguration('sirLanguageSupport');
+			const lintOnSave = cfg.get<boolean>('lintOnSave', true);
+			if (!lintOnSave) return;
+			void runLint(doc);
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.workspace.onDidChangeTextDocument((e) => {
+			const doc = e.document;
+			if (!isSirDoc(doc)) return;
+			const cfg = vscode.workspace.getConfiguration('sirLanguageSupport');
+			const lintOnType = cfg.get<boolean>('lintOnType', false);
+			if (!lintOnType) return;
+			const debounceMs = cfg.get<number>('lintDebounceMs', 400);
+
+			const key = doc.uri.toString();
+			const prev = lintTimers.get(key);
+			if (prev) clearTimeout(prev);
+			lintTimers.set(
+				key,
+				setTimeout(() => {
+					void runLint(doc);
+				}, Math.max(0, debounceMs))
+			);
 		})
 	);
 
@@ -120,8 +257,8 @@ export function activate(context: vscode.ExtensionContext) {
 							collected.set(key, entry);
 						};
 
-						const isSir = doc.languageId === 'sir' || doc.uri.path.endsWith('.sir');
-						const isSirJsonl = doc.languageId === 'sirjsonl' || doc.uri.path.endsWith('.sir.jsonl');
+						const isSir = isSirDoc(doc);
+						const isSirJsonl = isSirJsonlDoc(doc);
 						if (!isSir && !isSirJsonl) {
 							vscode.window.showWarningMessage('SIR: open a .sir or .sir.jsonl file to verify');
 							return;

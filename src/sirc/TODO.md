@@ -14,6 +14,7 @@ Legend:
   - [x] Intra-file recovery + multi-diagnostic collection (Bison error recovery).
 - [x] Add caret diagnostics in text mode (1–3 context lines with `^` under the span).
 - [x] Define and document exit codes: `0` success, `1` compile/verify error, `2` tool error (I/O, OOM, internal).
+- [x] VS Code extension: ship `.vsix` with syntax highlighting + lint-on-save diagnostics (bundled in `dist/doc/editors/`).
 
 ## P0 — Source mapping contract (output)
 

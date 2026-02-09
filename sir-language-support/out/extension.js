@@ -53,6 +53,41 @@ async function runTool(cmd, args, cwd) {
         child.on('error', () => resolve({ code: 127, stdout, stderr }));
     });
 }
+function asString(v) {
+    return typeof v === 'string' ? v : undefined;
+}
+function asNumber(v) {
+    return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+function asRecord(v) {
+    return typeof v === 'object' && v !== null ? v : undefined;
+}
+function normalizeDiag(v) {
+    // Accept multiple diagnostic JSON shapes:
+    // - sirc: {"k":"diag","tool":"sirc","code":"...","path":"...","line":N,"col":N,"msg":"..."}
+    // - sircc: {"k":"diag","level":"error","msg":"...","code":"...","loc":{"unit":"...","line":N,"col":N}}
+    // - sem: {"tool":"sem","code":"...","message":"...","path":"...","line":N,"col":N}
+    const k = asString(v.k);
+    const tool = asString(v.tool);
+    const code = asString(v.code);
+    const level = asString(v.level) ?? asString(v.severity);
+    const msg = asString(v.message) ?? asString(v.msg);
+    let p = asString(v.path);
+    let line = asNumber(v.line);
+    let col = asNumber(v.col);
+    const loc = asRecord(v.loc);
+    if (!p && loc)
+        p = asString(loc.unit) ?? asString(loc.path) ?? asString(loc.file);
+    if (line === undefined && loc)
+        line = asNumber(loc.line);
+    if (col === undefined && loc)
+        col = asNumber(loc.col);
+    if (msg && (k === 'diag' || tool || code || p || line !== undefined)) {
+        return { tool, code, level, path: p, line, col, message: msg };
+    }
+    // If it's a JSON object but doesn't match a diag schema, ignore it.
+    return undefined;
+}
 function parseDiagJsonLines(stderr) {
     const out = [];
     for (const line of stderr.split(/\r?\n/)) {
@@ -61,11 +96,12 @@ function parseDiagJsonLines(stderr) {
             continue;
         try {
             const v = JSON.parse(t);
-            if (typeof v === 'object' && v !== null) {
-                const dj = v;
-                if (dj.k === 'diag')
-                    out.push(dj);
-            }
+            const rec = asRecord(v);
+            if (!rec)
+                continue;
+            const nd = normalizeDiag(rec);
+            if (nd)
+                out.push(nd);
         }
         catch {
             // ignore non-json / partial lines
@@ -73,14 +109,22 @@ function parseDiagJsonLines(stderr) {
     }
     return out;
 }
+function diagSeverity(level) {
+    const l = (level ?? '').toLowerCase();
+    if (l === 'warn' || l === 'warning')
+        return vscode.DiagnosticSeverity.Warning;
+    if (l === 'info' || l === 'note')
+        return vscode.DiagnosticSeverity.Information;
+    return vscode.DiagnosticSeverity.Error;
+}
 function diagToVscodeDiagnostic(d) {
     const line = typeof d.line === 'number' && d.line > 0 ? d.line - 1 : 0;
     const col = typeof d.col === 'number' && d.col > 0 ? d.col - 1 : 0;
     const range = new vscode.Range(new vscode.Position(line, col), new vscode.Position(line, col + 1));
     const code = d.code ?? 'sir.diag';
-    const msg = d.msg ?? 'diagnostic';
+    const msg = d.message || 'diagnostic';
     const tool = d.tool ? `[${d.tool}] ` : '';
-    const diag = new vscode.Diagnostic(range, `${tool}${msg}`, vscode.DiagnosticSeverity.Error);
+    const diag = new vscode.Diagnostic(range, `${tool}${msg}`, diagSeverity(d.level));
     diag.code = code;
     return diag;
 }
@@ -102,12 +146,90 @@ function diagUriForPath(p, fallback) {
 async function ensureDir(p) {
     await fs.mkdir(p, { recursive: true });
 }
+function isSirDoc(doc) {
+    return doc.languageId === 'sir' || doc.uri.path.endsWith('.sir');
+}
+function isSirJsonlDoc(doc) {
+    return doc.languageId === 'sirjsonl' || doc.uri.path.endsWith('.sir.jsonl');
+}
+async function writeDocToTemp(doc, tmpRoot) {
+    const inputBase = path.basename(doc.uri.fsPath || 'untitled.sir');
+    const tmpInput = path.join(tmpRoot, inputBase);
+    await ensureDir(tmpRoot);
+    await fs.writeFile(tmpInput, doc.getText(), 'utf8');
+    return { tmpInput };
+}
 function activate(context) {
     const diags = vscode.languages.createDiagnosticCollection('sir');
     context.subscriptions.push(diags);
     context.subscriptions.push(vscode.commands.registerCommand('sir-language-support.clearDiagnostics', () => {
         diags.clear();
         vscode.window.setStatusBarMessage('SIR: diagnostics cleared', 1500);
+    }));
+    // Lightweight lint-on-save / lint-on-type for .sir documents (sirc only).
+    const lintSeq = new Map();
+    const lintTimers = new Map();
+    const runLint = async (doc) => {
+        if (!isSirDoc(doc))
+            return;
+        const cfg = vscode.workspace.getConfiguration('sirLanguageSupport');
+        const sircPath = cfg.get('sircPath', 'sirc') || 'sirc';
+        const useStrictSirc = cfg.get('useStrictSirc', true);
+        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const key = doc.uri.toString();
+        const seq = (lintSeq.get(key) ?? 0) + 1;
+        lintSeq.set(key, seq);
+        // Prefer linting the on-disk file when available; otherwise fall back to a temp copy.
+        let tmpRoot;
+        let inputPath;
+        try {
+            if (doc.uri.scheme === 'file' && doc.uri.fsPath) {
+                inputPath = doc.uri.fsPath;
+            }
+            else {
+                tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'sir-vscode-lint-'));
+                const { tmpInput } = await writeDocToTemp(doc, tmpRoot);
+                inputPath = tmpInput;
+            }
+            const args = ['--lint', '--diagnostics', 'json', '--all'];
+            if (useStrictSirc)
+                args.push('--strict');
+            args.push(inputPath);
+            const r = await runTool(sircPath, args, cwd);
+            if ((lintSeq.get(key) ?? 0) !== seq)
+                return; // stale run
+            const dj = parseDiagJsonLines(r.stderr);
+            const vd = dj.map(diagToVscodeDiagnostic);
+            diags.set(doc.uri, vd);
+        }
+        finally {
+            if (tmpRoot)
+                await fs.rm(tmpRoot, { recursive: true, force: true });
+        }
+    };
+    context.subscriptions.push(vscode.workspace.onDidSaveTextDocument((doc) => {
+        const cfg = vscode.workspace.getConfiguration('sirLanguageSupport');
+        const lintOnSave = cfg.get('lintOnSave', true);
+        if (!lintOnSave)
+            return;
+        void runLint(doc);
+    }));
+    context.subscriptions.push(vscode.workspace.onDidChangeTextDocument((e) => {
+        const doc = e.document;
+        if (!isSirDoc(doc))
+            return;
+        const cfg = vscode.workspace.getConfiguration('sirLanguageSupport');
+        const lintOnType = cfg.get('lintOnType', false);
+        if (!lintOnType)
+            return;
+        const debounceMs = cfg.get('lintDebounceMs', 400);
+        const key = doc.uri.toString();
+        const prev = lintTimers.get(key);
+        if (prev)
+            clearTimeout(prev);
+        lintTimers.set(key, setTimeout(() => {
+            void runLint(doc);
+        }, Math.max(0, debounceMs)));
     }));
     context.subscriptions.push(vscode.commands.registerCommand('sir-language-support.verifyCurrentFile', async () => {
         const editor = vscode.window.activeTextEditor;
@@ -137,8 +259,8 @@ function activate(context) {
                     entry.diagnostics.push(d);
                     collected.set(key, entry);
                 };
-                const isSir = doc.languageId === 'sir' || doc.uri.path.endsWith('.sir');
-                const isSirJsonl = doc.languageId === 'sirjsonl' || doc.uri.path.endsWith('.sir.jsonl');
+                const isSir = isSirDoc(doc);
+                const isSirJsonl = isSirJsonlDoc(doc);
                 if (!isSir && !isSirJsonl) {
                     vscode.window.showWarningMessage('SIR: open a .sir or .sir.jsonl file to verify');
                     return;

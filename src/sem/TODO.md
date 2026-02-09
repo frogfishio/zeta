@@ -77,6 +77,8 @@ Work items:
 
 Acceptance:
 - [ ] For each pack: add a positive + negative fixture pair and run them in `sem --check`
+  - [x] `atomics:v1`: negative parse fixture `bad_atomic_missing_mode` asserts `sem.parse.atomic.mode`
+  - [x] `simd:v1`: negative runtime fixture `simd_load_vec_misaligned_traps` asserts deterministic trap on misalignment
 
 Work items:
 - [x] `adt:v1` execution parity

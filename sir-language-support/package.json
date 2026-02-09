@@ -87,6 +87,22 @@
           "default": "sircc",
           "description": "Path to the `sircc` executable (used for verification and diagnostics)."
         },
+        "sirLanguageSupport.lintOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run `sirc --lint` on save and surface diagnostics in the Problems panel."
+        },
+        "sirLanguageSupport.lintOnType": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run `sirc --lint` while typing (debounced). This is more CPU-intensive than lint-on-save."
+        },
+        "sirLanguageSupport.lintDebounceMs": {
+          "type": "number",
+          "default": 400,
+          "minimum": 0,
+          "description": "Debounce interval (ms) for lint-on-type."
+        },
         "sirLanguageSupport.useStrictSirc": {
           "type": "boolean",
           "default": true,

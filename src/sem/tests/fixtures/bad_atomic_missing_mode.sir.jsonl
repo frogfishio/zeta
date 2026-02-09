@@ -1,0 +1,14 @@
+{"ir":"sir-v1.0","k":"meta","producer":"fixture","unit":"bad_atomic_missing_mode","ext":{"features":["atomics:v1"]}}
+{"ir":"sir-v1.0","k":"type","id":1,"kind":"prim","prim":"i32"}
+{"ir":"sir-v1.0","k":"type","id":2,"kind":"prim","prim":"i8"}
+{"ir":"sir-v1.0","k":"type","id":3,"kind":"ptr","of":2}
+{"ir":"sir-v1.0","k":"type","id":4,"kind":"fn","params":[],"ret":1}
+{"ir":"sir-v1.0","k":"node","id":10,"tag":"alloca.i32","fields":{"flags":{"align":4,"zero":true}}}
+{"ir":"sir-v1.0","k":"node","id":11,"tag":"let","fields":{"name":"p","value":{"t":"ref","id":10}}}
+{"ir":"sir-v1.0","k":"node","id":12,"tag":"name","type_ref":3,"fields":{"name":"p"}}
+{"ir":"sir-v1.0","k":"node","id":13,"tag":"atomic.load.i32","fields":{"args":[{"t":"ref","id":12}],"flags":{"align":4}}}
+{"ir":"sir-v1.0","k":"node","id":14,"tag":"let","fields":{"name":"x","value":{"t":"ref","id":13}}}
+{"ir":"sir-v1.0","k":"node","id":15,"tag":"name","type_ref":1,"fields":{"name":"x"}}
+{"ir":"sir-v1.0","k":"node","id":16,"tag":"term.ret","fields":{"value":{"t":"ref","id":15}}}
+{"ir":"sir-v1.0","k":"node","id":17,"tag":"block","fields":{"stmts":[{"t":"ref","id":11},{"t":"ref","id":14},{"t":"ref","id":16}]}}
+{"ir":"sir-v1.0","k":"node","id":18,"tag":"fn","type_ref":4,"fields":{"name":"main","linkage":"public","params":[],"body":{"t":"ref","id":17}}}
