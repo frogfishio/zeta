@@ -1,0 +1,8 @@
+[package]
+name = "com.frogfish.pkg_demo"
+version = "0.1.0"
+
+[artifact]
+dialect = "sir/1.0"
+encoding = "jsonl"
+

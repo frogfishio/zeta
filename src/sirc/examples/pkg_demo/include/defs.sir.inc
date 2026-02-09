@@ -1,0 +1,6 @@
+@mod defs
+
+fn helper() -> i32
+  return 7:i32
+end
+

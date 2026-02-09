@@ -86,7 +86,10 @@ Include another `.sir` *fragment* at the current position.
 Rules (v1):
 - `@include` is only supported at **top level** (between the unit header and declarations).
 - Included files are **fragments**: they must not start with a `unit ... target ...` header.
-- Relative paths are resolved relative to the including file’s directory.
+- Relative paths are searched in:
+  1) the including file’s directory
+  2) the nearest ancestor directory containing `package.toml` (if any)
+  3) any CLI include dirs passed via `-I <dir>` / `--include-dir <dir>` (in order)
 - Cycles are rejected (`A` includes `B` includes `A`).
 
 Scope:

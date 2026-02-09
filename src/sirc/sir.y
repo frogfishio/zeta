@@ -112,7 +112,7 @@ directives_opt
 
 directives
   : directive
-  | directives nl_plus directive
+  | directives nl_star directive
   | directives nl_plus
   ;
 

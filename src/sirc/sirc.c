@@ -179,6 +179,11 @@ static SircIncludeFrame* g_inc = NULL;
 static size_t g_inc_len = 0;
 static size_t g_inc_cap = 0;
 static char* g_root_realpath = NULL;
+static char* g_pkg_root_dir = NULL; // owned (dir containing package.toml, if discovered for the root input)
+
+static char** g_cli_include_dirs = NULL; // owned strings
+static size_t g_cli_include_dirs_len = 0;
+static size_t g_cli_include_dirs_cap = 0;
 
 static bool include_stack_contains(const char* realp) {
   if (!realp) return false;
@@ -205,6 +210,34 @@ static bool path_is_abs(const char* p) {
   return p && p[0] == '/';
 }
 
+static bool is_dir(const char* p) {
+  if (!p || !p[0]) return false;
+  struct stat st;
+  if (stat(p, &st) != 0) return false;
+  return S_ISDIR(st.st_mode);
+}
+
+static bool is_root_dir(const char* d) {
+  return d && d[0] == '/' && d[1] == 0;
+}
+
+static char* parent_dir_dup(const char* d) {
+  if (!d || !d[0]) return xstrdup(".");
+  if (is_root_dir(d)) return xstrdup("/");
+  // Trim trailing slash, but keep "/" intact.
+  size_t n = strlen(d);
+  while (n > 1 && d[n - 1] == '/') n--;
+  // Find previous slash.
+  size_t i = n;
+  while (i > 0 && d[i - 1] != '/') i--;
+  if (i == 0) return xstrdup(".");
+  if (i == 1) return xstrdup("/");
+  char* out = (char*)xmalloc(i);
+  memcpy(out, d, i - 1);
+  out[i - 1] = 0;
+  return out;
+}
+
 static char* path_join2(const char* a, const char* b) {
   if (!a || !a[0]) return xstrdup(b ? b : "");
   if (!b || !b[0]) return xstrdup(a);
@@ -218,6 +251,24 @@ static char* path_join2(const char* a, const char* b) {
   memcpy(out + j, b, nb);
   out[j + nb] = 0;
   return out;
+}
+
+static char* find_package_root_dir(const char* input_real_or_abs) {
+  if (!input_real_or_abs || !input_real_or_abs[0]) return NULL;
+  char* dir = dirname_dup(input_real_or_abs);
+  for (;;) {
+    char* probe = path_join2(dir, "package.toml");
+    struct stat st;
+    const bool ok = stat(probe, &st) == 0 && S_ISREG(st.st_mode);
+    free(probe);
+    if (ok) return dir; // owned
+    if (is_root_dir(dir)) break;
+    char* up = parent_dir_dup(dir);
+    free(dir);
+    dir = up;
+  }
+  free(dir);
+  return NULL;
 }
 
 static bool file_starts_with_unit_header(const char* path) {
@@ -596,23 +647,48 @@ bool sirc_include_file(char* path) {
     return false;
   }
 
-  char* joined = NULL;
+  char* realp = NULL;
   if (path_is_abs(path)) {
-    joined = xstrdup(path);
-  } else {
-    char* dir = dirname_dup(cur);
-    joined = path_join2(dir, path);
-    free(dir);
-  }
-
-  char* realp = realpath(joined, NULL);
-  if (!realp) {
-    diag_setf("sirc.include.open", "%s: %s", joined, strerror(errno));
+    char* joined = xstrdup(path);
+    realp = realpath(joined, NULL);
+    if (!realp) {
+      diag_setf("sirc.include.open", "%s: %s", joined, strerror(errno));
+      free(joined);
+      free(path);
+      return false;
+    }
     free(joined);
-    free(path);
-    return false;
+  } else {
+    // Search order:
+    //  1) Directory of the including file
+    //  2) package.toml root (for the entry file), if any
+    //  3) CLI include dirs (-I/--include-dir), in order
+    char* dir = dirname_dup(cur);
+    char* joined = path_join2(dir, path);
+    free(dir);
+    realp = realpath(joined, NULL);
+    free(joined);
+
+    if (!realp && g_pkg_root_dir) {
+      joined = path_join2(g_pkg_root_dir, path);
+      realp = realpath(joined, NULL);
+      free(joined);
+    }
+
+    if (!realp) {
+      for (size_t i = 0; i < g_cli_include_dirs_len && !realp; i++) {
+        joined = path_join2(g_cli_include_dirs[i], path);
+        realp = realpath(joined, NULL);
+        free(joined);
+      }
+    }
+
+    if (!realp) {
+      diag_setf("sirc.include.not_found", "@include not found: %s", path);
+      free(path);
+      return false;
+    }
   }
-  free(joined);
 
   if (include_stack_contains(realp)) {
     diag_setf("sirc.include.cycle", "@include cycle detected: %s", realp);
@@ -868,6 +944,8 @@ static void sirc_reset_compiler_state(void) {
   // Include stack (should be empty after a successful parse).
   free(g_root_realpath);
   g_root_realpath = NULL;
+  free(g_pkg_root_dir);
+  g_pkg_root_dir = NULL;
   free(g_inc);
   g_inc = NULL;
   g_inc_len = 0;
@@ -3659,6 +3737,8 @@ static void usage(FILE* out) {
           "  --print-support  Print supported syntax/features and exit\n"
           "  --format <jsonl|both>  Output format for compilation (default: jsonl)\n"
           "  --format <text|json>  Output format for --print-support (default: text)\n"
+          "  -I <dir>      Add an include search directory (repeatable)\n"
+          "  --include-dir <dir>  Same as -I\n"
           "  -o <path>     Write output JSONL to a file\n"
           "\n"
           "License: GPLv3+\n"
@@ -3741,6 +3821,10 @@ static int compile_one(const char* in_path, FILE* out) {
   free(g_root_realpath);
   g_root_realpath = realpath(in_path, NULL);
   g_emit.input_path = g_root_realpath ? g_root_realpath : in_path;
+
+  free(g_pkg_root_dir);
+  g_pkg_root_dir = find_package_root_dir(g_emit.input_path);
+
   g_emit.out = out;
   g_emit.next_type_id = 1;
   g_emit.next_node_id = 10;
@@ -3843,6 +3927,20 @@ int main(int argc, char** argv) {
       tool_mode = true;
       continue;
     }
+    if (strcmp(a, "-I") == 0 || strcmp(a, "--include-dir") == 0) {
+      if (i + 1 >= argc) die_at_last("sirc: %s requires a directory", a);
+      const char* d = argv[++i];
+      char* rd = realpath(d, NULL);
+      if (!rd) die_at_last("sirc: include dir not found: %s", d);
+      if (!is_dir(rd)) die_at_last("sirc: include dir is not a directory: %s", rd);
+      if (g_cli_include_dirs_len == g_cli_include_dirs_cap) {
+        g_cli_include_dirs_cap = g_cli_include_dirs_cap ? g_cli_include_dirs_cap * 2 : 8;
+        g_cli_include_dirs = (char**)realloc(g_cli_include_dirs, g_cli_include_dirs_cap * sizeof(char*));
+        if (!g_cli_include_dirs) die_at_last("sirc: out of memory");
+      }
+      g_cli_include_dirs[g_cli_include_dirs_len++] = rd; // owned
+      continue;
+    }
     if (strcmp(a, "-o") == 0) {
       if (i + 1 >= argc) die_at_last("sirc: -o requires a path");
       out_path = argv[++i];
@@ -3866,17 +3964,22 @@ int main(int argc, char** argv) {
     inputs[inputs_len++] = a;
   }
 
-  if (do_print_support) {
-    if (format) {
-      if (strcmp(format, "text") == 0) print_support_json = false;
-      else if (strcmp(format, "json") == 0) print_support_json = true;
-      else die_at_last("sirc: --print-support --format requires text|json (got %s)", format);
-    }
-    print_support(stdout, print_support_json);
-    free(out_path_owned);
-    free((void*)inputs);
-    return 0;
-  }
+	  if (do_print_support) {
+	    if (format) {
+	      if (strcmp(format, "text") == 0) print_support_json = false;
+	      else if (strcmp(format, "json") == 0) print_support_json = true;
+	      else die_at_last("sirc: --print-support --format requires text|json (got %s)", format);
+	    }
+	    print_support(stdout, print_support_json);
+	    for (size_t j = 0; j < g_cli_include_dirs_len; j++) free(g_cli_include_dirs[j]);
+	    free(g_cli_include_dirs);
+	    g_cli_include_dirs = NULL;
+	    g_cli_include_dirs_len = 0;
+	    g_cli_include_dirs_cap = 0;
+	    free(out_path_owned);
+	    free((void*)inputs);
+	    return 0;
+	  }
 
   if (format) {
     if (strcmp(format, "jsonl") == 0) {
@@ -3956,6 +4059,12 @@ int main(int argc, char** argv) {
 
 done:
   fclose(out);
+
+  for (size_t j = 0; j < g_cli_include_dirs_len; j++) free(g_cli_include_dirs[j]);
+  free(g_cli_include_dirs);
+  g_cli_include_dirs = NULL;
+  g_cli_include_dirs_len = 0;
+  g_cli_include_dirs_cap = 0;
 
   free(out_path_owned);
   free((void*)inputs);

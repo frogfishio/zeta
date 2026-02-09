@@ -1,0 +1,14 @@
+{"ir":"sir-v1.0","k":"meta","producer":"sirc","unit":"pkg_demo"}
+{"ir":"sir-v1.0","k":"src","id":"src:include/defs.sir.inc:4:1","file":"defs.sir.inc","line":4,"col":1,"text":"  return 7:i32"}
+{"ir":"sir-v1.0","k":"type","id":"prim:i32","kind":"prim","prim":"i32","loc":{"line":4,"col":1,"unit":"defs.sir.inc"},"src_ref":"src:include/defs.sir.inc:4:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:include/defs.sir.inc:5:1","file":"defs.sir.inc","line":5,"col":1,"text":"end"}
+{"ir":"sir-v1.0","k":"node","id":"defs:n:6a8e75aa:0000:0000","tag":"const.i32","type_ref":"prim:i32","fields":{"value":7},"loc":{"line":5,"col":1,"unit":"defs.sir.inc"},"src_ref":"src:include/defs.sir.inc:5:1"}
+{"ir":"sir-v1.0","k":"node","id":"defs:n:6a8e75aa:0000:0001","tag":"term.ret","fields":{"value":{"t":"ref","id":"defs:n:6a8e75aa:0000:0000"}},"loc":{"line":5,"col":1,"unit":"defs.sir.inc"},"src_ref":"src:include/defs.sir.inc:5:1"}
+{"ir":"sir-v1.0","k":"type","id":"fn()->prim:i32","kind":"fn","params":[],"ret":"prim:i32","loc":{"line":5,"col":1,"unit":"defs.sir.inc"},"src_ref":"src:include/defs.sir.inc:5:1"}
+{"ir":"sir-v1.0","k":"node","id":"defs:n:6a8e75aa:0000:0002","tag":"block","fields":{"stmts":[{"t":"ref","id":"defs:n:6a8e75aa:0000:0001"}]},"loc":{"line":5,"col":1,"unit":"defs.sir.inc"},"src_ref":"src:include/defs.sir.inc:5:1"}
+{"ir":"sir-v1.0","k":"node","id":"defs:n:6a8e75aa:0000:0003","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"helper","linkage":"local","params":[],"body":{"t":"ref","id":"defs:n:6a8e75aa:0000:0002"}},"loc":{"line":5,"col":1,"unit":"defs.sir.inc"},"src_ref":"src:include/defs.sir.inc:5:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:main.sir:8:1","file":"main.sir","line":8,"col":1,"text":"end"}
+{"ir":"sir-v1.0","k":"node","id":"pkg:n:6a8e75aa:0000:0000","tag":"call","type_ref":"prim:i32","fields":{"callee":{"t":"ref","id":"defs:n:6a8e75aa:0000:0003"},"args":[]},"loc":{"line":8,"col":1,"unit":"main.sir"},"src_ref":"src:main.sir:8:1"}
+{"ir":"sir-v1.0","k":"node","id":"pkg:n:6a8e75aa:0000:0001","tag":"term.ret","fields":{"value":{"t":"ref","id":"pkg:n:6a8e75aa:0000:0000"}},"loc":{"line":8,"col":1,"unit":"main.sir"},"src_ref":"src:main.sir:8:1"}
+{"ir":"sir-v1.0","k":"node","id":"pkg:n:6a8e75aa:0000:0002","tag":"block","fields":{"stmts":[{"t":"ref","id":"pkg:n:6a8e75aa:0000:0001"}]},"loc":{"line":8,"col":1,"unit":"main.sir"},"src_ref":"src:main.sir:8:1"}
+{"ir":"sir-v1.0","k":"node","id":"pkg:n:6a8e75aa:0000:0003","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","linkage":"public","params":[],"body":{"t":"ref","id":"pkg:n:6a8e75aa:0000:0002"}},"loc":{"line":8,"col":1,"unit":"main.sir"},"src_ref":"src:main.sir:8:1"}

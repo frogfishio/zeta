@@ -1,0 +1,9 @@
+unit pkg_demo target host
+@mod pkg
+
+@include "include/defs.sir.inc"
+
+fn main() -> i32 public
+  return helper()
+end
+
