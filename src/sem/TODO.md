@@ -230,11 +230,11 @@ Work items:
 
 ## P4 (later / optional packs)
 
-- [x] Atomics (partial): `atomic.load.i8/i16/i32/i64`, `atomic.store.i8/i16/i32/i64`, `atomic.rmw.{add,and,or,xor,xchg}.i32` (single-thread semantics; ordering validated, ignored)
-  - [ ] Extend RMW to other widths (`i8/i16/i64`) (blocked on wider integer op support in SEM bytecode)
-  - [x] `atomic.cmpxchg.i8/i16/i32` (returns old only; ok is derivable as `old==expected`; ordering validated, ignored)
-  - [ ] `atomic.cmpxchg.i64` (blocked on i64 compare support in SEM bytecode)
+- [x] Atomics: `atomic.load.i8/i16/i32/i64`, `atomic.store.i8/i16/i32/i64`, `atomic.rmw.{add,and,or,xor,xchg}.i8/i16/i32/i64`, `atomic.cmpxchg.i8/i16/i32/i64`
+  - Single-thread semantics: ordering is validated, ignored (no concurrency model yet).
+  - `atomic.*` results match `sircc`: ops return **old** only; ok is derivable as `old==expected`.
 - [x] SIMD/vectors (MVP): `load.vec`, `store.vec`, `vec.splat/add/cmp.eq/cmp.lt/select/extract/replace/shuffle` (scalar-lane execution; i32+bool lanes)
+  - [x] Enforce `align` (power-of-two; deterministic trap on misaligned when `align>1`) and accept/validate `vol` (ignored in SEM).
 - [ ] Coroutines: `coro.*`
 - [ ] Exceptions: `eh.*` + `term.invoke/throw/resume`
 - [ ] GC: `gc.*`
@@ -243,9 +243,9 @@ Work items:
 ## Tooling + tests (keeps us honest)
 
 - [x] Add a `sem --print-support [--json]` that reports supported mnemonics (SEM runner subset)
-- [ ] Add a “normative” SEM suite runner (single command)
-  - [ ] Run: parse+validate+execute known-good fixtures
-  - [ ] Include negative fixtures to lock diagnostics
+- [x] Add a “normative” SEM suite runner (single command): `sem --check <dir>... [--check-run]`
+  - [x] Run: parse+validate+execute known-good fixtures (`--check-run`)
+  - [ ] Include negative fixtures to lock diagnostics (verify-only failures with stable codes)
 - [ ] Add coverage-driven fixtures for tricky semantics
   - [ ] Switch fallthrough doesn’t exist (ensure single target)
   - [ ] Block-param correctness (overlapping src/dst slots; multi-arg joins)

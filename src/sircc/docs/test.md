@@ -12,12 +12,15 @@ $SIRCC --verify-only ./dist/test/examples/add.sir.jsonl
 $SIRCC ./dist/test/examples/mem_copy_fill.sir.jsonl -o /tmp/mem_copy_fill && /tmp/mem_copy_fill; echo $?
 $SIRCC ./dist/test/examples/cfg_if.sir.jsonl -o /tmp/cfg_if && /tmp/cfg_if; echo $?
 $SIRCC ./dist/test/examples/cfg_switch.sir.jsonl -o /tmp/cfg_switch && /tmp/cfg_switch; echo $?
-$SIRCC ./dist/test/examples/hello_world_puts.sir.jsonl -o /tmp/hello && /tmp/hello; echo $?
-$SIRCC ./dist/test/examples/interop_export_global_i32.sir.jsonl -o /tmp/interop_export_global_i32 && /tmp/interop_export_global_i32; echo $?
-$SIRCC ./dist/test/examples/atomic_basic_i32.sir.jsonl -o /tmp/atomic_basic_i32 && /tmp/atomic_basic_i32; echo $?
-$SIRCC ./dist/test/examples/simd_splat_extract.sir.jsonl -o /tmp/simd_splat_extract && /tmp/simd_splat_extract; echo $?
-$SIRCC ./dist/test/examples/simd_i32_add_extract_replace.sir.jsonl -o /tmp/simd_i32_add_extract_replace && /tmp/simd_i32_add_extract_replace; echo $?
-$SIRCC ./dist/test/examples/simd_cmp_select_bool_mask.sir.jsonl -o /tmp/simd_cmp_select_bool_mask && /tmp/simd_cmp_select_bool_mask; echo $?
+  $SIRCC ./dist/test/examples/hello_world_puts.sir.jsonl -o /tmp/hello && /tmp/hello; echo $?
+  $SIRCC ./dist/test/examples/interop_export_global_i32.sir.jsonl -o /tmp/interop_export_global_i32 && /tmp/interop_export_global_i32; echo $?
+  $SIRCC ./dist/test/examples/atomic_basic_i32.sir.jsonl -o /tmp/atomic_basic_i32 && /tmp/atomic_basic_i32; echo $?
+  $SIRCC ./dist/test/examples/atomic_basic_i64.sir.jsonl -o /tmp/atomic_basic_i64 && /tmp/atomic_basic_i64; echo $?
+  $SIRCC ./dist/test/examples/atomic_cmpxchg_i32.sir.jsonl -o /tmp/atomic_cmpxchg_i32 && /tmp/atomic_cmpxchg_i32; echo $?
+  $SIRCC ./dist/test/examples/atomic_cmpxchg_i64.sir.jsonl -o /tmp/atomic_cmpxchg_i64 && /tmp/atomic_cmpxchg_i64; echo $?
+  $SIRCC ./dist/test/examples/simd_splat_extract.sir.jsonl -o /tmp/simd_splat_extract && /tmp/simd_splat_extract; echo $?
+  $SIRCC ./dist/test/examples/simd_i32_add_extract_replace.sir.jsonl -o /tmp/simd_i32_add_extract_replace && /tmp/simd_i32_add_extract_replace; echo $?
+  $SIRCC ./dist/test/examples/simd_cmp_select_bool_mask.sir.jsonl -o /tmp/simd_cmp_select_bool_mask && /tmp/simd_cmp_select_bool_mask; echo $?
 $SIRCC ./dist/test/examples/simd_shuffle_two_inputs.sir.jsonl -o /tmp/simd_shuffle_two_inputs && /tmp/simd_shuffle_two_inputs; echo $?
 $SIRCC ./dist/test/examples/simd_f32_mul_nan_canon_bits.sir.jsonl -o /tmp/simd_f32_mul_nan_canon_bits && /tmp/simd_f32_mul_nan_canon_bits; echo $?
 $SIRCC ./dist/test/examples/fun_sym_call.sir.jsonl -o /tmp/fun_sym_call && /tmp/fun_sym_call; echo $?
@@ -50,6 +53,9 @@ Expected exit codes:
 - `hello_world_puts.sir.jsonl` → `0` (also prints a line via `puts`)
 - `interop_export_global_i32.sir.jsonl` → `42`
 - `atomic_basic_i32.sir.jsonl` → `124`
+- `atomic_basic_i64.sir.jsonl` → `124`
+- `atomic_cmpxchg_i32.sir.jsonl` → `25`
+- `atomic_cmpxchg_i64.sir.jsonl` → `25`
 - `simd_splat_extract.sir.jsonl` → `7`
 - `simd_i32_add_extract_replace.sir.jsonl` → `9`
 - `simd_cmp_select_bool_mask.sir.jsonl` → `7`
