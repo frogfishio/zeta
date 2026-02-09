@@ -1,0 +1,5 @@
+@include "types.sir"
+
+fn b_id() -> i32
+  return 2:i32
+end

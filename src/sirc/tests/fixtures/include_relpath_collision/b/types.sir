@@ -1,0 +1,5 @@
+type I32Sig = fn() -> i32
+
+fn t0() -> i32
+	return 0:i32
+end

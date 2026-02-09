@@ -593,6 +593,42 @@ static void stable_hash_cache_invalidate(void) {
   g_emit.last_line_occ = 0;
 }
 
+static char* stable_file_key_for_include_realpath(const char* include_realpath) {
+  if (!include_realpath || !include_realpath[0]) return xstrdup("?");
+
+  // Prefer a package-root-relative key when the entry file is in a package.
+  if (g_pkg_root_dir && g_pkg_root_dir[0]) {
+    const size_t n = strlen(g_pkg_root_dir);
+    if (strncmp(include_realpath, g_pkg_root_dir, n) == 0 && (include_realpath[n] == '/' || include_realpath[n] == 0)) {
+      const char* rel = include_realpath + n;
+      if (rel[0] == '/') rel++;
+      if (rel[0]) return xstrdup(rel);
+    }
+  }
+
+  // Otherwise, try making it relative to the root input file directory.
+  if (g_root_realpath && g_root_realpath[0]) {
+    char* root_dir = dirname_dup(g_root_realpath);
+    if (root_dir && root_dir[0]) {
+      const size_t n = strlen(root_dir);
+      if (strncmp(include_realpath, root_dir, n) == 0 && (include_realpath[n] == '/' || include_realpath[n] == 0)) {
+        const char* rel = include_realpath + n;
+        if (rel[0] == '/') rel++;
+        if (rel[0]) {
+          char* out = xstrdup(rel);
+          free(root_dir);
+          return out;
+        }
+      }
+    }
+    free(root_dir);
+  }
+
+  // Last resort: use the full resolved path. (This is only used for stable hashing;
+  // it is never emitted in the JSONL output.)
+  return xstrdup(include_realpath);
+}
+
 static void include_frame_pop(void) {
   if (!g_inc_len) return;
   SircIncludeFrame fr = g_inc[--g_inc_len];
@@ -744,7 +780,10 @@ bool sirc_include_file(char* path) {
 
   // Switch compilation context to the included file.
   g_emit.input_path = fr->path;
-  g_emit.file_key = path; // take ownership; used only for stable hashing
+  // The include token string may be ambiguous (same token can resolve to different files
+  // depending on the including file directory). Use the resolved path for file_key.
+  g_emit.file_key = stable_file_key_for_include_realpath(fr->path);
+  free(path);
   yylineno = 1;
   yycolumn = 1;
 
@@ -757,6 +796,26 @@ static uint32_t fnv1a32(const void* data, size_t n) {
   uint32_t h = 2166136261u;
   for (size_t i = 0; i < n; i++) {
     h ^= (uint32_t)p[i];
+    h *= 16777619u;
+  }
+  return h;
+}
+
+static uint32_t fnv1a32_3(const void* a, size_t na, const void* b, size_t nb, const void* c, size_t nc) {
+  const unsigned char* pa = (const unsigned char*)a;
+  const unsigned char* pb = (const unsigned char*)b;
+  const unsigned char* pc = (const unsigned char*)c;
+  uint32_t h = 2166136261u;
+  for (size_t i = 0; i < na; i++) {
+    h ^= (uint32_t)pa[i];
+    h *= 16777619u;
+  }
+  for (size_t i = 0; i < nb; i++) {
+    h ^= (uint32_t)pb[i];
+    h *= 16777619u;
+  }
+  for (size_t i = 0; i < nc; i++) {
+    h ^= (uint32_t)pc[i];
     h *= 16777619u;
   }
   return h;
@@ -836,7 +895,15 @@ static uint32_t stable_hash_for_current_line(void) {
     free(raw);
   }
 
+  // Base hash is the normalized source line.
   g_emit.last_line_hash = fnv1a32(g_emit.last_line_norm, strlen(g_emit.last_line_norm));
+
+  // For included files, incorporate file_key into the visible stable id hash so
+  // identical lines in different files cannot collide.
+  if (g_inc_len && g_emit.file_key && g_emit.file_key[0]) {
+    const char sep = '\n';
+    g_emit.last_line_hash = fnv1a32_3(g_emit.file_key, strlen(g_emit.file_key), &sep, 1, g_emit.last_line_norm, strlen(g_emit.last_line_norm));
+  }
 
   const uint32_t fh = fnv1a32(g_emit.file_key ? g_emit.file_key : "", g_emit.file_key ? strlen(g_emit.file_key) : 0);
   const uint64_t key = (((uint64_t)fh) << 32) | (uint64_t)g_emit.last_line_hash;

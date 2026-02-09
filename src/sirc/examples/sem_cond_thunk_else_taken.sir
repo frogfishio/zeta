@@ -1,0 +1,21 @@
+unit u0 target host +fun:v1 +sem:v1
+
+type I32Sig = fn() -> i32
+type I32Fun = fun(I32Sig)
+
+fn good() -> i32
+  return 7:i32
+end
+
+fn also_good() -> i32
+  return 9:i32
+end
+
+fn main() -> i32 public
+  let c: bool = false
+  return sem.cond(
+    c,
+    thunk fun.sym() name="good" as I32Fun,
+    thunk fun.sym() name="also_good" as I32Fun
+  ) as i32
+end

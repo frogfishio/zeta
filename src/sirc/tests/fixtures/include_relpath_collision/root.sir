@@ -1,0 +1,9 @@
+unit include_relpath_collision target host
+@mod main
+
+@include "a/a.sir"
+@include "b/b.sir"
+
+fn main() -> i32 public
+  return 0:i32
+end

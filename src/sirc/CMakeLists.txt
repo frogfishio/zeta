@@ -255,6 +255,9 @@ if(TARGET sircc)
   sirc_add_verify_test(sirc_verify_adt_make_get examples/adt_make_get.sir)
   sirc_add_verify_test(sirc_verify_sem_if_val_val examples/sem_if_val_val.sir)
   sirc_add_verify_test(sirc_verify_sem_if_thunk_trap_not_taken examples/sem_if_thunk_trap_not_taken.sir)
+  sirc_add_verify_test(sirc_verify_sem_cond_val_val examples/sem_cond_val_val.sir)
+  sirc_add_verify_test(sirc_verify_sem_cond_thunk_trap_not_taken examples/sem_cond_thunk_trap_not_taken.sir)
+  sirc_add_verify_test(sirc_verify_sem_cond_thunk_else_taken examples/sem_cond_thunk_else_taken.sir)
   sirc_add_verify_test(sirc_verify_sem_and_or_sc examples/sem_and_or_sc.sir)
   sirc_add_verify_test(sirc_verify_sem_switch_thunk examples/sem_switch_thunk.sir)
   sirc_add_verify_test(sirc_verify_sem_match_sum_payload_thunk examples/sem_match_sum_payload_thunk.sir)
@@ -263,6 +266,10 @@ if(TARGET sircc)
   sirc_add_verify_test(sirc_verify_sem_scope_cfg examples/sem_scope_cfg.sir)
   sirc_add_verify_test(sirc_verify_sendloop_mono examples/sendloop_mono.sir)
   sirc_add_verify_test(sirc_verify_sendloop_uniform examples/sendloop_uniform.sir)
+
+  # Regression: stable IDs must not collide when the same relative include token resolves to
+  # different files based on including directory.
+  sirc_add_verify_test(sirc_verify_include_relpath_collision tests/fixtures/include_relpath_collision/root.sir)
 
   add_test(
     NAME sirc_lint_add
