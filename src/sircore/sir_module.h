@@ -159,6 +159,12 @@ typedef enum sir_inst_kind {
   SIR_INST_SWITCH,
   SIR_INST_MEM_COPY,
   SIR_INST_MEM_FILL,
+  // Atomics (single-thread semantics; used by sem lowering)
+  SIR_INST_ATOMIC_RMW_I8,
+  SIR_INST_ATOMIC_RMW_I16,
+  SIR_INST_ATOMIC_RMW_I32,
+  SIR_INST_ATOMIC_RMW_I64,
+  SIR_INST_ATOMIC_CMPXCHG_I64, // returns old only; ok is derivable as (old == expected)
   SIR_INST_ALLOCA,
   SIR_INST_STORE_I8,
   SIR_INST_STORE_I16,
@@ -185,6 +191,15 @@ typedef enum sir_inst_kind {
   SIR_INST_EXIT,
   SIR_INST_EXIT_VAL, // exits with i32 value in slot
 } sir_inst_kind_t;
+
+typedef enum sir_atomic_rmw_op {
+  SIR_ATOMIC_RMW_INVALID = 0,
+  SIR_ATOMIC_RMW_ADD,
+  SIR_ATOMIC_RMW_AND,
+  SIR_ATOMIC_RMW_OR,
+  SIR_ATOMIC_RMW_XOR,
+  SIR_ATOMIC_RMW_XCHG,
+} sir_atomic_rmw_op_t;
 
 typedef struct sir_inst {
   sir_inst_kind_t k;
@@ -351,6 +366,20 @@ typedef struct sir_inst {
       sir_val_id_t byte;
       sir_val_id_t len;
     } mem_fill;
+    struct {
+      sir_val_id_t addr;
+      sir_val_id_t value;
+      sir_atomic_rmw_op_t op;
+      uint32_t align;
+      sir_val_id_t dst_old;
+    } atomic_rmw;
+    struct {
+      sir_val_id_t addr;
+      sir_val_id_t expected;
+      sir_val_id_t desired;
+      uint32_t align;
+      sir_val_id_t dst_old;
+    } atomic_cmpxchg_i64;
     struct {
       uint32_t size;
       uint32_t align;
@@ -525,6 +554,16 @@ bool sir_mb_emit_switch(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t s
                         uint32_t case_count, uint32_t default_ip, uint32_t* out_ip);
 bool sir_mb_emit_mem_copy(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst, sir_val_id_t src, sir_val_id_t len, bool overlap_allow);
 bool sir_mb_emit_mem_fill(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst, sir_val_id_t byte, sir_val_id_t len);
+bool sir_mb_emit_atomic_rmw_i8(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst_old, sir_val_id_t addr, sir_val_id_t value,
+                               sir_atomic_rmw_op_t op, uint32_t align);
+bool sir_mb_emit_atomic_rmw_i16(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst_old, sir_val_id_t addr, sir_val_id_t value,
+                                sir_atomic_rmw_op_t op, uint32_t align);
+bool sir_mb_emit_atomic_rmw_i32(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst_old, sir_val_id_t addr, sir_val_id_t value,
+                                sir_atomic_rmw_op_t op, uint32_t align);
+bool sir_mb_emit_atomic_rmw_i64(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst_old, sir_val_id_t addr, sir_val_id_t value,
+                                sir_atomic_rmw_op_t op, uint32_t align);
+bool sir_mb_emit_atomic_cmpxchg_i64(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst_old, sir_val_id_t addr, sir_val_id_t expected,
+                                    sir_val_id_t desired, uint32_t align);
 bool sir_mb_emit_alloca(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst, uint32_t size, uint32_t align);
 bool sir_mb_emit_store_i8(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t addr, sir_val_id_t value, uint32_t align);
 bool sir_mb_emit_store_i16(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t addr, sir_val_id_t value, uint32_t align);

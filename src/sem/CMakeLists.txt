@@ -1188,6 +1188,38 @@ target_compile_options(sem_unit_run_atomic_cmpxchg_i32 PRIVATE -Wall -Wextra -Wp
 
 add_test(NAME sem_run_atomic_cmpxchg_i32 COMMAND sem_unit_run_atomic_cmpxchg_i32)
 
+add_executable(sem_unit_run_atomic_basic_i64
+  tests/test_run_atomic_basic_i64.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_atomic_basic_i64 PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_atomic_basic_i64 PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_atomic_basic_i64 PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_atomic_basic_i64 PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_atomic_basic_i64 PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_atomic_basic_i64 COMMAND sem_unit_run_atomic_basic_i64)
+
+add_executable(sem_unit_run_atomic_cmpxchg_i64
+  tests/test_run_atomic_cmpxchg_i64.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_atomic_cmpxchg_i64 PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_atomic_cmpxchg_i64 PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_atomic_cmpxchg_i64 PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_atomic_cmpxchg_i64 PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_atomic_cmpxchg_i64 PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_atomic_cmpxchg_i64 COMMAND sem_unit_run_atomic_cmpxchg_i64)
+
 add_executable(sem_unit_run_simd_i32_add_extract_replace
   tests/test_run_simd_i32_add_extract_replace.c
   sem_hosted.c
@@ -1203,6 +1235,22 @@ target_link_libraries(sem_unit_run_simd_i32_add_extract_replace PRIVATE sircore_
 target_compile_options(sem_unit_run_simd_i32_add_extract_replace PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 add_test(NAME sem_run_simd_i32_add_extract_replace COMMAND sem_unit_run_simd_i32_add_extract_replace)
+
+add_executable(sem_unit_run_simd_load_vec_misaligned_traps
+  tests/test_run_simd_load_vec_misaligned_traps.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_simd_load_vec_misaligned_traps PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_simd_load_vec_misaligned_traps PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_simd_load_vec_misaligned_traps PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_simd_load_vec_misaligned_traps PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_simd_load_vec_misaligned_traps PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_simd_load_vec_misaligned_traps COMMAND sem_unit_run_simd_load_vec_misaligned_traps)
 
 add_executable(sem_unit_run_simd_splat_extract_load_store_vec
   tests/test_run_simd_splat_extract_load_store_vec.c

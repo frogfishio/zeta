@@ -921,6 +921,56 @@ bool sir_mb_emit_mem_fill(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t
   return emit_inst(b, f, i);
 }
 
+static bool emit_atomic_rmw(sir_module_builder_t* b, sir_func_id_t f, sir_inst_kind_t k, sir_val_id_t dst_old, sir_val_id_t addr, sir_val_id_t value,
+                            sir_atomic_rmw_op_t op, uint32_t align) {
+  if (!b) return false;
+  sir_inst_t i = {0};
+  i.k = k;
+  i.result_count = 1;
+  i.results[0] = dst_old;
+  i.u.atomic_rmw.dst_old = dst_old;
+  i.u.atomic_rmw.addr = addr;
+  i.u.atomic_rmw.value = value;
+  i.u.atomic_rmw.op = op;
+  i.u.atomic_rmw.align = align ? align : 1u;
+  return emit_inst(b, f, i);
+}
+
+bool sir_mb_emit_atomic_rmw_i8(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst_old, sir_val_id_t addr, sir_val_id_t value,
+                               sir_atomic_rmw_op_t op, uint32_t align) {
+  return emit_atomic_rmw(b, f, SIR_INST_ATOMIC_RMW_I8, dst_old, addr, value, op, align);
+}
+
+bool sir_mb_emit_atomic_rmw_i16(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst_old, sir_val_id_t addr, sir_val_id_t value,
+                                sir_atomic_rmw_op_t op, uint32_t align) {
+  return emit_atomic_rmw(b, f, SIR_INST_ATOMIC_RMW_I16, dst_old, addr, value, op, align);
+}
+
+bool sir_mb_emit_atomic_rmw_i32(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst_old, sir_val_id_t addr, sir_val_id_t value,
+                                sir_atomic_rmw_op_t op, uint32_t align) {
+  return emit_atomic_rmw(b, f, SIR_INST_ATOMIC_RMW_I32, dst_old, addr, value, op, align);
+}
+
+bool sir_mb_emit_atomic_rmw_i64(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst_old, sir_val_id_t addr, sir_val_id_t value,
+                                sir_atomic_rmw_op_t op, uint32_t align) {
+  return emit_atomic_rmw(b, f, SIR_INST_ATOMIC_RMW_I64, dst_old, addr, value, op, align);
+}
+
+bool sir_mb_emit_atomic_cmpxchg_i64(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst_old, sir_val_id_t addr, sir_val_id_t expected,
+                                    sir_val_id_t desired, uint32_t align) {
+  if (!b) return false;
+  sir_inst_t i = {0};
+  i.k = SIR_INST_ATOMIC_CMPXCHG_I64;
+  i.result_count = 1;
+  i.results[0] = dst_old;
+  i.u.atomic_cmpxchg_i64.dst_old = dst_old;
+  i.u.atomic_cmpxchg_i64.addr = addr;
+  i.u.atomic_cmpxchg_i64.expected = expected;
+  i.u.atomic_cmpxchg_i64.desired = desired;
+  i.u.atomic_cmpxchg_i64.align = align ? align : 1u;
+  return emit_inst(b, f, i);
+}
+
 bool sir_mb_emit_alloca(sir_module_builder_t* b, sir_func_id_t f, sir_val_id_t dst, uint32_t size, uint32_t align) {
   sir_inst_t i = {0};
   i.k = SIR_INST_ALLOCA;
@@ -1728,6 +1778,35 @@ bool sir_module_validate(const sir_module_t* m, char* err, size_t err_cap) {
         case SIR_INST_MEM_FILL:
           if (inst->u.mem_fill.dst >= vc || inst->u.mem_fill.byte >= vc || inst->u.mem_fill.len >= vc) {
             set_err(err, err_cap, "mem.fill operand out of range");
+            return false;
+          }
+          break;
+        case SIR_INST_ATOMIC_RMW_I8:
+        case SIR_INST_ATOMIC_RMW_I16:
+        case SIR_INST_ATOMIC_RMW_I32:
+        case SIR_INST_ATOMIC_RMW_I64:
+          if (inst->u.atomic_rmw.dst_old >= vc || inst->u.atomic_rmw.addr >= vc || inst->u.atomic_rmw.value >= vc) {
+            set_err(err, err_cap, "atomic.rmw operand out of range");
+            return false;
+          }
+          if (!is_pow2_u32(inst->u.atomic_rmw.align)) {
+            set_err(err, err_cap, "atomic.rmw align must be a power of two");
+            return false;
+          }
+          if (!(inst->u.atomic_rmw.op == SIR_ATOMIC_RMW_ADD || inst->u.atomic_rmw.op == SIR_ATOMIC_RMW_AND || inst->u.atomic_rmw.op == SIR_ATOMIC_RMW_OR ||
+                inst->u.atomic_rmw.op == SIR_ATOMIC_RMW_XOR || inst->u.atomic_rmw.op == SIR_ATOMIC_RMW_XCHG)) {
+            set_err(err, err_cap, "atomic.rmw op invalid");
+            return false;
+          }
+          break;
+        case SIR_INST_ATOMIC_CMPXCHG_I64:
+          if (inst->u.atomic_cmpxchg_i64.dst_old >= vc || inst->u.atomic_cmpxchg_i64.addr >= vc || inst->u.atomic_cmpxchg_i64.expected >= vc ||
+              inst->u.atomic_cmpxchg_i64.desired >= vc) {
+            set_err(err, err_cap, "atomic.cmpxchg.i64 operand out of range");
+            return false;
+          }
+          if (!is_pow2_u32(inst->u.atomic_cmpxchg_i64.align)) {
+            set_err(err, err_cap, "atomic.cmpxchg.i64 align must be a power of two");
             return false;
           }
           break;
@@ -3080,6 +3159,189 @@ static int32_t exec_func(const sir_module_t* m, sem_guest_mem_t* mem, sir_host_t
         ip++;
         break;
       }
+      case SIR_INST_ATOMIC_RMW_I8:
+      case SIR_INST_ATOMIC_RMW_I16:
+      case SIR_INST_ATOMIC_RMW_I32:
+      case SIR_INST_ATOMIC_RMW_I64: {
+        const sir_val_id_t a = i->u.atomic_rmw.addr;
+        const sir_val_id_t v = i->u.atomic_rmw.value;
+        const sir_val_id_t dst = i->u.atomic_rmw.dst_old;
+        if (a >= f->value_count || v >= f->value_count || dst >= f->value_count) {
+          free(vals);
+          return ZI_E_BOUNDS;
+        }
+        const sir_value_t av = vals[a];
+        if (av.kind != SIR_VAL_PTR) {
+          free(vals);
+          return ZI_E_INVALID;
+        }
+        const uint32_t align = i->u.atomic_rmw.align ? i->u.atomic_rmw.align : 1u;
+        if (!is_pow2_u32(align)) {
+          free(vals);
+          return ZI_E_INVALID;
+        }
+        if (align > 1u) {
+          const uint64_t addr = (uint64_t)av.u.ptr;
+          if ((addr & (uint64_t)(align - 1u)) != 0ull) {
+            free(vals);
+            return 256;
+          }
+        }
+
+        uint32_t size = 0;
+        sir_val_kind_t want = SIR_VAL_INVALID;
+        if (i->k == SIR_INST_ATOMIC_RMW_I8) {
+          size = 1;
+          want = SIR_VAL_I8;
+        } else if (i->k == SIR_INST_ATOMIC_RMW_I16) {
+          size = 2;
+          want = SIR_VAL_I16;
+        } else if (i->k == SIR_INST_ATOMIC_RMW_I32) {
+          size = 4;
+          want = SIR_VAL_I32;
+        } else {
+          size = 8;
+          want = SIR_VAL_I64;
+        }
+        const sir_value_t vv = vals[v];
+        if (vv.kind != want) {
+          free(vals);
+          return ZI_E_INVALID;
+        }
+
+        uint8_t* w = NULL;
+        if (!sem_guest_mem_map_rw(mem, av.u.ptr, (zi_size32_t)size, &w) || !w) {
+          free(vals);
+          return ZI_E_BOUNDS;
+        }
+        if (sink && sink->on_mem) sink->on_mem(sink->user, m, fid, ip, SIR_MEM_READ, av.u.ptr, size);
+
+        sir_value_t old = {0};
+        old.kind = want;
+        if (size == 1) {
+          uint8_t x = 0;
+          memcpy(&x, w, 1);
+          old.u.u8 = x;
+          uint8_t nv = x;
+          switch (i->u.atomic_rmw.op) {
+            case SIR_ATOMIC_RMW_ADD: nv = (uint8_t)(x + vv.u.u8); break;
+            case SIR_ATOMIC_RMW_AND: nv = (uint8_t)(x & vv.u.u8); break;
+            case SIR_ATOMIC_RMW_OR: nv = (uint8_t)(x | vv.u.u8); break;
+            case SIR_ATOMIC_RMW_XOR: nv = (uint8_t)(x ^ vv.u.u8); break;
+            case SIR_ATOMIC_RMW_XCHG: nv = vv.u.u8; break;
+            default:
+              free(vals);
+              return ZI_E_INVALID;
+          }
+          if (sink && sink->on_mem) sink->on_mem(sink->user, m, fid, ip, SIR_MEM_WRITE, av.u.ptr, 1);
+          memcpy(w, &nv, 1);
+        } else if (size == 2) {
+          uint16_t x = 0;
+          memcpy(&x, w, 2);
+          old.u.u16 = x;
+          uint16_t nv = x;
+          switch (i->u.atomic_rmw.op) {
+            case SIR_ATOMIC_RMW_ADD: nv = (uint16_t)(x + vv.u.u16); break;
+            case SIR_ATOMIC_RMW_AND: nv = (uint16_t)(x & vv.u.u16); break;
+            case SIR_ATOMIC_RMW_OR: nv = (uint16_t)(x | vv.u.u16); break;
+            case SIR_ATOMIC_RMW_XOR: nv = (uint16_t)(x ^ vv.u.u16); break;
+            case SIR_ATOMIC_RMW_XCHG: nv = vv.u.u16; break;
+            default:
+              free(vals);
+              return ZI_E_INVALID;
+          }
+          if (sink && sink->on_mem) sink->on_mem(sink->user, m, fid, ip, SIR_MEM_WRITE, av.u.ptr, 2);
+          memcpy(w, &nv, 2);
+        } else if (size == 4) {
+          int32_t x = 0;
+          memcpy(&x, w, 4);
+          old.u.i32 = x;
+          uint32_t xo = (uint32_t)x;
+          uint32_t xv = (uint32_t)vv.u.i32;
+          uint32_t nv = xo;
+          switch (i->u.atomic_rmw.op) {
+            case SIR_ATOMIC_RMW_ADD: nv = xo + xv; break;
+            case SIR_ATOMIC_RMW_AND: nv = xo & xv; break;
+            case SIR_ATOMIC_RMW_OR: nv = xo | xv; break;
+            case SIR_ATOMIC_RMW_XOR: nv = xo ^ xv; break;
+            case SIR_ATOMIC_RMW_XCHG: nv = xv; break;
+            default:
+              free(vals);
+              return ZI_E_INVALID;
+          }
+          const int32_t out = (int32_t)nv;
+          if (sink && sink->on_mem) sink->on_mem(sink->user, m, fid, ip, SIR_MEM_WRITE, av.u.ptr, 4);
+          memcpy(w, &out, 4);
+        } else {
+          int64_t x = 0;
+          memcpy(&x, w, 8);
+          old.u.i64 = x;
+          uint64_t xo = (uint64_t)x;
+          uint64_t xv = (uint64_t)vv.u.i64;
+          uint64_t nv = xo;
+          switch (i->u.atomic_rmw.op) {
+            case SIR_ATOMIC_RMW_ADD: nv = xo + xv; break;
+            case SIR_ATOMIC_RMW_AND: nv = xo & xv; break;
+            case SIR_ATOMIC_RMW_OR: nv = xo | xv; break;
+            case SIR_ATOMIC_RMW_XOR: nv = xo ^ xv; break;
+            case SIR_ATOMIC_RMW_XCHG: nv = xv; break;
+            default:
+              free(vals);
+              return ZI_E_INVALID;
+          }
+          const int64_t out = (int64_t)nv;
+          if (sink && sink->on_mem) sink->on_mem(sink->user, m, fid, ip, SIR_MEM_WRITE, av.u.ptr, 8);
+          memcpy(w, &out, 8);
+        }
+
+        vals[dst] = old;
+        ip++;
+        break;
+      }
+      case SIR_INST_ATOMIC_CMPXCHG_I64: {
+        const sir_val_id_t a = i->u.atomic_cmpxchg_i64.addr;
+        const sir_val_id_t e = i->u.atomic_cmpxchg_i64.expected;
+        const sir_val_id_t d = i->u.atomic_cmpxchg_i64.desired;
+        const sir_val_id_t dst = i->u.atomic_cmpxchg_i64.dst_old;
+        if (a >= f->value_count || e >= f->value_count || d >= f->value_count || dst >= f->value_count) {
+          free(vals);
+          return ZI_E_BOUNDS;
+        }
+        const sir_value_t av = vals[a];
+        const sir_value_t ev = vals[e];
+        const sir_value_t dv = vals[d];
+        if (av.kind != SIR_VAL_PTR || ev.kind != SIR_VAL_I64 || dv.kind != SIR_VAL_I64) {
+          free(vals);
+          return ZI_E_INVALID;
+        }
+        const uint32_t align = i->u.atomic_cmpxchg_i64.align ? i->u.atomic_cmpxchg_i64.align : 1u;
+        if (!is_pow2_u32(align)) {
+          free(vals);
+          return ZI_E_INVALID;
+        }
+        if (align > 1u) {
+          const uint64_t addr = (uint64_t)av.u.ptr;
+          if ((addr & (uint64_t)(align - 1u)) != 0ull) {
+            free(vals);
+            return 256;
+          }
+        }
+        uint8_t* w = NULL;
+        if (!sem_guest_mem_map_rw(mem, av.u.ptr, 8, &w) || !w) {
+          free(vals);
+          return ZI_E_BOUNDS;
+        }
+        if (sink && sink->on_mem) sink->on_mem(sink->user, m, fid, ip, SIR_MEM_READ, av.u.ptr, 8);
+        int64_t old = 0;
+        memcpy(&old, w, 8);
+        if (old == ev.u.i64) {
+          if (sink && sink->on_mem) sink->on_mem(sink->user, m, fid, ip, SIR_MEM_WRITE, av.u.ptr, 8);
+          memcpy(w, &dv.u.i64, 8);
+        }
+        vals[dst] = (sir_value_t){.kind = SIR_VAL_I64, .u.i64 = old};
+        ip++;
+        break;
+      }
       case SIR_INST_ALLOCA: {
         const sir_val_id_t dst = i->u.alloca_.dst;
         if (dst >= f->value_count) {
@@ -3555,6 +3817,16 @@ const char* sir_inst_kind_name(sir_inst_kind_t k) {
       return "mem.copy";
     case SIR_INST_MEM_FILL:
       return "mem.fill";
+    case SIR_INST_ATOMIC_RMW_I8:
+      return "atomic.rmw.i8";
+    case SIR_INST_ATOMIC_RMW_I16:
+      return "atomic.rmw.i16";
+    case SIR_INST_ATOMIC_RMW_I32:
+      return "atomic.rmw.i32";
+    case SIR_INST_ATOMIC_RMW_I64:
+      return "atomic.rmw.i64";
+    case SIR_INST_ATOMIC_CMPXCHG_I64:
+      return "atomic.cmpxchg.i64";
     case SIR_INST_ALLOCA:
       return "alloca";
     case SIR_INST_STORE_I8:

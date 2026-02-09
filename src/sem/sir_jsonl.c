@@ -96,11 +96,23 @@ typedef struct sirj_idmap_entry {
   const char* str;
 } sirj_idmap_entry_t;
 
+typedef struct sirj_idraw {
+  bool present;
+  bool is_num;
+  uint32_t num;
+  const char* str;
+} sirj_idraw_t;
+
 typedef struct sirj_idmap {
   sirj_idmap_entry_t* entries;
   uint32_t cap; // power-of-two
   uint32_t len;
   uint32_t next_id;
+
+  // Reverse mapping for diagnostics: interned id -> original token.
+  // (Token is either a u32 or a string; stored as pointer to JSON-owned string.)
+  sirj_idraw_t* raw_by_id; // indexed by interned id (0 unused)
+  uint32_t raw_cap;
 } sirj_idmap_t;
 
 typedef struct sirj_ctx {
@@ -426,6 +438,7 @@ static void ctx_dispose(sirj_ctx_t* c) {
     c->mb = NULL;
   }
   free(c->ids.entries);
+  free(c->ids.raw_by_id);
   free(c->types);
   free(c->nodes);
   free(c->syms);
@@ -529,6 +542,21 @@ static bool sirj_ids_grow(sirj_idmap_t* m) {
   return true;
 }
 
+static bool sirj_ids_raw_ensure(sirj_idmap_t* m, uint32_t need_id_inclusive) {
+  if (!m) return false;
+  // need_id_inclusive is the maximum interned id we need to store (>=1).
+  const uint32_t need = need_id_inclusive + 1u; // include index itself, 0 unused
+  if (need <= m->raw_cap) return true;
+  uint32_t ncap = m->raw_cap ? m->raw_cap : 256u;
+  while (ncap < need) ncap *= 2u;
+  sirj_idraw_t* nr = (sirj_idraw_t*)realloc(m->raw_by_id, (size_t)ncap * sizeof(sirj_idraw_t));
+  if (!nr) return false;
+  memset(nr + m->raw_cap, 0, (size_t)(ncap - m->raw_cap) * sizeof(sirj_idraw_t));
+  m->raw_by_id = nr;
+  m->raw_cap = ncap;
+  return true;
+}
+
 static bool sirj_intern_id(sirj_ctx_t* c, const JsonValue* v, uint32_t* out_id) {
   if (!c || !out_id) return false;
   if (!v) return false;
@@ -568,8 +596,10 @@ static bool sirj_intern_id(sirj_ctx_t* c, const JsonValue* v, uint32_t* out_id) 
     sirj_idmap_entry_t* e = &c->ids.entries[idx];
     if (!e->id) {
       const uint32_t nid = c->ids.next_id++;
+      if (!sirj_ids_raw_ensure(&c->ids, nid)) return false;
       *e = (sirj_idmap_entry_t){.h = h, .id = nid, .is_num = is_num, .num = num, .str = str};
       c->ids.len++;
+      c->ids.raw_by_id[nid] = (sirj_idraw_t){.present = true, .is_num = is_num, .num = num, .str = str};
       *out_id = nid;
       return true;
     }
@@ -588,6 +618,44 @@ static bool sirj_intern_id(sirj_ctx_t* c, const JsonValue* v, uint32_t* out_id) 
     }
     idx = (idx + 1u) & mask;
   }
+}
+
+static bool sirj_unintern_id(const sirj_ctx_t* c, uint32_t intern_id, bool* out_is_num, uint32_t* out_num, const char** out_str) {
+  if (!c || !out_is_num || !out_num || !out_str) return false;
+  *out_is_num = false;
+  *out_num = 0;
+  *out_str = NULL;
+  if (intern_id == 0) return true;
+  if (intern_id >= c->ids.raw_cap) return false;
+  const sirj_idraw_t* r = &c->ids.raw_by_id[intern_id];
+  if (!r->present) return false;
+  *out_is_num = r->is_num;
+  *out_num = r->num;
+  *out_str = r->str;
+  return true;
+}
+
+static void sem_emit_node_field_json(FILE* out, const sirj_ctx_t* c, uint32_t intern_node_id) {
+  if (!out || !intern_node_id) return;
+  if (!c) {
+    fprintf(out, ",\"node\":%u", (unsigned)intern_node_id);
+    return;
+  }
+  bool is_num = false;
+  uint32_t num = 0;
+  const char* str = NULL;
+  if (!sirj_unintern_id(c, intern_node_id, &is_num, &num, &str)) {
+    fprintf(out, ",\"node\":%u", (unsigned)intern_node_id);
+    return;
+  }
+  if (is_num) {
+    fprintf(out, ",\"node\":%u", (unsigned)num);
+  } else {
+    fprintf(out, ",\"node\":\"");
+    sem_json_write_escaped(out, str ? str : "");
+    fprintf(out, "\"");
+  }
+  fprintf(out, ",\"node_intern\":%u", (unsigned)intern_node_id);
 }
 
 static bool json_get_bool(const JsonValue* v, bool* out) {
@@ -2308,9 +2376,35 @@ static bool eval_atomic_store_i64_stmt(sirj_ctx_t* c, uint32_t stmt_id, const no
   return sir_mb_emit_store_i64(c->mb, c->fn, addr_slot, val_slot, align);
 }
 
-static bool eval_atomic_rmw_i32(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, const char* op, sir_val_id_t* out_slot,
-                                val_kind_t* out_kind) {
-  if (!c || !n || !op || !out_slot || !out_kind) return false;
+static bool atomic_rmw_op_from_str(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, const char* op_str, sir_atomic_rmw_op_t* out_op) {
+  if (!c || !n || !op_str || !out_op) return false;
+  if (strcmp(op_str, "add") == 0) {
+    *out_op = SIR_ATOMIC_RMW_ADD;
+    return true;
+  }
+  if (strcmp(op_str, "and") == 0) {
+    *out_op = SIR_ATOMIC_RMW_AND;
+    return true;
+  }
+  if (strcmp(op_str, "or") == 0) {
+    *out_op = SIR_ATOMIC_RMW_OR;
+    return true;
+  }
+  if (strcmp(op_str, "xor") == 0) {
+    *out_op = SIR_ATOMIC_RMW_XOR;
+    return true;
+  }
+  if (strcmp(op_str, "xchg") == 0) {
+    *out_op = SIR_ATOMIC_RMW_XCHG;
+    return true;
+  }
+  sirj_diag_setf(c, "sem.atomic.rmw.op", c->cur_path, n->loc_line, node_id, n->tag, "%s unsupported rmw op '%s'", n->tag, op_str);
+  return false;
+}
+
+static bool eval_atomic_rmw(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, const char* op_str, val_kind_t rk, uint32_t natural_align,
+                            sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !op_str || !out_slot || !out_kind) return false;
   if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
   const JsonValue* av = json_obj_get(n->fields_obj, "args");
   if (!json_is_array(av) || av->v.arr.len != 2) {
@@ -2322,42 +2416,48 @@ static bool eval_atomic_rmw_i32(sirj_ctx_t* c, uint32_t node_id, const node_info
   if (!parse_ref_id(c, av->v.arr.items[1], &val_id)) return false;
 
   const char* mode = NULL;
-  uint32_t align = 4;
-  if (!parse_atomic_flags(c, node_id, n, 4, &mode, &align)) return false;
+  uint32_t align = natural_align ? natural_align : 1u;
+  if (!parse_atomic_flags(c, node_id, n, natural_align, &mode, &align)) return false;
+  (void)mode; // sem ignores ordering in single-thread semantics (validated in parse_atomic_flags)
 
   sir_val_id_t addr_slot = 0, val_slot = 0;
   val_kind_t ak = VK_INVALID, vk = VK_INVALID;
   if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
   if (!eval_node(c, val_id, &val_slot, &vk)) return false;
-  if (ak != VK_PTR || vk != VK_I32) {
-    sirj_diag_setf(c, "sem.atomic.rmw.arg_type", c->cur_path, n->loc_line, node_id, n->tag, "%s requires (ptr, i32)", n->tag);
+  if (ak != VK_PTR || vk != rk) {
+    sirj_diag_setf(c, "sem.atomic.rmw.arg_type", c->cur_path, n->loc_line, node_id, n->tag, "%s requires (ptr, %s)", n->tag,
+                   (rk == VK_I8 ? "i8" : rk == VK_I16 ? "i16" : rk == VK_I32 ? "i32" : rk == VK_I64 ? "i64" : "?"));
     return false;
   }
 
-  const sir_val_id_t oldv = alloc_slot(c, VK_I32);
-  const sir_val_id_t newv = alloc_slot(c, VK_I32);
+  sir_atomic_rmw_op_t op = SIR_ATOMIC_RMW_ADD;
+  if (!atomic_rmw_op_from_str(c, node_id, n, op_str, &op)) return false;
+
+  const sir_val_id_t oldv = alloc_slot(c, rk);
   sir_mb_set_src(c->mb, node_id, n->loc_line);
-  if (!sir_mb_emit_load_i32(c->mb, c->fn, oldv, addr_slot, align)) return false;
-
-  if (strcmp(op, "xchg") == 0) {
-    if (!emit_copy_slot(c, newv, val_slot)) return false;
-  } else if (strcmp(op, "add") == 0) {
-    if (!sir_mb_emit_i32_add(c->mb, c->fn, newv, oldv, val_slot)) return false;
-  } else if (strcmp(op, "and") == 0) {
-    if (!sir_mb_emit_i32_and(c->mb, c->fn, newv, oldv, val_slot)) return false;
-  } else if (strcmp(op, "or") == 0) {
-    if (!sir_mb_emit_i32_or(c->mb, c->fn, newv, oldv, val_slot)) return false;
-  } else if (strcmp(op, "xor") == 0) {
-    if (!sir_mb_emit_i32_xor(c->mb, c->fn, newv, oldv, val_slot)) return false;
-  } else {
-    sirj_diag_setf(c, "sem.atomic.rmw.op", c->cur_path, n->loc_line, node_id, n->tag, "%s unsupported rmw op '%s'", n->tag, op);
-    return false;
+  bool ok = false;
+  switch (rk) {
+    case VK_I8:
+      ok = sir_mb_emit_atomic_rmw_i8(c->mb, c->fn, oldv, addr_slot, val_slot, op, align);
+      break;
+    case VK_I16:
+      ok = sir_mb_emit_atomic_rmw_i16(c->mb, c->fn, oldv, addr_slot, val_slot, op, align);
+      break;
+    case VK_I32:
+      ok = sir_mb_emit_atomic_rmw_i32(c->mb, c->fn, oldv, addr_slot, val_slot, op, align);
+      break;
+    case VK_I64:
+      ok = sir_mb_emit_atomic_rmw_i64(c->mb, c->fn, oldv, addr_slot, val_slot, op, align);
+      break;
+    default:
+      ok = false;
+      break;
   }
-
-  if (!sir_mb_emit_store_i32(c->mb, c->fn, addr_slot, newv, align)) return false;
-  if (!set_node_val(c, node_id, oldv, VK_I32)) return false;
+  sir_mb_clear_src(c->mb);
+  if (!ok) return false;
+  if (!set_node_val(c, node_id, oldv, rk)) return false;
   *out_slot = oldv;
-  *out_kind = VK_I32;
+  *out_kind = rk;
   return true;
 }
 
@@ -2748,6 +2848,130 @@ static bool emit_vec_store_lane_bool_as_i8(sirj_ctx_t* c, uint32_t node_id, uint
   return true;
 }
 
+static bool eval_atomic_cmpxchg_i64(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 3) {
+    sirj_diag_setf(c, "sem.parse.atomic.cmpxchg.args", c->cur_path, n->loc_line, node_id, n->tag, "%s args must be [addr, expected, desired]", n->tag);
+    return false;
+  }
+  uint32_t addr_id = 0, exp_id = 0, des_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &addr_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[1], &exp_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[2], &des_id)) return false;
+
+  const char* succ = NULL;
+  const char* fail = NULL;
+  uint32_t align = 8;
+  if (!parse_cmpxchg_flags(c, node_id, n, 8, &succ, &fail, &align)) return false;
+  (void)succ;
+  (void)fail;
+
+  sir_val_id_t addr_slot = 0, exp_slot = 0, des_slot = 0;
+  val_kind_t ak = VK_INVALID, ek = VK_INVALID, dk = VK_INVALID;
+  if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
+  if (!eval_node(c, exp_id, &exp_slot, &ek)) return false;
+  if (!eval_node(c, des_id, &des_slot, &dk)) return false;
+  if (ak != VK_PTR || ek != VK_I64 || dk != VK_I64) {
+    sirj_diag_setf(c, "sem.atomic.cmpxchg.arg_type", c->cur_path, n->loc_line, node_id, n->tag, "%s requires (ptr, i64, i64)", n->tag);
+    return false;
+  }
+
+  const sir_val_id_t oldv = alloc_slot(c, VK_I64);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_atomic_cmpxchg_i64(c->mb, c->fn, oldv, addr_slot, exp_slot, des_slot, align)) return false;
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, oldv, VK_I64)) return false;
+  *out_slot = oldv;
+  *out_kind = VK_I64;
+  return true;
+}
+
+static bool parse_simd_mem_flags(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, uint32_t natural_align, uint32_t* out_align, bool* out_vol) {
+  if (!c || !n || !out_align || !out_vol) return false;
+  *out_align = natural_align ? natural_align : 1u;
+  *out_vol = false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+
+  const JsonValue* fv = json_obj_get(n->fields_obj, "flags");
+  if (fv && !json_is_object(fv)) {
+    sirj_diag_setf(c, "sem.parse.simd.flags", c->cur_path, n->loc_line, node_id, n->tag, "%s flags must be an object", n->tag);
+    return false;
+  }
+
+  const JsonValue* av = NULL;
+  if (fv) av = json_obj_get(fv, "align");
+  if (!av) av = json_obj_get(n->fields_obj, "align");
+  if (av) {
+    uint32_t align = 0;
+    if (!json_get_u32(av, &align) || align == 0) {
+      sirj_diag_setf(c, "sem.parse.simd.align", c->cur_path, n->loc_line, node_id, n->tag, "%s align must be a positive integer", n->tag);
+      return false;
+    }
+    if (!is_pow2_u32(align)) {
+      sirj_diag_setf(c, "sem.parse.simd.align", c->cur_path, n->loc_line, node_id, n->tag, "%s align must be a power of two", n->tag);
+      return false;
+    }
+    *out_align = align;
+  }
+
+  const JsonValue* vv = NULL;
+  if (fv) vv = json_obj_get(fv, "vol");
+  if (!vv) vv = json_obj_get(n->fields_obj, "vol");
+  if (vv) {
+    bool vol = false;
+    if (!json_get_bool(vv, &vol)) {
+      sirj_diag_setf(c, "sem.parse.simd.vol", c->cur_path, n->loc_line, node_id, n->tag, "%s vol must be boolean", n->tag);
+      return false;
+    }
+    *out_vol = vol;
+  }
+
+  return true;
+}
+
+static bool emit_ptr_align_trap_check(sirj_ctx_t* c, uint32_t node_id, uint32_t loc_line, sir_val_id_t ptr_slot, uint32_t align) {
+  if (!c) return false;
+  if (align <= 1) return true;
+
+  const sir_val_id_t addr_i64 = alloc_slot(c, VK_I64);
+  const sir_val_id_t addr_i32 = alloc_slot(c, VK_I32);
+  const sir_val_id_t mask = alloc_slot(c, VK_I32);
+  const sir_val_id_t masked = alloc_slot(c, VK_I32);
+  const sir_val_id_t zero = alloc_slot(c, VK_I32);
+  const sir_val_id_t ok = alloc_slot(c, VK_BOOL);
+
+  sir_mb_set_src(c->mb, node_id, loc_line);
+  if (!sir_mb_emit_ptr_to_i64(c->mb, c->fn, addr_i64, ptr_slot)) return false;
+  if (!sir_mb_emit_i32_trunc_i64(c->mb, c->fn, addr_i32, addr_i64)) return false;
+  if (!sir_mb_emit_const_i32(c->mb, c->fn, mask, (int32_t)(align - 1u))) return false;
+  if (!sir_mb_emit_i32_and(c->mb, c->fn, masked, addr_i32, mask)) return false;
+  if (!sir_mb_emit_const_i32(c->mb, c->fn, zero, 0)) return false;
+  if (!sir_mb_emit_i32_cmp_eq(c->mb, c->fn, ok, masked, zero)) return false;
+
+  uint32_t ip_cbr = 0;
+  if (!sir_mb_emit_cbr(c->mb, c->fn, ok, 0, 0, &ip_cbr)) return false;
+
+  const uint32_t then_ip = sir_mb_func_ip(c->mb, c->fn);
+  uint32_t ip_br_then = 0;
+  if (!sir_mb_emit_br(c->mb, c->fn, 0, &ip_br_then)) return false;
+
+  const uint32_t else_ip = sir_mb_func_ip(c->mb, c->fn);
+  if (!sir_mb_emit_exit(c->mb, c->fn, 255)) return false;
+  uint32_t ip_br_else = 0;
+  if (!sir_mb_emit_br(c->mb, c->fn, 0, &ip_br_else)) return false;
+
+  const uint32_t join_ip = sir_mb_func_ip(c->mb, c->fn);
+  if (!sir_mb_patch_cbr(c->mb, c->fn, ip_cbr, then_ip, else_ip)) return false;
+  if (!sir_mb_patch_br(c->mb, c->fn, ip_br_then, join_ip)) return false;
+  if (!sir_mb_patch_br(c->mb, c->fn, ip_br_else, join_ip)) return false;
+  sir_mb_clear_src(c->mb);
+
+  return true;
+}
+
 static bool eval_load_vec(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
   if (!c || !n || !out_slot || !out_kind) return false;
   if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
@@ -2768,15 +2992,11 @@ static bool eval_load_vec(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n,
   if (!type_layout(c, n->type_ref, &vec_size, &vec_align)) return false;
   if (vec_size == 0) return false;
 
-  uint32_t align = 0;
-  const JsonValue* alignv = json_obj_get(n->fields_obj, "align");
-  if (alignv) {
-    if (!json_get_u32(alignv, &align) || align == 0) return false;
-    if (!is_pow2_u32(align)) return false;
-  } else {
-    align = vec_align ? vec_align : 1;
-  }
-  (void)align;
+  uint32_t align = vec_align ? vec_align : 1;
+  bool vol = false;
+  if (!parse_simd_mem_flags(c, node_id, n, align, &align, &vol)) return false;
+  (void)vol; // sem ignores volatility (but validates shape)
+  if (!emit_ptr_align_trap_check(c, node_id, n->loc_line, addr_slot, align)) return false;
 
   const sir_val_id_t vec_ptr = alloc_slot(c, VK_PTR);
   sir_mb_set_src(c->mb, node_id, n->loc_line);
@@ -2812,15 +3032,11 @@ static bool eval_store_vec_stmt(sirj_ctx_t* c, uint32_t node_id, const node_info
   if (!type_layout(c, vn->type_ref, &vec_size, &vec_align)) return false;
   if (vec_size == 0) return false;
 
-  uint32_t align = 0;
-  const JsonValue* alignv = json_obj_get(n->fields_obj, "align");
-  if (alignv) {
-    if (!json_get_u32(alignv, &align) || align == 0) return false;
-    if (!is_pow2_u32(align)) return false;
-  } else {
-    align = vec_align ? vec_align : 1;
-  }
-  (void)align;
+  uint32_t align = vec_align ? vec_align : 1;
+  bool vol = false;
+  if (!parse_simd_mem_flags(c, node_id, n, align, &align, &vol)) return false;
+  (void)vol;
+  if (!emit_ptr_align_trap_check(c, node_id, n->loc_line, addr_slot, align)) return false;
 
   const sir_val_id_t len = alloc_slot(c, VK_I32);
   sir_mb_set_src(c->mb, node_id, n->loc_line);
@@ -6344,10 +6560,7 @@ static bool eval_node(sirj_ctx_t* c, uint32_t node_id, sir_val_id_t* out_slot, v
   if (strcmp(n->tag, "atomic.cmpxchg.i8") == 0) return eval_atomic_cmpxchg_i8(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "atomic.cmpxchg.i16") == 0) return eval_atomic_cmpxchg_i16(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "atomic.cmpxchg.i32") == 0) return eval_atomic_cmpxchg_i32(c, node_id, n, out_slot, out_kind);
-  if (strcmp(n->tag, "atomic.cmpxchg.i64") == 0) {
-    sirj_diag_setf(c, "sem.atomic.cmpxchg.type", c->cur_path, n->loc_line, node_id, n->tag, "%s is not supported by sem yet (i64 ops missing in svm)", n->tag);
-    return false;
-  }
+  if (strcmp(n->tag, "atomic.cmpxchg.i64") == 0) return eval_atomic_cmpxchg_i64(c, node_id, n, out_slot, out_kind);
   if (strncmp(n->tag, "atomic.rmw.", 11) == 0) {
     const char* p1 = n->tag + 11;
     const char* dot = strchr(p1, '.');
@@ -6364,11 +6577,12 @@ static bool eval_node(sirj_ctx_t* c, uint32_t node_id, sir_val_id_t* out_slot, v
     memcpy(opbuf, p1, oplen);
     opbuf[oplen] = 0;
     const char* tname = dot + 1;
-    if (strcmp(tname, "i32") != 0) {
-      sirj_diag_setf(c, "sem.atomic.rmw.type", c->cur_path, n->loc_line, node_id, n->tag, "%s only supports i32 rmw for now", n->tag);
-      return false;
-    }
-    return eval_atomic_rmw_i32(c, node_id, n, opbuf, out_slot, out_kind);
+    if (strcmp(tname, "i8") == 0) return eval_atomic_rmw(c, node_id, n, opbuf, VK_I8, 1, out_slot, out_kind);
+    if (strcmp(tname, "i16") == 0) return eval_atomic_rmw(c, node_id, n, opbuf, VK_I16, 2, out_slot, out_kind);
+    if (strcmp(tname, "i32") == 0) return eval_atomic_rmw(c, node_id, n, opbuf, VK_I32, 4, out_slot, out_kind);
+    if (strcmp(tname, "i64") == 0) return eval_atomic_rmw(c, node_id, n, opbuf, VK_I64, 8, out_slot, out_kind);
+    sirj_diag_setf(c, "sem.atomic.rmw.type", c->cur_path, n->loc_line, node_id, n->tag, "%s unsupported rmw type '%s'", n->tag, tname);
+    return false;
   }
   if (strcmp(n->tag, "i32.add") == 0) return eval_i32_add_mnemonic(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "i32.sub") == 0) return eval_i32_bin_mnemonic(c, node_id, n, SIR_INST_I32_SUB, out_slot, out_kind);
@@ -8117,7 +8331,6 @@ static int sem_run_or_verify_sir_jsonl_impl(const char* path, const sem_cap_t* c
 
   sir_hosted_zabi_dispose(&hz);
   sir_module_free(m);
-  ctx_dispose(&c);
 
   if (rc < 0) {
     // Execution errors come from sircore (ZI_E_*).
@@ -8125,7 +8338,7 @@ static int sem_run_or_verify_sir_jsonl_impl(const char* path, const sem_cap_t* c
       fprintf(stderr, "{\"tool\":\"sem\",\"code\":\"sem.exec\",\"message\":\"execution failed\",\"rc\":%d,\"rc_name\":\"%s\"", (int)rc,
               sem_zi_err_name(rc));
       if (sink2) {
-        if (wrap.last.node_id) fprintf(stderr, ",\"node\":%u", (unsigned)wrap.last.node_id);
+        if (wrap.last.node_id) sem_emit_node_field_json(stderr, &c, wrap.last.node_id);
         if (wrap.last.line) fprintf(stderr, ",\"line\":%u", (unsigned)wrap.last.line);
         if (wrap.last.fid) {
           fprintf(stderr, ",\"fid\":%u", (unsigned)wrap.last.fid);
@@ -8140,12 +8353,23 @@ static int sem_run_or_verify_sir_jsonl_impl(const char* path, const sem_cap_t* c
         fprintf(stderr, "sem:   at fid=%u ip=%u op=%s\n", (unsigned)wrap.last.fid, (unsigned)wrap.last.ip, sir_inst_kind_name(wrap.last.op));
       }
       if (sink2 && (wrap.last.node_id || wrap.last.line)) {
-        fprintf(stderr, "sem:   at node=%u line=%u\n", (unsigned)wrap.last.node_id, (unsigned)wrap.last.line);
+        bool is_num = false;
+        uint32_t num = 0;
+        const char* str = NULL;
+        if (wrap.last.node_id && sirj_unintern_id(&c, wrap.last.node_id, &is_num, &num, &str)) {
+          if (is_num) fprintf(stderr, "sem:   at node=%u", (unsigned)num);
+          else fprintf(stderr, "sem:   at node=\"%s\"", str ? str : "");
+          fprintf(stderr, " (intern=%u) line=%u\n", (unsigned)wrap.last.node_id, (unsigned)wrap.last.line);
+        } else {
+          fprintf(stderr, "sem:   at node=%u line=%u\n", (unsigned)wrap.last.node_id, (unsigned)wrap.last.line);
+        }
       }
     }
+    ctx_dispose(&c);
     return 1;
   }
   if (out_prog_rc) *out_prog_rc = (int)rc;
+  ctx_dispose(&c);
   return 0;
 }
 
