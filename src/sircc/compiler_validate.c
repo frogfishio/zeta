@@ -1611,6 +1611,170 @@ bad:
   return false;
 }
 
+static bool validate_atomics_node(SirProgram* p, NodeRec* n) {
+  if (!p || !n) return false;
+  if (!p->feat_atomics_v1) return true;
+  if (strncmp(n->tag, "atomic.", 7) != 0) return true;
+
+  SirDiagSaved saved = sir_diag_push_node(p, n);
+
+  if (!n->fields || n->fields->type != JSON_OBJECT) {
+    err_codef(p, "sircc.atomic.fields.missing", "sircc: %s node %lld missing fields", n->tag, (long long)n->id);
+    goto bad;
+  }
+
+  JsonValue* flags = json_obj_get(n->fields, "flags");
+  const char* mode = NULL;
+  if (flags && flags->type == JSON_OBJECT) mode = json_get_string(json_obj_get(flags, "mode"));
+  if (!mode) mode = json_get_string(json_obj_get(n->fields, "mode"));
+  if (!mode) {
+    err_codef(p, "sircc.atomic.mode.missing", "sircc: %s node %lld missing flags.mode", n->tag, (long long)n->id);
+    goto bad;
+  }
+
+  bool mode_ok = (strcmp(mode, "relaxed") == 0 || strcmp(mode, "acquire") == 0 || strcmp(mode, "release") == 0 || strcmp(mode, "acqrel") == 0 ||
+                  strcmp(mode, "seqcst") == 0);
+  if (!mode_ok) {
+    err_codef(p, "sircc.atomic.mode.bad", "sircc: %s node %lld invalid mode '%s'", n->tag, (long long)n->id, mode);
+    goto bad;
+  }
+
+  JsonValue* alignv = NULL;
+  if (flags && flags->type == JSON_OBJECT) alignv = json_obj_get(flags, "align");
+  if (!alignv) alignv = json_obj_get(n->fields, "align");
+  if (alignv) {
+    int64_t a = 0;
+    if (!json_get_i64(alignv, &a) || a <= 0) {
+      err_codef(p, "sircc.atomic.align.bad", "sircc: %s node %lld flags.align must be a positive integer", n->tag, (long long)n->id);
+      goto bad;
+    }
+    if ((a & (a - 1)) != 0) {
+      err_codef(p, "sircc.atomic.align.not_pow2", "sircc: %s node %lld flags.align must be a power of two", n->tag, (long long)n->id);
+      goto bad;
+    }
+  }
+
+  JsonValue* args = json_obj_get(n->fields, "args");
+  if (!args || args->type != JSON_ARRAY) {
+    err_codef(p, "sircc.atomic.args.missing", "sircc: %s node %lld missing args array", n->tag, (long long)n->id);
+    goto bad;
+  }
+
+  const char* width = NULL;
+  bool is_load = false;
+  bool is_store = false;
+  bool is_rmw = false;
+  const char* rmw_op = NULL;
+  const char* rmw_dot = NULL;
+
+  if (strncmp(n->tag, "atomic.load.", 12) == 0) {
+    is_load = true;
+    width = n->tag + 12;
+  } else if (strncmp(n->tag, "atomic.store.", 13) == 0) {
+    is_store = true;
+    width = n->tag + 13;
+  } else if (strncmp(n->tag, "atomic.rmw.", 11) == 0) {
+    is_rmw = true;
+    rmw_op = n->tag + 11;
+    rmw_dot = strchr(rmw_op, '.');
+    if (!rmw_dot || rmw_dot == rmw_op || !rmw_dot[1]) {
+      err_codef(p, "sircc.atomic.rmw.tag.bad", "sircc: %s node %lld invalid rmw mnemonic spelling", n->tag, (long long)n->id);
+      goto bad;
+    }
+    width = rmw_dot + 1;
+  } else if (strncmp(n->tag, "atomic.cmpxchg.", 15) == 0) {
+    err_codef(p, "sircc.atomic.cmpxchg.unsupported", "sircc: %s is not supported yet (cmpxchg is multi-result)", n->tag);
+    goto bad;
+  } else {
+    err_codef(p, "sircc.atomic.tag.unknown", "sircc: unknown atomic mnemonic '%s'", n->tag);
+    goto bad;
+  }
+
+  bool width_ok = (strcmp(width, "i8") == 0 || strcmp(width, "i16") == 0 || strcmp(width, "i32") == 0 || strcmp(width, "i64") == 0);
+  if (!width_ok) {
+    err_codef(p, "sircc.atomic.width.unsupported", "sircc: %s node %lld unsupported width '%s' (expected i8/i16/i32/i64)", n->tag, (long long)n->id,
+              width ? width : "");
+    goto bad;
+  }
+
+  if (is_load) {
+    if (args->v.arr.len != 1) {
+      err_codef(p, "sircc.atomic.load.args.bad", "sircc: %s node %lld requires args:[addr]", n->tag, (long long)n->id);
+      goto bad;
+    }
+    if (strcmp(mode, "release") == 0 || strcmp(mode, "acqrel") == 0) {
+      err_codef(p, "sircc.atomic.load.mode.bad", "sircc: %s node %lld mode must not be '%s' for loads", n->tag, (long long)n->id, mode);
+      goto bad;
+    }
+  } else if (is_store) {
+    if (args->v.arr.len != 2) {
+      err_codef(p, "sircc.atomic.store.args.bad", "sircc: %s node %lld requires args:[addr, value]", n->tag, (long long)n->id);
+      goto bad;
+    }
+    if (strcmp(mode, "acquire") == 0 || strcmp(mode, "acqrel") == 0) {
+      err_codef(p, "sircc.atomic.store.mode.bad", "sircc: %s node %lld mode must not be '%s' for stores", n->tag, (long long)n->id, mode);
+      goto bad;
+    }
+  } else if (is_rmw) {
+    if (args->v.arr.len != 2) {
+      err_codef(p, "sircc.atomic.rmw.args.bad", "sircc: %s node %lld requires args:[addr, value]", n->tag, (long long)n->id);
+      goto bad;
+    }
+    const size_t op_len = (size_t)(rmw_dot - rmw_op);
+    bool op_ok = (op_len == 3 && strncmp(rmw_op, "add", 3) == 0) || (op_len == 3 && strncmp(rmw_op, "and", 3) == 0) ||
+                 (op_len == 2 && strncmp(rmw_op, "or", 2) == 0) || (op_len == 3 && strncmp(rmw_op, "xor", 3) == 0) ||
+                 (op_len == 4 && strncmp(rmw_op, "xchg", 4) == 0);
+    if (!op_ok) {
+      err_codef(p, "sircc.atomic.rmw.op.bad", "sircc: %s node %lld unsupported rmw op (expected add/and/or/xor/xchg)", n->tag, (long long)n->id);
+      goto bad;
+    }
+  }
+
+  int64_t aid = 0;
+  if (!parse_node_ref_id(p, args->v.arr.items[0], &aid)) {
+    err_codef(p, "sircc.atomic.addr.ref_bad", "sircc: %s node %lld addr must be a node ref", n->tag, (long long)n->id);
+    goto bad;
+  }
+  NodeRec* a = get_node(p, aid);
+  if (!a) {
+    err_codef(p, "sircc.atomic.addr.ref_bad", "sircc: %s node %lld addr references unknown node %lld", n->tag, (long long)n->id, (long long)aid);
+    goto bad;
+  }
+  if (a->type_ref && !is_ptr_type_id(p, a->type_ref)) {
+    err_codef(p, "sircc.atomic.addr.not_ptr", "sircc: %s node %lld requires pointer addr", n->tag, (long long)n->id);
+    goto bad;
+  }
+
+  if (args->v.arr.len == 2) {
+    int64_t vid = 0;
+    if (!parse_node_ref_id(p, args->v.arr.items[1], &vid)) {
+      err_codef(p, "sircc.atomic.value.ref_bad", "sircc: %s node %lld value must be a node ref", n->tag, (long long)n->id);
+      goto bad;
+    }
+    NodeRec* v = get_node(p, vid);
+    if (!v) {
+      err_codef(p, "sircc.atomic.value.ref_bad", "sircc: %s node %lld value references unknown node %lld", n->tag, (long long)n->id, (long long)vid);
+      goto bad;
+    }
+    if (v->type_ref) {
+      TypeRec* vt = get_type(p, v->type_ref);
+      if (!vt || vt->kind != TYPE_PRIM || !vt->prim || strcmp(vt->prim, width) != 0) {
+        err_codef(p, "sircc.atomic.value.type.bad", "sircc: %s node %lld value type must be %s (if annotated)", n->tag, (long long)n->id, width);
+        goto bad;
+      }
+    }
+  }
+
+  goto ok;
+
+bad:
+  sir_diag_pop(p, saved);
+  return false;
+ok:
+  sir_diag_pop(p, saved);
+  return true;
+}
+
 bool validate_program(SirProgram* p) {
   // Core fn record validation (runs for --verify-only too).
   for (size_t i = 0; i < p->nodes_cap; i++) {
@@ -1755,6 +1919,12 @@ bool validate_program(SirProgram* p) {
   for (size_t i = 0; i < p->nodes_cap; i++) {
     NodeRec* n = p->nodes[i];
     if (!n) continue;
+    if ((strncmp(n->tag, "atomic.", 7) == 0) && !p->feat_atomics_v1) {
+      SirDiagSaved saved = sir_diag_push_node(p, n);
+      err_codef(p, "sircc.feature.gate", "sircc: mnemonic '%s' requires feature atomics:v1 (enable via meta.ext.features)", n->tag);
+      sir_diag_pop(p, saved);
+      return false;
+    }
     if ((strncmp(n->tag, "vec.", 4) == 0 || strcmp(n->tag, "load.vec") == 0 || strcmp(n->tag, "store.vec") == 0) && !p->feat_simd_v1) {
       SirDiagSaved saved = sir_diag_push_node(p, n);
       err_codef(p, "sircc.feature.gate", "sircc: mnemonic '%s' requires feature simd:v1 (enable via meta.ext.features)", n->tag);
@@ -1799,6 +1969,15 @@ bool validate_program(SirProgram* p) {
       NodeRec* n = p->nodes[i];
       if (!n) continue;
       if (!validate_simd_node(p, n)) return false;
+    }
+  }
+
+  // Atomics semantic checks (close the "verify-only vs lowering" delta).
+  if (p->feat_atomics_v1) {
+    for (size_t i = 0; i < p->nodes_cap; i++) {
+      NodeRec* n = p->nodes[i];
+      if (!n) continue;
+      if (!validate_atomics_node(p, n)) return false;
     }
   }
 

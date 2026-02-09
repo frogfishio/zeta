@@ -1858,6 +1858,173 @@ static bool eval_store_mnemonic(sirj_ctx_t* c, uint32_t node_id, const node_info
   return false;
 }
 
+static bool parse_atomic_flags(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, uint32_t natural_align, const char** out_mode, uint32_t* out_align) {
+  if (!c || !n || !out_mode || !out_align) return false;
+  *out_mode = NULL;
+  *out_align = natural_align ? natural_align : 1u;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+
+  const JsonValue* fv = json_obj_get(n->fields_obj, "flags");
+  if (fv && !json_is_object(fv)) {
+    sirj_diag_setf(c, "sem.parse.atomic.flags", c->cur_path, n->loc_line, node_id, n->tag, "%s flags must be an object", n->tag);
+    return false;
+  }
+
+  const char* mode = NULL;
+  if (fv) mode = json_get_string(json_obj_get(fv, "mode"));
+  if (!mode) mode = json_get_string(json_obj_get(n->fields_obj, "mode"));
+  if (!mode) {
+    sirj_diag_setf(c, "sem.parse.atomic.mode", c->cur_path, n->loc_line, node_id, n->tag, "%s missing flags.mode", n->tag);
+    return false;
+  }
+  if (!(strcmp(mode, "relaxed") == 0 || strcmp(mode, "acquire") == 0 || strcmp(mode, "release") == 0 || strcmp(mode, "acqrel") == 0 ||
+        strcmp(mode, "seqcst") == 0)) {
+    sirj_diag_setf(c, "sem.parse.atomic.mode", c->cur_path, n->loc_line, node_id, n->tag, "%s invalid mode '%s'", n->tag, mode);
+    return false;
+  }
+
+  uint32_t align = *out_align;
+  const JsonValue* av = NULL;
+  if (fv) av = json_obj_get(fv, "align");
+  if (!av) av = json_obj_get(n->fields_obj, "align");
+  if (av) {
+    if (!json_get_u32(av, &align) || align == 0) {
+      sirj_diag_setf(c, "sem.parse.atomic.align", c->cur_path, n->loc_line, node_id, n->tag, "%s flags.align must be a positive integer", n->tag);
+      return false;
+    }
+  }
+  if (!is_pow2_u32(align)) {
+    sirj_diag_setf(c, "sem.parse.atomic.align", c->cur_path, n->loc_line, node_id, n->tag, "%s flags.align must be a power of two", n->tag);
+    return false;
+  }
+
+  *out_mode = mode;
+  *out_align = align;
+  return true;
+}
+
+static bool eval_atomic_load_i32(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 1) {
+    sirj_diag_setf(c, "sem.parse.atomic.load.args", c->cur_path, n->loc_line, node_id, n->tag, "%s args must be [addr]", n->tag);
+    return false;
+  }
+  uint32_t addr_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &addr_id)) return false;
+
+  const char* mode = NULL;
+  uint32_t align = 4;
+  if (!parse_atomic_flags(c, node_id, n, 4, &mode, &align)) return false;
+  if (strcmp(mode, "release") == 0 || strcmp(mode, "acqrel") == 0) {
+    sirj_diag_setf(c, "sem.parse.atomic.load.mode", c->cur_path, n->loc_line, node_id, n->tag, "%s invalid mode '%s' for loads", n->tag, mode);
+    return false;
+  }
+
+  sir_val_id_t addr_slot = 0;
+  val_kind_t ak = VK_INVALID;
+  if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
+  if (ak != VK_PTR) {
+    sirj_diag_setf(c, "sem.atomic.load.addr_type", c->cur_path, n->loc_line, node_id, n->tag, "%s addr must be ptr", n->tag);
+    return false;
+  }
+
+  const sir_val_id_t dst = alloc_slot(c, VK_I32);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_load_i32(c->mb, c->fn, dst, addr_slot, align)) return false;
+  if (!set_node_val(c, node_id, dst, VK_I32)) return false;
+  *out_slot = dst;
+  *out_kind = VK_I32;
+  return true;
+}
+
+static bool eval_atomic_store_i32_stmt(sirj_ctx_t* c, uint32_t stmt_id, const node_info_t* n) {
+  if (!c || !n) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 2) {
+    sirj_diag_setf(c, "sem.parse.atomic.store.args", c->cur_path, n->loc_line, stmt_id, n->tag, "%s args must be [addr, value]", n->tag);
+    return false;
+  }
+  uint32_t addr_id = 0, val_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &addr_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[1], &val_id)) return false;
+
+  const char* mode = NULL;
+  uint32_t align = 4;
+  if (!parse_atomic_flags(c, stmt_id, n, 4, &mode, &align)) return false;
+  if (strcmp(mode, "acquire") == 0 || strcmp(mode, "acqrel") == 0) {
+    sirj_diag_setf(c, "sem.parse.atomic.store.mode", c->cur_path, n->loc_line, stmt_id, n->tag, "%s invalid mode '%s' for stores", n->tag, mode);
+    return false;
+  }
+
+  sir_val_id_t addr_slot = 0, val_slot = 0;
+  val_kind_t ak = VK_INVALID, vk = VK_INVALID;
+  if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
+  if (!eval_node(c, val_id, &val_slot, &vk)) return false;
+  if (ak != VK_PTR || vk != VK_I32) {
+    sirj_diag_setf(c, "sem.atomic.store.arg_type", c->cur_path, n->loc_line, stmt_id, n->tag, "%s requires (ptr, i32)", n->tag);
+    return false;
+  }
+
+  sir_mb_set_src(c->mb, stmt_id, n->loc_line);
+  return sir_mb_emit_store_i32(c->mb, c->fn, addr_slot, val_slot, align);
+}
+
+static bool eval_atomic_rmw_i32(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, const char* op, sir_val_id_t* out_slot,
+                                val_kind_t* out_kind) {
+  if (!c || !n || !op || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 2) {
+    sirj_diag_setf(c, "sem.parse.atomic.rmw.args", c->cur_path, n->loc_line, node_id, n->tag, "%s args must be [addr, value]", n->tag);
+    return false;
+  }
+  uint32_t addr_id = 0, val_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &addr_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[1], &val_id)) return false;
+
+  const char* mode = NULL;
+  uint32_t align = 4;
+  if (!parse_atomic_flags(c, node_id, n, 4, &mode, &align)) return false;
+
+  sir_val_id_t addr_slot = 0, val_slot = 0;
+  val_kind_t ak = VK_INVALID, vk = VK_INVALID;
+  if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
+  if (!eval_node(c, val_id, &val_slot, &vk)) return false;
+  if (ak != VK_PTR || vk != VK_I32) {
+    sirj_diag_setf(c, "sem.atomic.rmw.arg_type", c->cur_path, n->loc_line, node_id, n->tag, "%s requires (ptr, i32)", n->tag);
+    return false;
+  }
+
+  const sir_val_id_t oldv = alloc_slot(c, VK_I32);
+  const sir_val_id_t newv = alloc_slot(c, VK_I32);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_load_i32(c->mb, c->fn, oldv, addr_slot, align)) return false;
+
+  if (strcmp(op, "xchg") == 0) {
+    if (!emit_copy_slot(c, newv, val_slot)) return false;
+  } else if (strcmp(op, "add") == 0) {
+    if (!sir_mb_emit_i32_add(c->mb, c->fn, newv, oldv, val_slot)) return false;
+  } else if (strcmp(op, "and") == 0) {
+    if (!sir_mb_emit_i32_and(c->mb, c->fn, newv, oldv, val_slot)) return false;
+  } else if (strcmp(op, "or") == 0) {
+    if (!sir_mb_emit_i32_or(c->mb, c->fn, newv, oldv, val_slot)) return false;
+  } else if (strcmp(op, "xor") == 0) {
+    if (!sir_mb_emit_i32_xor(c->mb, c->fn, newv, oldv, val_slot)) return false;
+  } else {
+    sirj_diag_setf(c, "sem.atomic.rmw.op", c->cur_path, n->loc_line, node_id, n->tag, "%s unsupported rmw op '%s'", n->tag, op);
+    return false;
+  }
+
+  if (!sir_mb_emit_store_i32(c->mb, c->fn, addr_slot, newv, align)) return false;
+  if (!set_node_val(c, node_id, oldv, VK_I32)) return false;
+  *out_slot = oldv;
+  *out_kind = VK_I32;
+  return true;
+}
+
 static bool eval_mem_copy_stmt(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n) {
   if (!c || !n) return false;
   if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
@@ -4990,6 +5157,29 @@ static bool eval_node(sirj_ctx_t* c, uint32_t node_id, sir_val_id_t* out_slot, v
   if (strcmp(n->tag, "bool.or") == 0) return eval_bool_bin(c, node_id, n, SIR_INST_BOOL_OR, out_slot, out_kind);
   if (strcmp(n->tag, "bool.xor") == 0) return eval_bool_bin(c, node_id, n, SIR_INST_BOOL_XOR, out_slot, out_kind);
   if (strcmp(n->tag, "select") == 0) return eval_select(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "atomic.load.i32") == 0) return eval_atomic_load_i32(c, node_id, n, out_slot, out_kind);
+  if (strncmp(n->tag, "atomic.rmw.", 11) == 0) {
+    const char* p1 = n->tag + 11;
+    const char* dot = strchr(p1, '.');
+    if (!dot || dot == p1 || !dot[1]) {
+      sirj_diag_setf(c, "sem.parse.atomic.rmw.tag", c->cur_path, n->loc_line, node_id, n->tag, "%s invalid rmw mnemonic spelling", n->tag);
+      return false;
+    }
+    char opbuf[16];
+    const size_t oplen = (size_t)(dot - p1);
+    if (oplen >= sizeof(opbuf)) {
+      sirj_diag_setf(c, "sem.parse.atomic.rmw.tag", c->cur_path, n->loc_line, node_id, n->tag, "%s rmw op too long", n->tag);
+      return false;
+    }
+    memcpy(opbuf, p1, oplen);
+    opbuf[oplen] = 0;
+    const char* tname = dot + 1;
+    if (strcmp(tname, "i32") != 0) {
+      sirj_diag_setf(c, "sem.atomic.rmw.type", c->cur_path, n->loc_line, node_id, n->tag, "%s only supports i32 rmw for now", n->tag);
+      return false;
+    }
+    return eval_atomic_rmw_i32(c, node_id, n, opbuf, out_slot, out_kind);
+  }
   if (strcmp(n->tag, "i32.add") == 0) return eval_i32_add_mnemonic(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "i32.sub") == 0) return eval_i32_bin_mnemonic(c, node_id, n, SIR_INST_I32_SUB, out_slot, out_kind);
   if (strcmp(n->tag, "i32.mul") == 0) return eval_i32_bin_mnemonic(c, node_id, n, SIR_INST_I32_MUL, out_slot, out_kind);
@@ -5119,6 +5309,7 @@ static bool exec_stmt(sirj_ctx_t* c, uint32_t stmt_id, bool* out_did_return, sir
   if (strcmp(n->tag, "store.ptr") == 0) return eval_store_mnemonic(c, stmt_id, n, SIR_INST_STORE_PTR);
   if (strcmp(n->tag, "store.f32") == 0) return eval_store_mnemonic(c, stmt_id, n, SIR_INST_STORE_F32);
   if (strcmp(n->tag, "store.f64") == 0) return eval_store_mnemonic(c, stmt_id, n, SIR_INST_STORE_F64);
+  if (strcmp(n->tag, "atomic.store.i32") == 0) return eval_atomic_store_i32_stmt(c, stmt_id, n);
   if (strcmp(n->tag, "mem.copy") == 0) return eval_mem_copy_stmt(c, stmt_id, n);
   if (strcmp(n->tag, "mem.fill") == 0) return eval_mem_fill_stmt(c, stmt_id, n);
   if (strcmp(n->tag, "call") == 0) {

@@ -112,6 +112,91 @@ bool lower_stmt(FunctionCtx* f, int64_t node_id) {
     return true;
   }
 
+  if (strncmp(n->tag, "atomic.store.", 13) == 0) {
+    const char* tname = n->tag + 13;
+    if (!n->fields) {
+      LOWER_ERR_NODE(f, n, "sircc.atomic.store.missing_fields", "sircc: %s node %lld missing fields", n->tag, (long long)node_id);
+      return false;
+    }
+    JsonValue* args = json_obj_get(n->fields, "args");
+    if (!args || args->type != JSON_ARRAY || args->v.arr.len != 2) {
+      LOWER_ERR_NODE(f, n, "sircc.atomic.store.args.bad", "sircc: %s node %lld requires args:[addr, value]", n->tag, (long long)node_id);
+      return false;
+    }
+    int64_t aid = 0, vid = 0;
+    if (!parse_node_ref_id(f->p, args->v.arr.items[0], &aid) || !parse_node_ref_id(f->p, args->v.arr.items[1], &vid)) {
+      LOWER_ERR_NODE(f, n, "sircc.atomic.store.args.ref_bad", "sircc: %s node %lld args must be node refs", n->tag, (long long)node_id);
+      return false;
+    }
+    LLVMValueRef pval = lower_expr(f, aid);
+    LLVMValueRef vval = lower_expr(f, vid);
+    if (!pval || !vval) return false;
+
+    LLVMTypeRef pty = LLVMTypeOf(pval);
+    if (LLVMGetTypeKind(pty) != LLVMPointerTypeKind) {
+      LOWER_ERR_NODE(f, n, "sircc.atomic.store.addr.not_ptr", "sircc: %s requires pointer addr", n->tag);
+      return false;
+    }
+
+    LLVMTypeRef el = lower_type_prim(f->ctx, tname);
+    if (!el || LLVMGetTypeKind(el) != LLVMIntegerTypeKind) {
+      LOWER_ERR_NODE(f, n, "sircc.atomic.store.type_unsupported", "sircc: unsupported atomic.store type '%s'", tname);
+      return false;
+    }
+    const unsigned w = LLVMGetIntTypeWidth(el);
+    if (LLVMGetTypeKind(LLVMTypeOf(vval)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(vval)) != w) {
+      vval = LLVMBuildTruncOrBitCast(f->builder, vval, el, "atomic.st.val");
+    }
+
+    LLVMTypeRef want_ptr = LLVMPointerType(el, 0);
+    if (want_ptr != pty) pval = LLVMBuildBitCast(f->builder, pval, want_ptr, "atomic.st.cast");
+
+    unsigned natural_align = (unsigned)((w + 7u) / 8u);
+    unsigned align = natural_align ? natural_align : 1u;
+    JsonValue* flags = json_obj_get(n->fields, "flags");
+    JsonValue* alignv = NULL;
+    if (flags && flags->type == JSON_OBJECT) alignv = json_obj_get(flags, "align");
+    if (!alignv) alignv = json_obj_get(n->fields, "align");
+    if (alignv) {
+      int64_t a = 0;
+      if (!json_get_i64(alignv, &a)) {
+        LOWER_ERR_NODE(f, n, "sircc.atomic.store.align.not_int", "sircc: %s node %lld flags.align must be an integer", n->tag, (long long)node_id);
+        return false;
+      }
+      if (a <= 0 || a > (int64_t)UINT_MAX) {
+        LOWER_ERR_NODE(f, n, "sircc.atomic.store.align.range", "sircc: %s node %lld flags.align must be > 0", n->tag, (long long)node_id);
+        return false;
+      }
+      align = (unsigned)a;
+    }
+    if ((align & (align - 1u)) != 0u) {
+      LOWER_ERR_NODE(f, n, "sircc.atomic.store.align.not_pow2", "sircc: %s node %lld flags.align must be a power of two", n->tag, (long long)node_id);
+      return false;
+    }
+    if (!emit_trap_if_misaligned(f, pval, align)) return false;
+
+    const char* mode = NULL;
+    if (flags && flags->type == JSON_OBJECT) mode = json_get_string(json_obj_get(flags, "mode"));
+    if (!mode) mode = json_get_string(json_obj_get(n->fields, "mode"));
+    if (!mode) {
+      LOWER_ERR_NODE(f, n, "sircc.atomic.store.mode.missing", "sircc: %s node %lld missing flags.mode", n->tag, (long long)node_id);
+      return false;
+    }
+    LLVMAtomicOrdering ord;
+    if (strcmp(mode, "relaxed") == 0) ord = LLVMAtomicOrderingMonotonic;
+    else if (strcmp(mode, "release") == 0) ord = LLVMAtomicOrderingRelease;
+    else if (strcmp(mode, "seqcst") == 0) ord = LLVMAtomicOrderingSequentiallyConsistent;
+    else {
+      LOWER_ERR_NODE(f, n, "sircc.atomic.store.mode.bad", "sircc: %s node %lld invalid mode '%s' for stores", n->tag, (long long)node_id, mode);
+      return false;
+    }
+
+    LLVMValueRef st = LLVMBuildStore(f->builder, vval, pval);
+    LLVMSetOrdering(st, ord);
+    LLVMSetAlignment(st, align);
+    return true;
+  }
+
   if (strcmp(n->tag, "mem.copy") == 0) {
     if (!n->fields) {
       LOWER_ERR_NODE(f, n, "sircc.mem.copy.missing_fields", "sircc: mem.copy node %lld missing fields", (long long)node_id);

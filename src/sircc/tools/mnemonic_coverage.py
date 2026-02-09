@@ -196,6 +196,13 @@ def infer_implemented_mnemonics(csrc: str) -> set[str]:
         impl.add(f"store.{t}")
         impl.add(f"alloca.{t}")
 
+    # atomics:v1 (explicit patterns; these aren't always inferable from strncmp handlers)
+    for w in [8, 16, 32, 64]:
+        impl.add(f"atomic.load.i{w}")
+        impl.add(f"atomic.store.i{w}")
+        for op in ["add", "and", "or", "xor", "xchg"]:
+            impl.add(f"atomic.rmw.{op}.i{w}")
+
     # bool.*
     impl |= {f"bool.{op}" for op in ["not", "and", "or", "xor"]}
 

@@ -651,6 +651,196 @@ bool lower_expr_part_b(FunctionCtx* f, int64_t node_id, NodeRec* n, LLVMValueRef
     goto done;
   }
 
+  if (strncmp(n->tag, "atomic.load.", 12) == 0) {
+    const char* tname = n->tag + 12;
+    if (!n->fields) {
+      err_codef(f->p, "sircc.atomic.load.missing_fields", "sircc: %s node %lld missing fields", n->tag, (long long)node_id);
+      goto done;
+    }
+    JsonValue* args = json_obj_get(n->fields, "args");
+    if (!args || args->type != JSON_ARRAY || args->v.arr.len != 1) {
+      err_codef(f->p, "sircc.atomic.load.args.bad", "sircc: %s node %lld requires args:[addr]", n->tag, (long long)node_id);
+      goto done;
+    }
+    int64_t aid = 0;
+    if (!parse_node_ref_id(f->p, args->v.arr.items[0], &aid)) {
+      err_codef(f->p, "sircc.atomic.load.addr.ref_bad", "sircc: %s node %lld addr must be a node ref", n->tag, (long long)node_id);
+      goto done;
+    }
+    LLVMValueRef pval = lower_expr(f, aid);
+    if (!pval) goto done;
+    LLVMTypeRef pty = LLVMTypeOf(pval);
+    if (LLVMGetTypeKind(pty) != LLVMPointerTypeKind) {
+      err_codef(f->p, "sircc.atomic.load.addr.not_ptr", "sircc: %s requires pointer addr", n->tag);
+      goto done;
+    }
+
+    LLVMTypeRef el = lower_type_prim(f->ctx, tname);
+    if (!el || LLVMGetTypeKind(el) != LLVMIntegerTypeKind) {
+      err_codef(f->p, "sircc.atomic.load.type_unsupported", "sircc: unsupported atomic.load type '%s'", tname);
+      goto done;
+    }
+
+    LLVMTypeRef want_ptr = LLVMPointerType(el, 0);
+    if (want_ptr != pty) pval = LLVMBuildBitCast(f->builder, pval, want_ptr, "atomic.ld.cast");
+
+    unsigned natural_align = (unsigned)((LLVMGetIntTypeWidth(el) + 7u) / 8u);
+    unsigned align = natural_align ? natural_align : 1u;
+    JsonValue* flags = json_obj_get(n->fields, "flags");
+    JsonValue* alignv = NULL;
+    if (flags && flags->type == JSON_OBJECT) alignv = json_obj_get(flags, "align");
+    if (!alignv) alignv = json_obj_get(n->fields, "align");
+    if (alignv) {
+      int64_t a = 0;
+      if (!json_get_i64(alignv, &a)) {
+        err_codef(f->p, "sircc.atomic.load.align.not_int", "sircc: %s node %lld flags.align must be an integer", n->tag, (long long)node_id);
+        goto done;
+      }
+      if (a <= 0 || a > (int64_t)UINT_MAX) {
+        err_codef(f->p, "sircc.atomic.load.align.range", "sircc: %s node %lld flags.align must be > 0", n->tag, (long long)node_id);
+        goto done;
+      }
+      align = (unsigned)a;
+    }
+    if ((align & (align - 1u)) != 0u) {
+      err_codef(f->p, "sircc.atomic.load.align.not_pow2", "sircc: %s node %lld flags.align must be a power of two", n->tag, (long long)node_id);
+      goto done;
+    }
+    if (!emit_trap_if_misaligned(f, pval, align)) goto done;
+
+    const char* mode = NULL;
+    if (flags && flags->type == JSON_OBJECT) mode = json_get_string(json_obj_get(flags, "mode"));
+    if (!mode) mode = json_get_string(json_obj_get(n->fields, "mode"));
+    if (!mode) {
+      err_codef(f->p, "sircc.atomic.load.mode.missing", "sircc: %s node %lld missing flags.mode", n->tag, (long long)node_id);
+      goto done;
+    }
+    LLVMAtomicOrdering ord;
+    if (strcmp(mode, "relaxed") == 0) ord = LLVMAtomicOrderingMonotonic;
+    else if (strcmp(mode, "acquire") == 0) ord = LLVMAtomicOrderingAcquire;
+    else if (strcmp(mode, "seqcst") == 0) ord = LLVMAtomicOrderingSequentiallyConsistent;
+    else {
+      err_codef(f->p, "sircc.atomic.load.mode.bad", "sircc: %s node %lld invalid mode '%s' for loads", n->tag, (long long)node_id, mode);
+      goto done;
+    }
+
+    out = LLVMBuildLoad2(f->builder, el, pval, "atomic.load");
+    LLVMSetOrdering(out, ord);
+    LLVMSetAlignment(out, align);
+    goto done;
+  }
+
+  if (strncmp(n->tag, "atomic.rmw.", 11) == 0) {
+    const char* p1 = n->tag + 11;
+    const char* dot = strchr(p1, '.');
+    if (!dot || dot == p1 || !dot[1]) {
+      err_codef(f->p, "sircc.atomic.rmw.tag.bad", "sircc: %s node %lld invalid rmw mnemonic spelling", n->tag, (long long)node_id);
+      goto done;
+    }
+    char opbuf[16];
+    const size_t oplen = (size_t)(dot - p1);
+    if (oplen >= sizeof(opbuf)) {
+      err_codef(f->p, "sircc.atomic.rmw.op.bad", "sircc: %s node %lld rmw op too long", n->tag, (long long)node_id);
+      goto done;
+    }
+    memcpy(opbuf, p1, oplen);
+    opbuf[oplen] = 0;
+    const char* tname = dot + 1;
+
+    if (!n->fields) {
+      err_codef(f->p, "sircc.atomic.rmw.missing_fields", "sircc: %s node %lld missing fields", n->tag, (long long)node_id);
+      goto done;
+    }
+    JsonValue* args = json_obj_get(n->fields, "args");
+    if (!args || args->type != JSON_ARRAY || args->v.arr.len != 2) {
+      err_codef(f->p, "sircc.atomic.rmw.args.bad", "sircc: %s node %lld requires args:[addr, value]", n->tag, (long long)node_id);
+      goto done;
+    }
+    int64_t aid = 0, vid = 0;
+    if (!parse_node_ref_id(f->p, args->v.arr.items[0], &aid) || !parse_node_ref_id(f->p, args->v.arr.items[1], &vid)) {
+      err_codef(f->p, "sircc.atomic.rmw.args.ref_bad", "sircc: %s node %lld args must be node refs", n->tag, (long long)node_id);
+      goto done;
+    }
+    LLVMValueRef pval = lower_expr(f, aid);
+    LLVMValueRef vval = lower_expr(f, vid);
+    if (!pval || !vval) goto done;
+    LLVMTypeRef pty = LLVMTypeOf(pval);
+    if (LLVMGetTypeKind(pty) != LLVMPointerTypeKind) {
+      err_codef(f->p, "sircc.atomic.rmw.addr.not_ptr", "sircc: %s requires pointer addr", n->tag);
+      goto done;
+    }
+
+    LLVMTypeRef el = lower_type_prim(f->ctx, tname);
+    if (!el || LLVMGetTypeKind(el) != LLVMIntegerTypeKind) {
+      err_codef(f->p, "sircc.atomic.rmw.type_unsupported", "sircc: unsupported atomic.rmw type '%s'", tname);
+      goto done;
+    }
+    const unsigned w = LLVMGetIntTypeWidth(el);
+    if (LLVMGetTypeKind(LLVMTypeOf(vval)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(vval)) != w) {
+      vval = LLVMBuildTruncOrBitCast(f->builder, vval, el, "atomic.rmw.val");
+    }
+
+    LLVMTypeRef want_ptr = LLVMPointerType(el, 0);
+    if (want_ptr != pty) pval = LLVMBuildBitCast(f->builder, pval, want_ptr, "atomic.rmw.cast");
+
+    unsigned natural_align = (unsigned)((w + 7u) / 8u);
+    unsigned align = natural_align ? natural_align : 1u;
+    JsonValue* flags = json_obj_get(n->fields, "flags");
+    JsonValue* alignv = NULL;
+    if (flags && flags->type == JSON_OBJECT) alignv = json_obj_get(flags, "align");
+    if (!alignv) alignv = json_obj_get(n->fields, "align");
+    if (alignv) {
+      int64_t a = 0;
+      if (!json_get_i64(alignv, &a)) {
+        err_codef(f->p, "sircc.atomic.rmw.align.not_int", "sircc: %s node %lld flags.align must be an integer", n->tag, (long long)node_id);
+        goto done;
+      }
+      if (a <= 0 || a > (int64_t)UINT_MAX) {
+        err_codef(f->p, "sircc.atomic.rmw.align.range", "sircc: %s node %lld flags.align must be > 0", n->tag, (long long)node_id);
+        goto done;
+      }
+      align = (unsigned)a;
+    }
+    if ((align & (align - 1u)) != 0u) {
+      err_codef(f->p, "sircc.atomic.rmw.align.not_pow2", "sircc: %s node %lld flags.align must be a power of two", n->tag, (long long)node_id);
+      goto done;
+    }
+    if (!emit_trap_if_misaligned(f, pval, align)) goto done;
+
+    const char* mode = NULL;
+    if (flags && flags->type == JSON_OBJECT) mode = json_get_string(json_obj_get(flags, "mode"));
+    if (!mode) mode = json_get_string(json_obj_get(n->fields, "mode"));
+    if (!mode) {
+      err_codef(f->p, "sircc.atomic.rmw.mode.missing", "sircc: %s node %lld missing flags.mode", n->tag, (long long)node_id);
+      goto done;
+    }
+    LLVMAtomicOrdering ord;
+    if (strcmp(mode, "relaxed") == 0) ord = LLVMAtomicOrderingMonotonic;
+    else if (strcmp(mode, "acquire") == 0) ord = LLVMAtomicOrderingAcquire;
+    else if (strcmp(mode, "release") == 0) ord = LLVMAtomicOrderingRelease;
+    else if (strcmp(mode, "acqrel") == 0) ord = LLVMAtomicOrderingAcquireRelease;
+    else if (strcmp(mode, "seqcst") == 0) ord = LLVMAtomicOrderingSequentiallyConsistent;
+    else {
+      err_codef(f->p, "sircc.atomic.rmw.mode.bad", "sircc: %s node %lld invalid mode '%s'", n->tag, (long long)node_id, mode);
+      goto done;
+    }
+
+    LLVMAtomicRMWBinOp bop;
+    if (strcmp(opbuf, "add") == 0) bop = LLVMAtomicRMWBinOpAdd;
+    else if (strcmp(opbuf, "and") == 0) bop = LLVMAtomicRMWBinOpAnd;
+    else if (strcmp(opbuf, "or") == 0) bop = LLVMAtomicRMWBinOpOr;
+    else if (strcmp(opbuf, "xor") == 0) bop = LLVMAtomicRMWBinOpXor;
+    else if (strcmp(opbuf, "xchg") == 0) bop = LLVMAtomicRMWBinOpXchg;
+    else {
+      err_codef(f->p, "sircc.atomic.rmw.op.bad", "sircc: %s node %lld unsupported rmw op '%s'", n->tag, (long long)node_id, opbuf);
+      goto done;
+    }
+
+    out = LLVMBuildAtomicRMW(f->builder, bop, pval, vval, ord, 0);
+    LLVMSetAlignment(out, align);
+    goto done;
+  }
+
   if (strncmp(n->tag, "load.", 5) == 0) {
     const char* tname = n->tag + 5;
     if (!n->fields) {

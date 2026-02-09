@@ -205,8 +205,12 @@ Implement in the same order as below (earlier items unblock later ones). Each bu
 Each package must be fully skippable unless its `unit.features` gate is enabled.
 
 ### 4.1 Atomics (effects; atomics:v1) — 4
-- [ ] Validate + lower ordering modes (`relaxed/acquire/release/acqrel/seqcst`)
-- [ ] Implement atomic load/store/RMW/CAS as specified
+- [x] Validate + lower ordering modes (`relaxed/acquire/release/acqrel/seqcst`) (closed set; load/store legality enforced)
+- [ ] Implement atomic load/store/RMW/CAS as specified (partial)
+  - [x] `atomic.load.i8/i16/i32/i64` (LLVM atomic load)
+  - [x] `atomic.store.i8/i16/i32/i64` (LLVM atomic store)
+  - [x] `atomic.rmw.{add,and,or,xor,xchg}.i8/i16/i32/i64` (LLVM atomicrmw)
+  - [ ] `atomic.cmpxchg.*` (blocked: current node model is single-result; cmpxchg is multi-result in spec)
 
 ### 4.2 SIMD (simd:v1) — 13
 - [x] **Phase 0: contracts + representation (must be explicit)**

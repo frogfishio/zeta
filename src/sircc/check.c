@@ -266,6 +266,7 @@ int sircc_run_check(FILE* out, const SirccOptions* base_opt, const SirccCheckOpt
       {.name = "call_indirect_ptrsym", .file = "call_indirect_ptrsym.sir.jsonl", .kind = CHECK_VERIFY, .expect_exit = 0},
       {.name = "ptr_layout", .file = "ptr_layout.sir.jsonl", .kind = CHECK_VERIFY, .expect_exit = 0},
       {.name = "misaligned_load_traps", .file = "misaligned_load_traps.sir.jsonl", .kind = CHECK_VERIFY, .expect_exit = 0},
+      {.name = "atomic_basic_i32", .file = "atomic_basic_i32.sir.jsonl", .kind = CHECK_RUN, .expect_exit = 124},
       {.name = "mem_copy_fill", .file = "mem_copy_fill.sir.jsonl", .kind = CHECK_RUN, .expect_exit = 42},
       {.name = "cfg_if", .file = "cfg_if.sir.jsonl", .kind = CHECK_RUN, .expect_exit = 222},
       {.name = "cfg_switch", .file = "cfg_switch.sir.jsonl", .kind = CHECK_RUN, .expect_exit = 20},

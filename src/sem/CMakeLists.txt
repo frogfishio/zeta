@@ -76,6 +76,18 @@ add_test(
   COMMAND $<TARGET_FILE:sem> --run ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_write.sir.jsonl
 )
 
+add_executable(sem_unit_diff_sem_vs_sircc_atomic_basic_i32
+  tests/test_diff_sem_vs_sircc_atomic_basic_i32.c
+)
+
+add_dependencies(sem_unit_diff_sem_vs_sircc_atomic_basic_i32 sem sircc)
+target_compile_definitions(sem_unit_diff_sem_vs_sircc_atomic_basic_i32 PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_definitions(sem_unit_diff_sem_vs_sircc_atomic_basic_i32 PRIVATE SEM_EXE_PATH="$<TARGET_FILE:sem>")
+target_compile_definitions(sem_unit_diff_sem_vs_sircc_atomic_basic_i32 PRIVATE SIRCC_EXE_PATH="$<TARGET_FILE:sircc>")
+target_compile_options(sem_unit_diff_sem_vs_sircc_atomic_basic_i32 PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_diff_sem_vs_sircc_atomic_basic_i32 COMMAND sem_unit_diff_sem_vs_sircc_atomic_basic_i32)
+
 add_executable(sem_unit_run_call_indirect
   tests/test_run_call_indirect.c
   sem_hosted.c
