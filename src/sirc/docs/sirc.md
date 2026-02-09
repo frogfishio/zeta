@@ -294,7 +294,7 @@ let x:i32 = sem.switch(scrut, cases: [
 
 ```sir
 let x:i32 = sem.match_sum(MySumTy, scrut, cases: [
-  { variant: 0, body: val 1:i32 }
+  case 0 -> val 1:i32
 ], default: val 0:i32) as i32
 ```
 

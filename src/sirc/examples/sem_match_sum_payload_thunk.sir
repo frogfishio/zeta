@@ -16,8 +16,8 @@ fn main() -> i32 public
     OptI32,
     v,
     cases: [
-      { variant: 0, body: val 0:i32 },
-      { variant: 1, body: thunk f }
+      case 0 -> val 0:i32,
+      case 1 -> thunk f
     ],
     default: val 0:i32
   ) as i32

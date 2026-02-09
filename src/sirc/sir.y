@@ -393,6 +393,11 @@ sem_match_case
       $$.variant = $5;
       $$.body = $10;
     }
+  | T_CASE T_INT nl_star T_ARROW nl_star branch_operand
+    {
+      $$.variant = $2;
+      $$.body = $6;
+    }
   ;
 
 block_value
