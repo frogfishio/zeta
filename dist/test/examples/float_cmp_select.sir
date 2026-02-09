@@ -1,0 +1,9 @@
+unit float_cmp_select target host
+
+fn main() -> i32 public
+  let a: f64 = f64.from_i32.s(7:i32)
+  let b: f64 = f64.div(a, 2.0:f64)
+  let ok: bool = f64.cmp.olt(b, 4.0:f64)
+  return select(i32, ok, 1:i32, 0:i32)
+end
+

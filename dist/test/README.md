@@ -14,6 +14,7 @@ $SIRCC ./dist/test/examples/cfg_if.sir.jsonl -o /tmp/cfg_if && /tmp/cfg_if; echo
 $SIRCC ./dist/test/examples/cfg_switch.sir.jsonl -o /tmp/cfg_switch && /tmp/cfg_switch; echo $?
 $SIRCC ./dist/test/examples/hello_world_puts.sir.jsonl -o /tmp/hello && /tmp/hello; echo $?
 $SIRCC ./dist/test/examples/interop_export_global_i32.sir.jsonl -o /tmp/interop_export_global_i32 && /tmp/interop_export_global_i32; echo $?
+$SIRCC ./dist/test/examples/atomic_basic_i32.sir.jsonl -o /tmp/atomic_basic_i32 && /tmp/atomic_basic_i32; echo $?
 $SIRCC ./dist/test/examples/simd_splat_extract.sir.jsonl -o /tmp/simd_splat_extract && /tmp/simd_splat_extract; echo $?
 $SIRCC ./dist/test/examples/simd_i32_add_extract_replace.sir.jsonl -o /tmp/simd_i32_add_extract_replace && /tmp/simd_i32_add_extract_replace; echo $?
 $SIRCC ./dist/test/examples/simd_cmp_select_bool_mask.sir.jsonl -o /tmp/simd_cmp_select_bool_mask && /tmp/simd_cmp_select_bool_mask; echo $?
@@ -48,6 +49,7 @@ Expected exit codes:
 - `cfg_switch.sir.jsonl` → `20` (with no CLI args; `argc==1` selects case `1` ⇒ returns `20`)
 - `hello_world_puts.sir.jsonl` → `0` (also prints a line via `puts`)
 - `interop_export_global_i32.sir.jsonl` → `42`
+- `atomic_basic_i32.sir.jsonl` → `124`
 - `simd_splat_extract.sir.jsonl` → `7`
 - `simd_i32_add_extract_replace.sir.jsonl` → `9`
 - `simd_cmp_select_bool_mask.sir.jsonl` → `7`

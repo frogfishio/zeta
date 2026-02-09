@@ -117,6 +117,19 @@ Standalone build (from repo root):
 - `cmake -S src/sirc -B build/sirc`
 - `cmake --build build/sirc`
 
+## VS Code (syntax highlighting)
+
+The repo includes a small VS Code extension in `sir-language-support/` with TextMate grammars for:
+
+- `.sir` (sugared source)
+- `.sir.jsonl` / SIR JSONL streams
+
+For alpha users, the `dist/` bundle also includes a prebuilt `.vsix`:
+
+- `dist/doc/editors/sir-language-support-0.0.2.vsix`
+
+Install via VS Code: “Extensions: Install from VSIX…”.
+
 Try it:
 
 - `./build/sirc/sirc src/sirc/examples/hello.sir -o /tmp/hello.sir.jsonl`
@@ -130,14 +143,25 @@ Tip: use `target host` in the `unit` header to let the backend pick the default 
 
 This is what we treat as “basic product” right now:
 
+- Reference docs: `src/sirc/docs/sirc.md`
+
 - unit header: `unit <name> target host|<triple> [+feature[:v]]*`
+- ids: emitted as strings by default (`--ids numeric` switches to numeric ids)
 - functions: `extern fn ...`, `fn ... end`, `public`, `let`, `return`
 - values: identifiers, `true/false`, string literals
 - values: integer literals (`3` and `3:i32`)
 - values: float literals (`1.5`, `1.5:f32`, `1e3:f64`) (emitted as deterministic `const.f32/f64` bit-pattern records)
 - values: decimal float literals (`1.5` and `1.5:f64` / `1.5:f32`) (emitted as deterministic `const.f32/f64` bit-pattern records)
+- types:
+  - `^T` pointer types
+  - `array(T, N)` array types
+  - `fn(T, ...) -> R` function signature types
+  - `fun(Sig)` function-pointer types (pack `fun:v1`)
+  - `closure(CallSig, EnvTy)` closure types (pack `closure:v1`)
+  - `sum{None, Some:T, ...}` sum/ADT types (pack `adt:v1`)
 - calls:
   - mnemonic calls via dotted names (e.g. `i32.add(a,b)`, `alloca.i32()`, `mem.copy(dst,src,len)`)
+  - typed mnemonic calls: `tag(args...) ... as Type` forces the node `type_ref` (useful for `call.fun`, `call.closure`, `adt.*`)
   - `load.<ty>(addr)` / `store.<ty>(addr, value)` (emits `fields.addr/value`; `align`/`vol` are optional via attributes)
   - `select(<ty>, cond, then, else)` (lowers to SIR `select`)
   - attribute tail (flat, no braces):

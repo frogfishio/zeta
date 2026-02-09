@@ -1,0 +1,24 @@
+unit simd_shuffle_hsum target host +simd:v1
+
+type V4i32 = vec(i32, 4)
+
+fn main() -> i32 public
+  ;; v = [1,2,3,4]
+  let v0: V4i32 = vec.splat(1:i32) as V4i32
+  let v1: V4i32 = vec.replace(v0, 1:i32, 2:i32) as V4i32
+  let v2: V4i32 = vec.replace(v1, 2:i32, 3:i32) as V4i32
+  let v3: V4i32 = vec.replace(v2, 3:i32, 4:i32) as V4i32
+
+  ;; reverse lanes via shuffle (idx picks from concatenated [a,b] lanes)
+  let r: V4i32 = vec.shuffle(v3, v3) +idx=[3,2,1,0] as V4i32
+
+  ;; horizontal sum (extract + scalar adds)
+  let a0: i32 = vec.extract(r, 0:i32) as i32
+  let a1: i32 = vec.extract(r, 1:i32) as i32
+  let a2: i32 = vec.extract(r, 2:i32) as i32
+  let a3: i32 = vec.extract(r, 3:i32) as i32
+  let s01: i32 = i32.add(a0, a1)
+  let s23: i32 = i32.add(a2, a3)
+  return i32.add(s01, s23)
+end
+

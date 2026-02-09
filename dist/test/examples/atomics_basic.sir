@@ -1,0 +1,13 @@
+unit atomics_basic target host +atomics:v1
+
+fn main() -> i32 public
+  let p: ptr = alloca.i32() +align=4 +zero=true
+
+  atomic.store.i32(p, 41:i32) +mode=seqcst +align=4
+  let old: i32 = atomic.load.i32(p) +mode=seqcst +align=4
+  let prev: i32 = atomic.rmw.add.i32(p, 1:i32) +mode=seqcst +align=4
+  let now: i32 = atomic.load.i32(p) +mode=seqcst +align=4
+
+  return i32.add(i32.add(old, prev), now)
+end
+

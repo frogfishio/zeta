@@ -80,6 +80,7 @@ add_custom_target(dist_sircc
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/docs/hl_core_contract.md ${SIR_DIST_DOC}/hl_core_contract.md
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sem/README.md ${SIR_DIST_DOC}/sem.md
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/docs/test.md ${SIR_DIST_TEST}/README.md
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/docs/QUICKSTART.md ${SIR_DIST_ROOT}/QUICKSTART.md
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>
     -DOUT=${SIR_DIST_DOC}/support.html
@@ -167,11 +168,15 @@ if(EXISTS ${SIR_ZABI25_PACK_ROOT}/include AND EXISTS ${SIR_ZABI25_PACK_ROOT}/lib
 endif()
 
 if(TARGET sirc)
+  set(SIR_VSCODE_EXT_VSIX ${CMAKE_SOURCE_DIR}/sir-language-support/sir-language-support-0.0.2.vsix)
+  set(SIR_VSCODE_EXT_README ${CMAKE_SOURCE_DIR}/sir-language-support/README.md)
+
   add_custom_target(dist_sirc
     DEPENDS sirc
     COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_BIN_OS}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_DOC}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_TEST_EXAMPLES}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_DOC}/editors
 
     # binary + docs
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:sirc> ${SIR_DIST_BIN_OS}/sirc
@@ -188,7 +193,26 @@ if(TARGET sirc)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/eff_fence.sir ${SIR_DIST_TEST_EXAMPLES}/eff_fence.sir
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/load_store_no_align.sir ${SIR_DIST_TEST_EXAMPLES}/load_store_no_align.sir
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/trap.sir ${SIR_DIST_TEST_EXAMPLES}/trap.sir
+
+    # pack examples (feature-gated; intended for sirc → sircc)
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/atomics_basic.sir ${SIR_DIST_TEST_EXAMPLES}/atomics_basic.sir
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/simd_basic.sir ${SIR_DIST_TEST_EXAMPLES}/simd_basic.sir
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/simd_shuffle_hsum.sir ${SIR_DIST_TEST_EXAMPLES}/simd_shuffle_hsum.sir
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/simd_atomic_mix.sir ${SIR_DIST_TEST_EXAMPLES}/simd_atomic_mix.sir
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/ptr_arith.sir ${SIR_DIST_TEST_EXAMPLES}/ptr_arith.sir
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/float_cmp_select.sir ${SIR_DIST_TEST_EXAMPLES}/float_cmp_select.sir
+
+    # VS Code extension (prebuilt .vsix, if present)
   )
+
+  if(EXISTS ${SIR_VSCODE_EXT_VSIX} AND EXISTS ${SIR_VSCODE_EXT_README})
+    add_custom_command(
+      TARGET dist_sirc
+      POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SIR_VSCODE_EXT_VSIX} ${SIR_DIST_DOC}/editors/sir-language-support-0.0.2.vsix
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SIR_VSCODE_EXT_README} ${SIR_DIST_DOC}/editors/sir-language-support.md
+    )
+  endif()
 endif()
 
 add_custom_target(dist DEPENDS dist_sircc)

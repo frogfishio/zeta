@@ -117,6 +117,19 @@ Standalone build (from repo root):
 - `cmake -S src/sirc -B build/sirc`
 - `cmake --build build/sirc`
 
+## VS Code (syntax highlighting)
+
+The repo includes a small VS Code extension in `sir-language-support/` with TextMate grammars for:
+
+- `.sir` (sugared source)
+- `.sir.jsonl` / SIR JSONL streams
+
+For alpha users, the `dist/` bundle also includes a prebuilt `.vsix`:
+
+- `dist/doc/editors/sir-language-support-0.0.2.vsix`
+
+Install via VS Code: “Extensions: Install from VSIX…”.
+
 Try it:
 
 - `./build/sirc/sirc src/sirc/examples/hello.sir -o /tmp/hello.sir.jsonl`
