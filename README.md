@@ -65,6 +65,14 @@ Zeta’s value isn’t just code generation—it’s the whole correctness loop:
 
 ---
 
+## Why learn Zeta?
+
+- **It’s a real low-level language.** Write kernels/drivers/embedded-style code *and* normal applications with explicit control over types, memory, and calling conventions.
+- **It’s a better “lowering target” than “lower to C”.** You get a strict verifier, stable diagnostic context (`src`/`src_ref`/`loc`), and an execution harness (`sem`) that can prove a lowering is correct by running it deterministically under explicit capabilities.
+- **It scales from hand-written code to compiler pipelines.** You can author `.sir` directly for fast iteration, or emit `sir-v1.0` JSONL from a frontend/DSL and rely on Zeta’s shared lowering and codegen.
+
+---
+
 ## Components (repo)
 
 ### SIR (the contract)
