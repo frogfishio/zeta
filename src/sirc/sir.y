@@ -247,6 +247,10 @@ switch_cases
     { $$ = sirc_cases_append(sirc_cases_empty(), $5, $9); }
   | switch_cases ',' nl_star '{' nl_star T_LIT ':' int_lit ',' nl_star T_TO T_ID nl_star '}'
     { $$ = sirc_cases_append($1, $8, $12); }
+  | T_CASE int_lit nl_star T_ARROW nl_star T_ID
+    { $$ = sirc_cases_append(sirc_cases_empty(), $2, $6); }
+  | switch_cases ',' nl_star T_CASE int_lit nl_star T_ARROW nl_star T_ID
+    { $$ = sirc_cases_append($1, $5, $9); }
   ;
 
 term_switch_stmt

@@ -4,8 +4,8 @@ fn main(x:i32) -> i32 public
   block entry
     term.switch scrut:x,
       cases:[
-        { lit:0:i32, to zero },
-        { lit:1:i32, to one }
+        case 0:i32 -> zero,
+        case 1:i32 -> one
       ],
       default:def
   end
@@ -22,4 +22,3 @@ fn main(x:i32) -> i32 public
     term.ret value:30:i32
   end
 end
-

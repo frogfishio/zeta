@@ -255,7 +255,7 @@ end
 Terminators:
 - `term.br to <block> [args: [...]]`
 - `term.cbr cond: <expr>, then: <block> [args], else: <block> [args]`
-- `term.switch scrut: <expr>, cases: [...], default: <block>`
+- `term.switch scrut: <expr>, cases: [case <lit> -> <block>, ...], default: <block>`
 - `term.ret [value: <expr>]`
 - `term.unreachable ...attrs`
 - `term.trap ...attrs`
