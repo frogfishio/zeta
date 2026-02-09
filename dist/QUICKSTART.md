@@ -42,13 +42,6 @@ $SIRC ./dist/test/examples/hello.sir -o /tmp/hello.sir.jsonl
 $SIRCC /tmp/hello.sir.jsonl -o /tmp/hello && /tmp/hello
 ```
 
-## Starter project (package.toml + @include)
-
-```sh
-$SIRC ./dist/starter/hello_zeta/src/main.sir -o /tmp/hello_zeta.sir.jsonl
-$SIRCC /tmp/hello_zeta.sir.jsonl -o /tmp/hello_zeta && /tmp/hello_zeta
-```
-
 ## “What does sircc support?”
 
 ```sh
@@ -68,3 +61,4 @@ The bundle includes a `.vsix` for the `.sir` language and `.sir.jsonl` streams:
 - `dist/doc/editors/sir-language-support-0.0.2.vsix`
 
 Install via VS Code: “Extensions: Install from VSIX…”.
+
