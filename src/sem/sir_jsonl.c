@@ -1939,6 +1939,114 @@ static bool eval_atomic_load_i32(sirj_ctx_t* c, uint32_t node_id, const node_inf
   return true;
 }
 
+static bool eval_atomic_load_i8(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 1) {
+    sirj_diag_setf(c, "sem.parse.atomic.load.args", c->cur_path, n->loc_line, node_id, n->tag, "%s args must be [addr]", n->tag);
+    return false;
+  }
+  uint32_t addr_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &addr_id)) return false;
+
+  const char* mode = NULL;
+  uint32_t align = 1;
+  if (!parse_atomic_flags(c, node_id, n, 1, &mode, &align)) return false;
+  if (strcmp(mode, "release") == 0 || strcmp(mode, "acqrel") == 0) {
+    sirj_diag_setf(c, "sem.parse.atomic.load.mode", c->cur_path, n->loc_line, node_id, n->tag, "%s invalid mode '%s' for loads", n->tag, mode);
+    return false;
+  }
+
+  sir_val_id_t addr_slot = 0;
+  val_kind_t ak = VK_INVALID;
+  if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
+  if (ak != VK_PTR) {
+    sirj_diag_setf(c, "sem.atomic.load.addr_type", c->cur_path, n->loc_line, node_id, n->tag, "%s addr must be ptr", n->tag);
+    return false;
+  }
+
+  const sir_val_id_t dst = alloc_slot(c, VK_I8);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_load_i8(c->mb, c->fn, dst, addr_slot, align)) return false;
+  if (!set_node_val(c, node_id, dst, VK_I8)) return false;
+  *out_slot = dst;
+  *out_kind = VK_I8;
+  return true;
+}
+
+static bool eval_atomic_load_i16(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 1) {
+    sirj_diag_setf(c, "sem.parse.atomic.load.args", c->cur_path, n->loc_line, node_id, n->tag, "%s args must be [addr]", n->tag);
+    return false;
+  }
+  uint32_t addr_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &addr_id)) return false;
+
+  const char* mode = NULL;
+  uint32_t align = 2;
+  if (!parse_atomic_flags(c, node_id, n, 2, &mode, &align)) return false;
+  if (strcmp(mode, "release") == 0 || strcmp(mode, "acqrel") == 0) {
+    sirj_diag_setf(c, "sem.parse.atomic.load.mode", c->cur_path, n->loc_line, node_id, n->tag, "%s invalid mode '%s' for loads", n->tag, mode);
+    return false;
+  }
+
+  sir_val_id_t addr_slot = 0;
+  val_kind_t ak = VK_INVALID;
+  if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
+  if (ak != VK_PTR) {
+    sirj_diag_setf(c, "sem.atomic.load.addr_type", c->cur_path, n->loc_line, node_id, n->tag, "%s addr must be ptr", n->tag);
+    return false;
+  }
+
+  const sir_val_id_t dst = alloc_slot(c, VK_I16);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_load_i16(c->mb, c->fn, dst, addr_slot, align)) return false;
+  if (!set_node_val(c, node_id, dst, VK_I16)) return false;
+  *out_slot = dst;
+  *out_kind = VK_I16;
+  return true;
+}
+
+static bool eval_atomic_load_i64(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 1) {
+    sirj_diag_setf(c, "sem.parse.atomic.load.args", c->cur_path, n->loc_line, node_id, n->tag, "%s args must be [addr]", n->tag);
+    return false;
+  }
+  uint32_t addr_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &addr_id)) return false;
+
+  const char* mode = NULL;
+  uint32_t align = 8;
+  if (!parse_atomic_flags(c, node_id, n, 8, &mode, &align)) return false;
+  if (strcmp(mode, "release") == 0 || strcmp(mode, "acqrel") == 0) {
+    sirj_diag_setf(c, "sem.parse.atomic.load.mode", c->cur_path, n->loc_line, node_id, n->tag, "%s invalid mode '%s' for loads", n->tag, mode);
+    return false;
+  }
+
+  sir_val_id_t addr_slot = 0;
+  val_kind_t ak = VK_INVALID;
+  if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
+  if (ak != VK_PTR) {
+    sirj_diag_setf(c, "sem.atomic.load.addr_type", c->cur_path, n->loc_line, node_id, n->tag, "%s addr must be ptr", n->tag);
+    return false;
+  }
+
+  const sir_val_id_t dst = alloc_slot(c, VK_I64);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_load_i64(c->mb, c->fn, dst, addr_slot, align)) return false;
+  if (!set_node_val(c, node_id, dst, VK_I64)) return false;
+  *out_slot = dst;
+  *out_kind = VK_I64;
+  return true;
+}
+
 static bool eval_atomic_store_i32_stmt(sirj_ctx_t* c, uint32_t stmt_id, const node_info_t* n) {
   if (!c || !n) return false;
   if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
@@ -1970,6 +2078,105 @@ static bool eval_atomic_store_i32_stmt(sirj_ctx_t* c, uint32_t stmt_id, const no
 
   sir_mb_set_src(c->mb, stmt_id, n->loc_line);
   return sir_mb_emit_store_i32(c->mb, c->fn, addr_slot, val_slot, align);
+}
+
+static bool eval_atomic_store_i8_stmt(sirj_ctx_t* c, uint32_t stmt_id, const node_info_t* n) {
+  if (!c || !n) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 2) {
+    sirj_diag_setf(c, "sem.parse.atomic.store.args", c->cur_path, n->loc_line, stmt_id, n->tag, "%s args must be [addr, value]", n->tag);
+    return false;
+  }
+  uint32_t addr_id = 0, val_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &addr_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[1], &val_id)) return false;
+
+  const char* mode = NULL;
+  uint32_t align = 1;
+  if (!parse_atomic_flags(c, stmt_id, n, 1, &mode, &align)) return false;
+  if (strcmp(mode, "acquire") == 0 || strcmp(mode, "acqrel") == 0) {
+    sirj_diag_setf(c, "sem.parse.atomic.store.mode", c->cur_path, n->loc_line, stmt_id, n->tag, "%s invalid mode '%s' for stores", n->tag, mode);
+    return false;
+  }
+
+  sir_val_id_t addr_slot = 0, val_slot = 0;
+  val_kind_t ak = VK_INVALID, vk = VK_INVALID;
+  if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
+  if (!eval_node(c, val_id, &val_slot, &vk)) return false;
+  if (ak != VK_PTR || vk != VK_I8) {
+    sirj_diag_setf(c, "sem.atomic.store.arg_type", c->cur_path, n->loc_line, stmt_id, n->tag, "%s requires (ptr, i8)", n->tag);
+    return false;
+  }
+
+  sir_mb_set_src(c->mb, stmt_id, n->loc_line);
+  return sir_mb_emit_store_i8(c->mb, c->fn, addr_slot, val_slot, align);
+}
+
+static bool eval_atomic_store_i16_stmt(sirj_ctx_t* c, uint32_t stmt_id, const node_info_t* n) {
+  if (!c || !n) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 2) {
+    sirj_diag_setf(c, "sem.parse.atomic.store.args", c->cur_path, n->loc_line, stmt_id, n->tag, "%s args must be [addr, value]", n->tag);
+    return false;
+  }
+  uint32_t addr_id = 0, val_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &addr_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[1], &val_id)) return false;
+
+  const char* mode = NULL;
+  uint32_t align = 2;
+  if (!parse_atomic_flags(c, stmt_id, n, 2, &mode, &align)) return false;
+  if (strcmp(mode, "acquire") == 0 || strcmp(mode, "acqrel") == 0) {
+    sirj_diag_setf(c, "sem.parse.atomic.store.mode", c->cur_path, n->loc_line, stmt_id, n->tag, "%s invalid mode '%s' for stores", n->tag, mode);
+    return false;
+  }
+
+  sir_val_id_t addr_slot = 0, val_slot = 0;
+  val_kind_t ak = VK_INVALID, vk = VK_INVALID;
+  if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
+  if (!eval_node(c, val_id, &val_slot, &vk)) return false;
+  if (ak != VK_PTR || vk != VK_I16) {
+    sirj_diag_setf(c, "sem.atomic.store.arg_type", c->cur_path, n->loc_line, stmt_id, n->tag, "%s requires (ptr, i16)", n->tag);
+    return false;
+  }
+
+  sir_mb_set_src(c->mb, stmt_id, n->loc_line);
+  return sir_mb_emit_store_i16(c->mb, c->fn, addr_slot, val_slot, align);
+}
+
+static bool eval_atomic_store_i64_stmt(sirj_ctx_t* c, uint32_t stmt_id, const node_info_t* n) {
+  if (!c || !n) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 2) {
+    sirj_diag_setf(c, "sem.parse.atomic.store.args", c->cur_path, n->loc_line, stmt_id, n->tag, "%s args must be [addr, value]", n->tag);
+    return false;
+  }
+  uint32_t addr_id = 0, val_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &addr_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[1], &val_id)) return false;
+
+  const char* mode = NULL;
+  uint32_t align = 8;
+  if (!parse_atomic_flags(c, stmt_id, n, 8, &mode, &align)) return false;
+  if (strcmp(mode, "acquire") == 0 || strcmp(mode, "acqrel") == 0) {
+    sirj_diag_setf(c, "sem.parse.atomic.store.mode", c->cur_path, n->loc_line, stmt_id, n->tag, "%s invalid mode '%s' for stores", n->tag, mode);
+    return false;
+  }
+
+  sir_val_id_t addr_slot = 0, val_slot = 0;
+  val_kind_t ak = VK_INVALID, vk = VK_INVALID;
+  if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
+  if (!eval_node(c, val_id, &val_slot, &vk)) return false;
+  if (ak != VK_PTR || vk != VK_I64) {
+    sirj_diag_setf(c, "sem.atomic.store.arg_type", c->cur_path, n->loc_line, stmt_id, n->tag, "%s requires (ptr, i64)", n->tag);
+    return false;
+  }
+
+  sir_mb_set_src(c->mb, stmt_id, n->loc_line);
+  return sir_mb_emit_store_i64(c->mb, c->fn, addr_slot, val_slot, align);
 }
 
 static bool eval_atomic_rmw_i32(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, const char* op, sir_val_id_t* out_slot,
@@ -5157,7 +5364,10 @@ static bool eval_node(sirj_ctx_t* c, uint32_t node_id, sir_val_id_t* out_slot, v
   if (strcmp(n->tag, "bool.or") == 0) return eval_bool_bin(c, node_id, n, SIR_INST_BOOL_OR, out_slot, out_kind);
   if (strcmp(n->tag, "bool.xor") == 0) return eval_bool_bin(c, node_id, n, SIR_INST_BOOL_XOR, out_slot, out_kind);
   if (strcmp(n->tag, "select") == 0) return eval_select(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "atomic.load.i8") == 0) return eval_atomic_load_i8(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "atomic.load.i16") == 0) return eval_atomic_load_i16(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "atomic.load.i32") == 0) return eval_atomic_load_i32(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "atomic.load.i64") == 0) return eval_atomic_load_i64(c, node_id, n, out_slot, out_kind);
   if (strncmp(n->tag, "atomic.rmw.", 11) == 0) {
     const char* p1 = n->tag + 11;
     const char* dot = strchr(p1, '.');
@@ -5309,7 +5519,10 @@ static bool exec_stmt(sirj_ctx_t* c, uint32_t stmt_id, bool* out_did_return, sir
   if (strcmp(n->tag, "store.ptr") == 0) return eval_store_mnemonic(c, stmt_id, n, SIR_INST_STORE_PTR);
   if (strcmp(n->tag, "store.f32") == 0) return eval_store_mnemonic(c, stmt_id, n, SIR_INST_STORE_F32);
   if (strcmp(n->tag, "store.f64") == 0) return eval_store_mnemonic(c, stmt_id, n, SIR_INST_STORE_F64);
+  if (strcmp(n->tag, "atomic.store.i8") == 0) return eval_atomic_store_i8_stmt(c, stmt_id, n);
+  if (strcmp(n->tag, "atomic.store.i16") == 0) return eval_atomic_store_i16_stmt(c, stmt_id, n);
   if (strcmp(n->tag, "atomic.store.i32") == 0) return eval_atomic_store_i32_stmt(c, stmt_id, n);
+  if (strcmp(n->tag, "atomic.store.i64") == 0) return eval_atomic_store_i64_stmt(c, stmt_id, n);
   if (strcmp(n->tag, "mem.copy") == 0) return eval_mem_copy_stmt(c, stmt_id, n);
   if (strcmp(n->tag, "mem.fill") == 0) return eval_mem_fill_stmt(c, stmt_id, n);
   if (strcmp(n->tag, "call") == 0) {

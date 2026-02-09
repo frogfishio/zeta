@@ -97,6 +97,13 @@ Use `--format json` to get a machine-readable summary:
 ./dist/bin/<os>/sircc --check --format json
 ```
 
+Or run the full bundle check (sircc + sem) via `zetacheck`:
+
+```sh
+./dist/bin/<os>/zetacheck
+./dist/bin/<os>/zetacheck --json
+```
+
 ## zABI (optional runtime)
 
 If your `dist/` bundle includes `dist/rt/zabi25/macos-arm64`, you can build a zABI-linked executable by exporting `zir_main` and linking via the host shim:

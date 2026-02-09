@@ -230,8 +230,8 @@ Work items:
 
 ## P4 (later / optional packs)
 
-- [ ] Atomics (partial): `atomic.load.i32`, `atomic.store.i32`, `atomic.rmw.{add,and,or,xor,xchg}.i32` (single-thread semantics; ordering validated, ignored)
-  - [ ] Extend to other widths (`i8/i16/i64`)
+- [ ] Atomics (partial): `atomic.load.i8/i16/i32/i64`, `atomic.store.i8/i16/i32/i64`, `atomic.rmw.{add,and,or,xor,xchg}.i32` (single-thread semantics; ordering validated, ignored)
+  - [ ] Extend RMW to other widths (`i8/i16/i64`) (blocked on wider integer op support in SEM bytecode)
   - [ ] `atomic.cmpxchg.*` (multi-result)
 - [ ] SIMD/vectors: `load.vec`, `store.vec`, and all `vec.*` mnemonics
 - [ ] Coroutines: `coro.*`

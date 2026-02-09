@@ -19,6 +19,7 @@ set(SIR_VERSION "${SIR_VERSION}" CACHE STRING "Project version (from ./VERSION)"
 add_subdirectory(src/sircore)
 add_subdirectory(src/sircc)
 add_subdirectory(src/sem)
+add_subdirectory(src/zetacheck)
 
 option(SIR_ENABLE_SIRC "Build the experimental .sir text parser (flex/bison)" OFF)
 if(SIR_ENABLE_SIRC)
@@ -51,7 +52,7 @@ endif()
 set(SIR_DIST_BIN_OS ${SIR_DIST_BIN}/${SIR_DIST_OS})
 
 add_custom_target(dist_sircc
-  DEPENDS sircc sem
+  DEPENDS sircc sem zetacheck
   COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_BIN_OS}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_DOC}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${SIR_DIST_PRELUDE}
@@ -65,6 +66,7 @@ add_custom_target(dist_sircc
   # binaries
   COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:sircc> ${SIR_DIST_BIN_OS}/sircc
   COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:sem> ${SIR_DIST_BIN_OS}/sem
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:zetacheck> ${SIR_DIST_BIN_OS}/zetacheck
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/VERSION ${SIR_DIST_ROOT}/VERSION
 
   # docs
@@ -198,6 +200,7 @@ if(TARGET sirc)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/atomics_basic.sir ${SIR_DIST_TEST_EXAMPLES}/atomics_basic.sir
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/simd_basic.sir ${SIR_DIST_TEST_EXAMPLES}/simd_basic.sir
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/simd_shuffle_hsum.sir ${SIR_DIST_TEST_EXAMPLES}/simd_shuffle_hsum.sir
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/simd_load_store_vec.sir ${SIR_DIST_TEST_EXAMPLES}/simd_load_store_vec.sir
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/simd_atomic_mix.sir ${SIR_DIST_TEST_EXAMPLES}/simd_atomic_mix.sir
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/ptr_arith.sir ${SIR_DIST_TEST_EXAMPLES}/ptr_arith.sir
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/float_cmp_select.sir ${SIR_DIST_TEST_EXAMPLES}/float_cmp_select.sir

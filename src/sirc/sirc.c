@@ -2758,6 +2758,59 @@ static int64_t sirc_call_impl(char* name, SircExprList* args, SircAttrList* attr
     return id;
   }
 
+  if (strcmp(name, "load.vec") == 0) {
+    if (argc != 1) die_at_last("sirc: load.vec requires 1 arg (addr)");
+    if (!forced_type_ref) die_at_last("sirc: load.vec requires an explicit vec type via '... as <VecType>'");
+
+    if (g_strict) {
+      if (acc.have_sig) strict_failf("sirc.strict.attr.unsupported", "load.vec: 'sig' attribute is not supported");
+      if (acc.have_count) strict_failf("sirc.strict.attr.unsupported", "load.vec: 'count' attribute is not supported");
+      for (size_t i = 0; i < acc.root_len; i++) {
+        AttrItem* it = &acc.root[i];
+        if (!it->key) continue;
+        if (strcmp(it->key, "align") == 0) {
+          if (it->scalar.kind != ATTR_SCALAR_INT) strict_failf("sirc.strict.attr.bad_type", "load.vec: align must be an integer");
+          continue;
+        }
+        if (strcmp(it->key, "vol") == 0) {
+          if (it->scalar.kind != ATTR_SCALAR_BOOL) strict_failf("sirc.strict.attr.bad_type", "load.vec: vol must be a boolean");
+          continue;
+        }
+        strict_failf("sirc.strict.attr.unknown", "load.vec: unknown attribute '%s'", it->key);
+      }
+      for (size_t i = 0; i < acc.flags_len; i++) {
+        AttrItem* it = &acc.flags[i];
+        if (!it->key) continue;
+        if (strcmp(it->key, "align") == 0) {
+          if (!(it->kind == ATTR_FLAGS_SCALAR && it->scalar.kind == ATTR_SCALAR_INT)) {
+            strict_failf("sirc.strict.attr.bad_type", "load.vec: align must be an integer");
+          }
+          continue;
+        }
+        if (strcmp(it->key, "vol") == 0) {
+          if (!(it->kind == ATTR_FLAGS_SCALAR && it->scalar.kind == ATTR_SCALAR_BOOL)) {
+            strict_failf("sirc.strict.attr.bad_type", "load.vec: vol must be a boolean");
+          }
+          continue;
+        }
+        strict_failf("sirc.strict.attr.unsupported", "load.vec: flags are not supported");
+      }
+    }
+
+    int64_t id = emit_node_with_fields_begin("load.vec", forced_type_ref);
+    emitf("\"addr\":");
+    emit_node_ref_obj(argv[0]);
+    AttrItem* a = attrs_find_scalar_item(acc.flags, acc.flags_len, "align");
+    if (!a) a = attrs_find_scalar_item(acc.root, acc.root_len, "align");
+    if (a && a->scalar.kind == ATTR_SCALAR_INT) emitf(",\"align\":%lld", (long long)a->scalar.v.i);
+    AttrItem* v = attrs_find_scalar_item(acc.flags, acc.flags_len, "vol");
+    if (!v) v = attrs_find_scalar_item(acc.root, acc.root_len, "vol");
+    if (v && v->scalar.kind == ATTR_SCALAR_BOOL) emitf(",\"vol\":%s", v->scalar.v.b ? "true" : "false");
+    emit_fields_end();
+    SIRC_CALL_CLEANUP();
+    return id;
+  }
+
   if (strncmp(name, "load.", 5) == 0) {
     if (argc != 1) die_at_last("sirc: %s requires 1 arg (addr)", name);
     const char* tname = name + 5;
@@ -2766,7 +2819,6 @@ static int64_t sirc_call_impl(char* name, SircExprList* args, SircAttrList* attr
     if (g_strict) {
       if (acc.have_sig) strict_failf("sirc.strict.attr.unsupported", "%s: 'sig' attribute is not supported", name);
       if (acc.have_count) strict_failf("sirc.strict.attr.unsupported", "%s: 'count' attribute is not supported", name);
-      if (acc.flags_len) strict_failf("sirc.strict.attr.unsupported", "%s: flags are not supported", name);
       for (size_t i = 0; i < acc.root_len; i++) {
         AttrItem* it = &acc.root[i];
         if (!it->key) continue;
@@ -2780,14 +2832,87 @@ static int64_t sirc_call_impl(char* name, SircExprList* args, SircAttrList* attr
         }
         strict_failf("sirc.strict.attr.unknown", "%s: unknown attribute '%s'", name, it->key);
       }
+      for (size_t i = 0; i < acc.flags_len; i++) {
+        AttrItem* it = &acc.flags[i];
+        if (!it->key) continue;
+        if (strcmp(it->key, "align") == 0) {
+          if (!(it->kind == ATTR_FLAGS_SCALAR && it->scalar.kind == ATTR_SCALAR_INT)) {
+            strict_failf("sirc.strict.attr.bad_type", "%s: align must be an integer", name);
+          }
+          continue;
+        }
+        if (strcmp(it->key, "vol") == 0) {
+          if (!(it->kind == ATTR_FLAGS_SCALAR && it->scalar.kind == ATTR_SCALAR_BOOL)) {
+            strict_failf("sirc.strict.attr.bad_type", "%s: vol must be a boolean", name);
+          }
+          continue;
+        }
+        strict_failf("sirc.strict.attr.unsupported", "%s: flags are not supported", name);
+      }
     }
 
     int64_t id = emit_node_with_fields_begin(name, ty);
     emitf("\"addr\":");
     emit_node_ref_obj(argv[0]);
-    AttrItem* a = attrs_find_scalar_item(acc.root, acc.root_len, "align");
+    AttrItem* a = attrs_find_scalar_item(acc.flags, acc.flags_len, "align");
+    if (!a) a = attrs_find_scalar_item(acc.root, acc.root_len, "align");
     if (a && a->scalar.kind == ATTR_SCALAR_INT) emitf(",\"align\":%lld", (long long)a->scalar.v.i);
-    AttrItem* v = attrs_find_scalar_item(acc.root, acc.root_len, "vol");
+    AttrItem* v = attrs_find_scalar_item(acc.flags, acc.flags_len, "vol");
+    if (!v) v = attrs_find_scalar_item(acc.root, acc.root_len, "vol");
+    if (v && v->scalar.kind == ATTR_SCALAR_BOOL) emitf(",\"vol\":%s", v->scalar.v.b ? "true" : "false");
+    emit_fields_end();
+    SIRC_CALL_CLEANUP();
+    return id;
+  }
+
+  if (strcmp(name, "store.vec") == 0) {
+    if (argc != 2) die_at_last("sirc: store.vec requires 2 args (addr, value)");
+
+    if (g_strict) {
+      if (acc.have_sig) strict_failf("sirc.strict.attr.unsupported", "store.vec: 'sig' attribute is not supported");
+      if (acc.have_count) strict_failf("sirc.strict.attr.unsupported", "store.vec: 'count' attribute is not supported");
+      for (size_t i = 0; i < acc.root_len; i++) {
+        AttrItem* it = &acc.root[i];
+        if (!it->key) continue;
+        if (strcmp(it->key, "align") == 0) {
+          if (it->scalar.kind != ATTR_SCALAR_INT) strict_failf("sirc.strict.attr.bad_type", "store.vec: align must be an integer");
+          continue;
+        }
+        if (strcmp(it->key, "vol") == 0) {
+          if (it->scalar.kind != ATTR_SCALAR_BOOL) strict_failf("sirc.strict.attr.bad_type", "store.vec: vol must be a boolean");
+          continue;
+        }
+        strict_failf("sirc.strict.attr.unknown", "store.vec: unknown attribute '%s'", it->key);
+      }
+      for (size_t i = 0; i < acc.flags_len; i++) {
+        AttrItem* it = &acc.flags[i];
+        if (!it->key) continue;
+        if (strcmp(it->key, "align") == 0) {
+          if (!(it->kind == ATTR_FLAGS_SCALAR && it->scalar.kind == ATTR_SCALAR_INT)) {
+            strict_failf("sirc.strict.attr.bad_type", "store.vec: align must be an integer");
+          }
+          continue;
+        }
+        if (strcmp(it->key, "vol") == 0) {
+          if (!(it->kind == ATTR_FLAGS_SCALAR && it->scalar.kind == ATTR_SCALAR_BOOL)) {
+            strict_failf("sirc.strict.attr.bad_type", "store.vec: vol must be a boolean");
+          }
+          continue;
+        }
+        strict_failf("sirc.strict.attr.unsupported", "store.vec: flags are not supported");
+      }
+    }
+
+    int64_t id = emit_node_with_fields_begin("store.vec", 0);
+    emitf("\"addr\":");
+    emit_node_ref_obj(argv[0]);
+    emitf(",\"value\":");
+    emit_node_ref_obj(argv[1]);
+    AttrItem* a = attrs_find_scalar_item(acc.flags, acc.flags_len, "align");
+    if (!a) a = attrs_find_scalar_item(acc.root, acc.root_len, "align");
+    if (a && a->scalar.kind == ATTR_SCALAR_INT) emitf(",\"align\":%lld", (long long)a->scalar.v.i);
+    AttrItem* v = attrs_find_scalar_item(acc.flags, acc.flags_len, "vol");
+    if (!v) v = attrs_find_scalar_item(acc.root, acc.root_len, "vol");
     if (v && v->scalar.kind == ATTR_SCALAR_BOOL) emitf(",\"vol\":%s", v->scalar.v.b ? "true" : "false");
     emit_fields_end();
     SIRC_CALL_CLEANUP();
@@ -2800,7 +2925,6 @@ static int64_t sirc_call_impl(char* name, SircExprList* args, SircAttrList* attr
     if (g_strict) {
       if (acc.have_sig) strict_failf("sirc.strict.attr.unsupported", "%s: 'sig' attribute is not supported", name);
       if (acc.have_count) strict_failf("sirc.strict.attr.unsupported", "%s: 'count' attribute is not supported", name);
-      if (acc.flags_len) strict_failf("sirc.strict.attr.unsupported", "%s: flags are not supported", name);
       for (size_t i = 0; i < acc.root_len; i++) {
         AttrItem* it = &acc.root[i];
         if (!it->key) continue;
@@ -2814,6 +2938,23 @@ static int64_t sirc_call_impl(char* name, SircExprList* args, SircAttrList* attr
         }
         strict_failf("sirc.strict.attr.unknown", "%s: unknown attribute '%s'", name, it->key);
       }
+      for (size_t i = 0; i < acc.flags_len; i++) {
+        AttrItem* it = &acc.flags[i];
+        if (!it->key) continue;
+        if (strcmp(it->key, "align") == 0) {
+          if (!(it->kind == ATTR_FLAGS_SCALAR && it->scalar.kind == ATTR_SCALAR_INT)) {
+            strict_failf("sirc.strict.attr.bad_type", "%s: align must be an integer", name);
+          }
+          continue;
+        }
+        if (strcmp(it->key, "vol") == 0) {
+          if (!(it->kind == ATTR_FLAGS_SCALAR && it->scalar.kind == ATTR_SCALAR_BOOL)) {
+            strict_failf("sirc.strict.attr.bad_type", "%s: vol must be a boolean", name);
+          }
+          continue;
+        }
+        strict_failf("sirc.strict.attr.unsupported", "%s: flags are not supported", name);
+      }
     }
 
     int64_t id = emit_node_with_fields_begin(name, 0);
@@ -2821,9 +2962,11 @@ static int64_t sirc_call_impl(char* name, SircExprList* args, SircAttrList* attr
     emit_node_ref_obj(argv[0]);
     emitf(",\"value\":");
     emit_node_ref_obj(argv[1]);
-    AttrItem* a = attrs_find_scalar_item(acc.root, acc.root_len, "align");
+    AttrItem* a = attrs_find_scalar_item(acc.flags, acc.flags_len, "align");
+    if (!a) a = attrs_find_scalar_item(acc.root, acc.root_len, "align");
     if (a && a->scalar.kind == ATTR_SCALAR_INT) emitf(",\"align\":%lld", (long long)a->scalar.v.i);
-    AttrItem* v = attrs_find_scalar_item(acc.root, acc.root_len, "vol");
+    AttrItem* v = attrs_find_scalar_item(acc.flags, acc.flags_len, "vol");
+    if (!v) v = attrs_find_scalar_item(acc.root, acc.root_len, "vol");
     if (v && v->scalar.kind == ATTR_SCALAR_BOOL) emitf(",\"vol\":%s", v->scalar.v.b ? "true" : "false");
     emit_fields_end();
     SIRC_CALL_CLEANUP();
@@ -3073,8 +3216,8 @@ static void print_support(FILE* out, bool as_json) {
   fprintf(out, "  - sem.cond(cond, ...) as T\n");
   fprintf(out, "  - sem.and_sc(lhs, rhsBranch)\n");
   fprintf(out, "  - sem.or_sc(lhs, rhsBranch)\n");
-  fprintf(out, "  - sem.switch(scrut, cases:[{lit:<int>, body:<branch>}, ...], default:<branch>) as T\n");
-  fprintf(out, "  - sem.match_sum(sumTy, scrut, cases:[{variant:N, body:<branch>}, ...], default:<branch>) as T\n");
+  fprintf(out, "  - sem.switch(scrut, cases:[case <lit> -> <branch>, ...], default:<branch>) as T\n");
+  fprintf(out, "  - sem.match_sum(sumTy, scrut, cases:[case <variant> -> <branch>, ...], default:<branch>) as T\n");
   fprintf(out, "  - sem.while(thunk <cond>, thunk <body>)\n");
   fprintf(out, "  - sem.break / sem.continue\n");
   fprintf(out, "  - sem.defer(thunk <cleanup>)\n");

@@ -336,7 +336,9 @@ static void sem_print_support(FILE* out, bool json) {
       "store.ptr",
       "mem.copy",
       "mem.fill",
-      "atomic.load.i32 / atomic.store.i32 / atomic.rmw.*.i32 (atomics:v1, single-thread semantics)",
+      "atomic.load.i8/i16/i32/i64 (atomics:v1, single-thread semantics; ordering validated, ignored)",
+      "atomic.store.i8/i16/i32/i64 (atomics:v1, single-thread semantics; ordering validated, ignored)",
+      "atomic.rmw.*.i32 (atomics:v1, single-thread semantics; ordering validated, ignored)",
 
       // calls
       "decl.fn (extern import)",

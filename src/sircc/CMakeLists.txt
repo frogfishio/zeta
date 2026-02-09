@@ -895,6 +895,15 @@ add_test(
 )
 
 add_test(
+  NAME sircc_print_support_core_missing_zero
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    "-DARGS=--print-support;--format;json;--full"
+    "-DEXPECT=\\\"core_mnemonics\\\":0"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stdout_contains.cmake
+)
+
+add_test(
   NAME sircc_print_support_html
   COMMAND ${CMAKE_COMMAND}
     -DSIRCC=$<TARGET_FILE:sircc>
@@ -921,6 +930,15 @@ add_test(
     "-DARGS=--check;--examples-dir;${CMAKE_CURRENT_LIST_DIR}/examples;--format;json"
     "-DEXPECT=\\\"k\\\":\\\"check\\\""
     "-DEXPECT2=\\\"ok\\\":true"
+    -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stdout_contains.cmake
+)
+
+add_test(
+  NAME sircc_check_includes_atomic_basic
+  COMMAND ${CMAKE_COMMAND}
+    -DSIRCC=$<TARGET_FILE:sircc>
+    "-DARGS=--check;--examples-dir;${CMAKE_CURRENT_LIST_DIR}/examples;--format;json"
+    "-DEXPECT=\\\"name\\\":\\\"atomic_basic_i32\\\""
     -P ${CMAKE_CURRENT_LIST_DIR}/tests/expect_stdout_contains.cmake
 )
 
