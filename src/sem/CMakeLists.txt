@@ -93,6 +93,22 @@ add_test(
   COMMAND $<TARGET_FILE:sem> --run ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_write.sir.jsonl
 )
 
+# Regression: ensure sirc-emitted stable IDs for @include-heavy .sir inputs do not collide
+# in a way that prevents sem from loading/verifying the program.
+# Note: top-level CMake adds `src/sem` before `src/sirc`, so `if(TARGET sirc)`
+# would always be false here. Gate on the option instead.
+if(SIR_ENABLE_SIRC)
+  add_test(
+    NAME sem_verify_sirc_include_relpath_collision
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRC=$<TARGET_FILE:sirc>
+      -DSEM=$<TARGET_FILE:sem>
+      -DINPUT=${CMAKE_SOURCE_DIR}/src/sirc/tests/fixtures/include_relpath_collision/root.sir
+      -DOUT=${CMAKE_CURRENT_BINARY_DIR}/sem_verify_sirc_include_relpath_collision.sir.jsonl
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/run_sirc_then_sem_verify.cmake
+  )
+endif()
+
 add_executable(sem_unit_diff_sem_vs_sircc_atomic_basic_i32
   tests/test_diff_sem_vs_sircc_atomic_basic_i32.c
 )
