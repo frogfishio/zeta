@@ -1,0 +1,6 @@
+unit u0 target host
+
+fn main() -> i32 public
+  eff.fence() flags mode seqcst
+  return 0:i32
+end

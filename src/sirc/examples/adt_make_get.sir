@@ -4,6 +4,6 @@ type OptI32 = sum{None, Some:i32}
 
 fn main() -> i32 public
   let x: i32 = 12:i32
-  let v: OptI32 = adt.make(x) flags variant 1 as OptI32
-  return adt.get(v) ty=OptI32 flags variant 1 as i32
+  let v: OptI32 = adt.make(x) +variant=1 as OptI32
+  return adt.get(v) ty=OptI32 +variant=1 as i32
 end

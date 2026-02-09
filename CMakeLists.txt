@@ -108,6 +108,7 @@ add_custom_target(dist_sircc
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/misaligned_load_traps.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/misaligned_load_traps.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/ptr_layout.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/ptr_layout.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/atomic_basic_i32.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/atomic_basic_i32.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/atomic_cmpxchg_i32.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/atomic_cmpxchg_i32.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/interop_export_global_i32.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/interop_export_global_i32.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_write.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/hello_zabi25_write.sir.jsonl
 
@@ -132,6 +133,7 @@ add_custom_target(dist_sircc
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/ptr_layout.sir.jsonl ${SIR_DIST_TEST_SEM_EXAMPLES}/ptr_layout.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/call_indirect_ptrsym.sir.jsonl ${SIR_DIST_TEST_SEM_EXAMPLES}/call_indirect_ptrsym.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/atomic_basic_i32.sir.jsonl ${SIR_DIST_TEST_SEM_EXAMPLES}/atomic_basic_i32.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/atomic_cmpxchg_i32.sir.jsonl ${SIR_DIST_TEST_SEM_EXAMPLES}/atomic_cmpxchg_i32.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/interop_export_global_i32.sir.jsonl ${SIR_DIST_TEST_SEM_EXAMPLES}/interop_export_global_i32.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/misaligned_load_traps.sir.jsonl ${SIR_DIST_TEST_SEM_EXAMPLES}/misaligned_load_traps.sir.jsonl
 
@@ -143,6 +145,7 @@ add_custom_target(dist_sircc
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_write.sir.jsonl ${SIR_DIST_TEST_SEM_RUN}/hello_zabi25_write.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/call_indirect_ptrsym.sir.jsonl ${SIR_DIST_TEST_SEM_RUN}/call_indirect_ptrsym.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/atomic_basic_i32.sir.jsonl ${SIR_DIST_TEST_SEM_RUN}/atomic_basic_i32.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/atomic_cmpxchg_i32.sir.jsonl ${SIR_DIST_TEST_SEM_RUN}/atomic_cmpxchg_i32.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/interop_export_global_i32.sir.jsonl ${SIR_DIST_TEST_SEM_RUN}/interop_export_global_i32.sir.jsonl
 
   # negative fixtures (verify-only; diagnostics)
@@ -202,6 +205,9 @@ if(TARGET sirc)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/simd_shuffle_hsum.sir ${SIR_DIST_TEST_EXAMPLES}/simd_shuffle_hsum.sir
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/simd_load_store_vec.sir ${SIR_DIST_TEST_EXAMPLES}/simd_load_store_vec.sir
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/simd_atomic_mix.sir ${SIR_DIST_TEST_EXAMPLES}/simd_atomic_mix.sir
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/simd_masked_add.sir ${SIR_DIST_TEST_EXAMPLES}/simd_masked_add.sir
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/simd_gather_scatter_masked.sir ${SIR_DIST_TEST_EXAMPLES}/simd_gather_scatter_masked.sir
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/simd_atomic_per_lane.sir ${SIR_DIST_TEST_EXAMPLES}/simd_atomic_per_lane.sir
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/ptr_arith.sir ${SIR_DIST_TEST_EXAMPLES}/ptr_arith.sir
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sirc/examples/float_cmp_select.sir ${SIR_DIST_TEST_EXAMPLES}/float_cmp_select.sir
 

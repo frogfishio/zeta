@@ -17,6 +17,7 @@ Common modes:
 - Compile one file: `sirc <input.sir> [-o <out.sir.jsonl>]`
 - Tool mode (multi-file): `sirc --tool -o <out.jsonl> <a.sir> <b.sir> ...`
 - Lint only: `sirc --lint <input.sir>`
+- Output format: `--format jsonl|both` (`both` prints a tiny per-record summary to stderr)
 
 Diagnostics:
 - `--diagnostics text|json` (default: `text`)
@@ -186,8 +187,6 @@ Attribute tails are a sequence of items appended to a call or terminator line:
 - `+flag` → boolean flag in `fields.flags` (value `true`)
 - `+key=<scalar>` → keyed scalar in `fields.flags` (recommended for anything “flags-like”)
 - `key=<scalar>` → scalar field in `fields[key]`
-- `flags key <scalar>` → legacy spelling for forcing a keyed scalar into `fields.flags`
-- `flags [a, b, c]` → sugar for `+a +b +c`
 
 Examples:
 

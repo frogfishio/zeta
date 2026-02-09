@@ -81,7 +81,7 @@ void yyerror(const char* s);
 %type <cases> switch_cases_opt switch_cases
 %type <node> expr value int_lit float_lit dotted_or_call
 %type <s> dotted_name
-%type <attrs> attr_tail_opt attr_tail attr_item flags_list flags_id_list
+%type <attrs> attr_tail_opt attr_tail attr_item
 %type <i> attr_int
 %type <b> attr_bool
 %type <s> attr_ident
@@ -485,11 +485,6 @@ attr_item
   | '+' T_ID '=' attr_bool      { $$ = sirc_attrs_add_flags_scalar_bool(sirc_attrs_empty(), $2, $4); }
   | '+' T_ID '=' attr_ident     { $$ = sirc_attrs_add_flags_scalar_str(sirc_attrs_empty(), $2, $4); }
   | '+' T_ID '=' '[' nl_star int_list_opt nl_star ']' { $$ = sirc_attrs_add_flags_scalar_int_list(sirc_attrs_empty(), $2, $6); }
-  | flags_list                  { $$ = $1; }
-  | T_FLAGS T_ID attr_int       { $$ = sirc_attrs_add_flags_scalar_int(sirc_attrs_empty(), $2, $3); }
-  | T_FLAGS T_ID T_STRING       { $$ = sirc_attrs_add_flags_scalar_str(sirc_attrs_empty(), $2, $3); }
-  | T_FLAGS T_ID attr_bool      { $$ = sirc_attrs_add_flags_scalar_bool(sirc_attrs_empty(), $2, $3); }
-  | T_FLAGS T_ID attr_ident     { $$ = sirc_attrs_add_flags_scalar_str(sirc_attrs_empty(), $2, $3); }
   | T_ID '=' attr_int           { $$ = sirc_attrs_add_field_scalar_int(sirc_attrs_empty(), $1, $3); }
   | T_ID '=' T_STRING           { $$ = sirc_attrs_add_field_scalar_str(sirc_attrs_empty(), $1, $3); }
   | T_ID '=' attr_bool          { $$ = sirc_attrs_add_field_scalar_bool(sirc_attrs_empty(), $1, $3); }
@@ -506,16 +501,6 @@ int_list_opt
 int_list
   : T_INT                      { $$ = sirc_ints_append(sirc_ints_empty(), $1); }
   | int_list comma_sep T_INT   { $$ = sirc_ints_append($1, $3); }
-  ;
-
-flags_list
-  : T_FLAGS '[' nl_star flags_id_list nl_star ']'
-                                { $$ = $4; }
-  ;
-
-flags_id_list
-  : T_ID                        { $$ = sirc_attrs_add_flag(sirc_attrs_empty(), $1); }
-  | flags_id_list comma_sep T_ID { $$ = sirc_attrs_add_flag($1, $3); }
   ;
 
 attr_int

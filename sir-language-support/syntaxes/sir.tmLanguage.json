@@ -6,9 +6,9 @@
     { "include": "#comment" },
     { "include": "#string" },
     { "include": "#numbers" },
+    { "include": "#flags" },
     { "include": "#keywords" },
     { "include": "#types" },
-    { "include": "#flags" },
     { "include": "#decls" },
     { "include": "#callNames" },
     { "include": "#attrKeys" }
@@ -60,7 +60,7 @@
       "patterns": [
         {
           "name": "keyword.control.sir",
-          "match": "\\b(unit|target|fn|extern|public|end|return|let|type|const|global|block|do|as)\\b"
+          "match": "\\b(unit|target|fn|extern|public|end|return|let|type|const|global|block|do|as|case|default|to|then|else|val|thunk)\\b"
         },
         {
           "name": "keyword.control.sir",
@@ -72,7 +72,7 @@
         },
         {
           "name": "keyword.operator.sir",
-          "match": "->|=|\\+|:|\\^"
+          "match": "->|=|:(?![A-Za-z_])|\\^(?![A-Za-z_])|\\+(?![A-Za-z_])"
         }
       ]
     },
@@ -96,7 +96,7 @@
       "patterns": [
         {
           "name": "constant.language.flag.sir",
-          "match": "(?<!\\w)\\+[A-Za-z_][A-Za-z0-9_:\\.-]*\\b"
+          "match": "(?<!\\w)\\+[A-Za-z_][A-Za-z0-9_:\\.-]*(?:=[^\\s\\],)]+)?\\b"
         }
       ]
     },
@@ -138,4 +138,3 @@
     }
   }
 }
-

@@ -167,6 +167,7 @@ function(sirc_add_diag_expect_strict_test name input_rel expect_code expect_line
 endfunction()
 
 sirc_add_diag_expect_test(sirc_diag_bad_syntax tests/fixtures/bad_syntax.sir sirc.parse.syntax 4 22 "syntax error")
+sirc_add_diag_expect_test(sirc_diag_bad_legacy_flags_scalar tests/fixtures/bad_legacy_flags_scalar.sir sirc.parse.syntax 4 15 "syntax error")
 sirc_add_diag_expect_test(sirc_diag_bad_sem_if_branch_kind tests/fixtures/bad_sem_if_branch_kind.sir sirc.parse.syntax 5 37 "expected 'val' or 'thunk'")
 sirc_add_diag_expect_test(sirc_diag_bad_sem_scope_keys tests/fixtures/bad_sem_scope_keys.sir sirc.parse.syntax 7 6 "sem.scope: expected 'defers'")
 sirc_add_diag_expect_test(sirc_diag_bad_sem_switch_case_body_key tests/fixtures/bad_sem_switch_missing_body_key.sir sirc.parse.syntax 6 34 "sem.switch: expected 'body'")

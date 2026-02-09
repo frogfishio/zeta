@@ -65,7 +65,10 @@ typedef struct SrcMapEntry {
 
 typedef struct Emitter {
   FILE* out;
+  FILE* pretty;
   const char* input_path;
+
+  bool pretty_enabled;
 
   sirc_ids_mode_t ids_mode;
   sirc_emit_src_mode_t emit_src;
@@ -499,8 +502,69 @@ static void emitf(const char* fmt, ...) {
   va_end(ap);
 }
 
+static const char* pretty_basename(const char* p) {
+  if (!p) return NULL;
+  const char* s = strrchr(p, '/');
+  return s ? (s + 1) : p;
+}
+
+static const char* pretty_node_id_str(int64_t id) {
+  if (g_emit.ids_mode != SIRC_IDS_STRING) return NULL;
+  return ((size_t)id < g_emit.node_id_cap) ? g_emit.node_id_by_id[id] : NULL;
+}
+
+static const char* pretty_type_id_str(int64_t id) {
+  if (g_emit.ids_mode != SIRC_IDS_STRING) return NULL;
+  return ((size_t)id < g_emit.type_id_cap) ? g_emit.type_id_by_id[id] : NULL;
+}
+
+static void pretty_record_loc_prefix(void) {
+  if (!g_emit.pretty_enabled || !g_emit.pretty) return;
+  const int line = sirc_last_line > 0 ? sirc_last_line : 1;
+  const int col = sirc_last_col > 0 ? sirc_last_col : 1;
+  const char* bn = pretty_basename(g_emit.input_path);
+  if (bn && bn[0] && strcmp(bn, "<input>") != 0) {
+    fprintf(g_emit.pretty, "%s:%d:%d: ", bn, line, col);
+  } else {
+    fprintf(g_emit.pretty, "%d:%d: ", line, col);
+  }
+}
+
+static void pretty_meta(void) {
+  if (!g_emit.pretty_enabled || !g_emit.pretty) return;
+  fprintf(g_emit.pretty,
+          "meta unit=%s target=%s features=%zu\n",
+          g_emit.unit ? g_emit.unit : "unit",
+          g_emit.target ? g_emit.target : "host",
+          g_emit.features_len);
+}
+
+static void pretty_type_record(int64_t id, const char* kind, const char* detail) {
+  if (!g_emit.pretty_enabled || !g_emit.pretty) return;
+  const char* sid = pretty_type_id_str(id);
+  if (sid) fprintf(g_emit.pretty, "type %s id=%s", kind ? kind : "?", sid);
+  else fprintf(g_emit.pretty, "type %s id=%lld", kind ? kind : "?", (long long)id);
+  if (detail && detail[0]) fprintf(g_emit.pretty, " %s", detail);
+  fputc('\n', g_emit.pretty);
+}
+
+static void pretty_node_record(int64_t id, const char* tag, int64_t type_ref) {
+  if (!g_emit.pretty_enabled || !g_emit.pretty) return;
+  pretty_record_loc_prefix();
+  const char* sid = pretty_node_id_str(id);
+  if (sid) fprintf(g_emit.pretty, "node %s id=%s", tag ? tag : "?", sid);
+  else fprintf(g_emit.pretty, "node %s id=%lld", tag ? tag : "?", (long long)id);
+  if (type_ref) {
+    const char* tid = pretty_type_id_str(type_ref);
+    if (tid) fprintf(g_emit.pretty, " ty=%s", tid);
+    else fprintf(g_emit.pretty, " ty=%lld", (long long)type_ref);
+  }
+  fputc('\n', g_emit.pretty);
+}
+
 static void emit_meta(void) {
   if (!g_emit.unit) g_emit.unit = xstrdup("unit");
+  pretty_meta();
   emitf("{\"ir\":\"sir-v1.0\",\"k\":\"meta\",\"producer\":\"sirc\",\"unit\":");
   json_write_escaped(g_emit.out, g_emit.unit);
   if (g_emit.target || g_emit.features_len) {
@@ -657,6 +721,7 @@ static int64_t type_prim(const char* prim) {
   int64_t id = type_lookup(key);
   if (id) return id;
   id = type_insert(key);
+  pretty_type_record(id, "prim", prim);
   emit_record_prepare();
   emitf("{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":");
   emit_type_id_value(id);
@@ -695,6 +760,7 @@ static int64_t type_ptr(int64_t of) {
   }
   id = type_insert(key);
   free(key);
+  pretty_type_record(id, "ptr", NULL);
   emit_record_prepare();
   emitf("{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":");
   emit_type_id_value(id);
@@ -719,6 +785,7 @@ static int64_t type_array(int64_t of, int64_t len) {
   }
   id = type_insert(key);
   free(key);
+  pretty_type_record(id, "array", NULL);
   emit_record_prepare();
   emitf("{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":");
   emit_type_id_value(id);
@@ -746,6 +813,7 @@ static int64_t type_vec(int64_t lane, int64_t lanes) {
   id = type_insert(key);
   free(key);
 
+  pretty_type_record(id, "vec", NULL);
   emit_record_prepare();
   emitf("{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":");
   emit_type_id_value(id);
@@ -808,6 +876,7 @@ static int64_t type_fn(const int64_t* params, size_t n, int64_t ret) {
   id = type_insert(key);
   free(key);
 
+  pretty_type_record(id, "fn", NULL);
   emit_record_prepare();
   emitf("{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":");
   emit_type_id_value(id);
@@ -838,6 +907,7 @@ static int64_t type_fun(int64_t sig) {
   id = type_insert(key);
   free(key);
 
+  pretty_type_record(id, "fun", NULL);
   emit_record_prepare();
   emitf("{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":");
   emit_type_id_value(id);
@@ -866,6 +936,7 @@ static int64_t type_closure(int64_t call_sig, int64_t env) {
   id = type_insert(key);
   free(key);
 
+  pretty_type_record(id, "closure", NULL);
   emit_record_prepare();
   emitf("{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":");
   emit_type_id_value(id);
@@ -985,6 +1056,7 @@ static int64_t type_sum(const SircSumVariantList* v) {
   id = type_insert(key);
   free(key);
 
+  pretty_type_record(id, "sum", NULL);
   emit_record_prepare();
   emitf("{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":");
   emit_type_id_value(id);
@@ -1203,6 +1275,7 @@ static const char* lookup_node_name(int64_t id) {
 
 static int64_t emit_node_with_fields_begin(const char* tag, int64_t type_ref) {
   int64_t id = next_node_id();
+  pretty_node_record(id, tag, type_ref);
   emit_record_prepare();
   emitf("{\"ir\":\"sir-v1.0\",\"k\":\"node\",\"id\":");
   emit_node_id_value(id);
@@ -1232,6 +1305,7 @@ static int64_t emit_param_node(const char* name, int64_t type_ref) {
 
 static int64_t emit_bparam_node(int64_t type_ref) {
   int64_t id = next_node_id();
+  pretty_node_record(id, "bparam", type_ref);
   emit_record_prepare();
   emitf("{\"ir\":\"sir-v1.0\",\"k\":\"node\",\"id\":");
   emit_node_id_value(id);
@@ -3145,6 +3219,7 @@ static void usage(FILE* out) {
           "  sirc <input.sir> [-o <output.sir.jsonl>]\n"
           "  sirc --tool -o <output.jsonl> <input.sir>...\n"
           "  sirc --print-support [--format text|json]\n"
+          "  sirc <input.sir> [--format jsonl|both] [-o <output.sir.jsonl>]\n"
           "\n"
           "Options:\n"
           "  --help, -h    Show this help message\n"
@@ -3157,6 +3232,7 @@ static void usage(FILE* out) {
           "  --lint        Parse/validate only (no output)\n"
           "  --tool        Enable filelist + -o output mode\n"
           "  --print-support  Print supported syntax/features and exit\n"
+          "  --format <jsonl|both>  Output format for compilation (default: jsonl)\n"
           "  --format <text|json>  Output format for --print-support (default: text)\n"
           "  -o <path>     Write output JSONL to a file\n"
           "\n"
@@ -3274,6 +3350,7 @@ int main(int argc, char** argv) {
   bool tool_mode = false;
   bool do_print_support = false;
   bool print_support_json = false;
+  const char* format = NULL;
 
   const char** inputs = NULL;
   size_t inputs_len = 0;
@@ -3299,11 +3376,8 @@ int main(int argc, char** argv) {
       continue;
     }
     if (strcmp(a, "--format") == 0) {
-      if (i + 1 >= argc) die_at_last("sirc: --format requires text|json");
-      const char* f = argv[++i];
-      if (strcmp(f, "text") == 0) print_support_json = false;
-      else if (strcmp(f, "json") == 0) print_support_json = true;
-      else die_at_last("sirc: unknown --format: %s", f);
+      if (i + 1 >= argc) die_at_last("sirc: --format requires a value");
+      format = argv[++i];
       continue;
     }
     if (strcmp(a, "--diagnostics") == 0) {
@@ -3363,10 +3437,27 @@ int main(int argc, char** argv) {
   }
 
   if (do_print_support) {
+    if (format) {
+      if (strcmp(format, "text") == 0) print_support_json = false;
+      else if (strcmp(format, "json") == 0) print_support_json = true;
+      else die_at_last("sirc: --print-support --format requires text|json (got %s)", format);
+    }
     print_support(stdout, print_support_json);
     free(out_path_owned);
     free((void*)inputs);
     return 0;
+  }
+
+  if (format) {
+    if (strcmp(format, "jsonl") == 0) {
+      g_emit.pretty_enabled = false;
+      g_emit.pretty = NULL;
+    } else if (strcmp(format, "both") == 0) {
+      g_emit.pretty_enabled = true;
+      g_emit.pretty = stderr;
+    } else {
+      die_at_last("sirc: --format requires jsonl|both (got %s)", format);
+    }
   }
 
   if (!inputs_len) die_at_last("sirc: missing input .sir path");

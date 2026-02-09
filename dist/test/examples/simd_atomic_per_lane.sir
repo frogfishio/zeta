@@ -1,0 +1,28 @@
+unit simd_atomic_per_lane target host +simd:v1 +atomics:v1
+
+type V4i32 = vec(i32, 4)
+type buf4 = array(i32, 4)
+
+fn main() -> i32 public
+  let p: ptr = alloca(buf4) +align=16 +zero=true
+
+  ;; init [7,7,7,7]
+  atomic.store.i32(ptr.offset(i32, p, 0:i64), 7:i32) +mode=seqcst +align=4
+  atomic.store.i32(ptr.offset(i32, p, 1:i64), 7:i32) +mode=seqcst +align=4
+  atomic.store.i32(ptr.offset(i32, p, 2:i64), 7:i32) +mode=seqcst +align=4
+  atomic.store.i32(ptr.offset(i32, p, 3:i64), 7:i32) +mode=seqcst +align=4
+
+  ;; "vector atomic add" emulated as 4 scalar atomics, then pack results
+  let r0: i32 = atomic.rmw.add.i32(ptr.offset(i32, p, 0:i64), 1:i32) +mode=seqcst +align=4
+  let r1: i32 = atomic.rmw.add.i32(ptr.offset(i32, p, 1:i64), 1:i32) +mode=seqcst +align=4
+  let r2: i32 = atomic.rmw.add.i32(ptr.offset(i32, p, 2:i64), 1:i32) +mode=seqcst +align=4
+  let r3: i32 = atomic.rmw.add.i32(ptr.offset(i32, p, 3:i64), 1:i32) +mode=seqcst +align=4
+
+  let v0: V4i32 = vec.splat(r0) as V4i32
+  let v1: V4i32 = vec.replace(v0, 1:i32, r1) as V4i32
+  let v2: V4i32 = vec.replace(v1, 2:i32, r2) as V4i32
+  let v: V4i32 = vec.replace(v2, 3:i32, r3) as V4i32
+
+  return vec.extract(v, 0:i32) as i32
+end
+

@@ -98,6 +98,8 @@ static void sem_print_help(FILE* out) {
 
 static void sem_print_version(FILE* out) {
   fprintf(out, "sem %s\n", SIR_VERSION);
+  fprintf(out, "License: GPLv3+\n");
+  fprintf(out, "© 2026 Frogfish — Author: Alexander Croft\n");
 }
 
 static bool sem_path_is_dir(const char* path) {

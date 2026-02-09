@@ -1,0 +1,26 @@
+unit simd_masked_add target host +simd:v1
+
+type V4i32 = vec(i32, 4)
+type V4b = vec(bool, 4)
+
+fn main() -> i32 public
+  ;; a = [10,20,30,40]
+  let a0: V4i32 = vec.splat(10:i32) as V4i32
+  let a1: V4i32 = vec.replace(a0, 1:i32, 20:i32) as V4i32
+  let a2: V4i32 = vec.replace(a1, 2:i32, 30:i32) as V4i32
+  let a: V4i32 = vec.replace(a2, 3:i32, 40:i32) as V4i32
+
+  ;; b = [1,1,1,1]
+  let b: V4i32 = vec.splat(1:i32) as V4i32
+
+  ;; mask = a < 25  => lanes [true,true,false,false]
+  let m: V4b = vec.cmp.lt(a, vec.splat(25:i32) as V4i32) as V4b
+
+  ;; masked add: if mask[i] then a[i]+b[i] else a[i]
+  let sum: V4i32 = vec.add(a, b) as V4i32
+  let out: V4i32 = vec.select(m, sum, a) as V4i32
+
+  ;; return lane1 (20+1)
+  return vec.extract(out, 1:i32) as i32
+end
+

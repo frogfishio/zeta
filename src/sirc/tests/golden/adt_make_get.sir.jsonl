@@ -2,15 +2,15 @@
 {"ir":"sir-v1.0","k":"src","id":"src:adt_make_get.sir:3:33","file":"adt_make_get.sir","line":3,"col":33,"text":"type OptI32 = sum{None, Some:i32}"}
 {"ir":"sir-v1.0","k":"type","id":"prim:i32","kind":"prim","prim":"i32","loc":{"line":3,"col":33,"unit":"adt_make_get.sir"},"src_ref":"src:adt_make_get.sir:3:33"}
 {"ir":"sir-v1.0","k":"type","id":"sum{None,Some:prim:i32}","kind":"sum","variants":[{"name":"None"},{"name":"Some","ty":"prim:i32"}],"loc":{"line":3,"col":33,"unit":"adt_make_get.sir"},"src_ref":"src:adt_make_get.sir:3:33"}
-{"ir":"sir-v1.0","k":"src","id":"src:adt_make_get.sir:7:1","file":"adt_make_get.sir","line":7,"col":1,"text":"  let v: OptI32 = adt.make(x) flags variant 1 as OptI32"}
+{"ir":"sir-v1.0","k":"src","id":"src:adt_make_get.sir:7:1","file":"adt_make_get.sir","line":7,"col":1,"text":"  let v: OptI32 = adt.make(x) +variant=1 as OptI32"}
 {"ir":"sir-v1.0","k":"node","id":"n:7:0","tag":"const.i32","type_ref":"prim:i32","fields":{"value":12},"loc":{"line":7,"col":1,"unit":"adt_make_get.sir"},"src_ref":"src:adt_make_get.sir:7:1"}
 {"ir":"sir-v1.0","k":"node","id":"n:7:1","tag":"let","fields":{"name":"x","value":{"t":"ref","id":"n:7:0"}},"loc":{"line":7,"col":1,"unit":"adt_make_get.sir"},"src_ref":"src:adt_make_get.sir:7:1"}
-{"ir":"sir-v1.0","k":"src","id":"src:adt_make_get.sir:7:29","file":"adt_make_get.sir","line":7,"col":29,"text":"  let v: OptI32 = adt.make(x) flags variant 1 as OptI32"}
+{"ir":"sir-v1.0","k":"src","id":"src:adt_make_get.sir:7:29","file":"adt_make_get.sir","line":7,"col":29,"text":"  let v: OptI32 = adt.make(x) +variant=1 as OptI32"}
 {"ir":"sir-v1.0","k":"node","id":"n:7:2","tag":"name","type_ref":"prim:i32","fields":{"name":"x"},"loc":{"line":7,"col":29,"unit":"adt_make_get.sir"},"src_ref":"src:adt_make_get.sir:7:29"}
-{"ir":"sir-v1.0","k":"src","id":"src:adt_make_get.sir:8:1","file":"adt_make_get.sir","line":8,"col":1,"text":"  return adt.get(v) ty=OptI32 flags variant 1 as i32"}
+{"ir":"sir-v1.0","k":"src","id":"src:adt_make_get.sir:8:1","file":"adt_make_get.sir","line":8,"col":1,"text":"  return adt.get(v) ty=OptI32 +variant=1 as i32"}
 {"ir":"sir-v1.0","k":"node","id":"n:8:0","tag":"adt.make","type_ref":"sum{None,Some:prim:i32}","fields":{"args":[{"t":"ref","id":"n:7:2"}],"flags":{"variant":1}},"loc":{"line":8,"col":1,"unit":"adt_make_get.sir"},"src_ref":"src:adt_make_get.sir:8:1"}
 {"ir":"sir-v1.0","k":"node","id":"n:8:1","tag":"let","fields":{"name":"v","value":{"t":"ref","id":"n:8:0"}},"loc":{"line":8,"col":1,"unit":"adt_make_get.sir"},"src_ref":"src:adt_make_get.sir:8:1"}
-{"ir":"sir-v1.0","k":"src","id":"src:adt_make_get.sir:8:19","file":"adt_make_get.sir","line":8,"col":19,"text":"  return adt.get(v) ty=OptI32 flags variant 1 as i32"}
+{"ir":"sir-v1.0","k":"src","id":"src:adt_make_get.sir:8:19","file":"adt_make_get.sir","line":8,"col":19,"text":"  return adt.get(v) ty=OptI32 +variant=1 as i32"}
 {"ir":"sir-v1.0","k":"node","id":"n:8:2","tag":"name","type_ref":"sum{None,Some:prim:i32}","fields":{"name":"v"},"loc":{"line":8,"col":19,"unit":"adt_make_get.sir"},"src_ref":"src:adt_make_get.sir:8:19"}
 {"ir":"sir-v1.0","k":"src","id":"src:adt_make_get.sir:9:1","file":"adt_make_get.sir","line":9,"col":1,"text":"end"}
 {"ir":"sir-v1.0","k":"node","id":"n:9:0","tag":"adt.get","type_ref":"prim:i32","fields":{"args":[{"t":"ref","id":"n:8:2"}],"ty":{"t":"ref","k":"type","id":"sum{None,Some:prim:i32}"},"flags":{"variant":1}},"loc":{"line":9,"col":1,"unit":"adt_make_get.sir"},"src_ref":"src:adt_make_get.sir:9:1"}
