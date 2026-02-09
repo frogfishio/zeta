@@ -46,6 +46,7 @@ static void sem_print_help(FILE* out) {
           "  sem --print-support [--json]\n"
           "  sem --caps [--json]\n"
           "      [--cap KIND:NAME[:FLAGS]]...\n"
+          "      [--enable WHAT]...\n"
           "      [--cap-file-fs] [--cap-async-default] [--cap-sys-info]\n"
           "      [--fs-root PATH]\n"
           "      [--tape-out PATH] [--tape-in PATH] [--tape-lax]\n"
@@ -82,6 +83,15 @@ static void sem_print_help(FILE* out) {
           "  --cap KIND:NAME[:FLAGS]\n"
           "      Add a capability entry. FLAGS is a comma-list of:\n"
           "        open (ZI_CAP_CAN_OPEN), pure (ZI_CAP_PURE), block (ZI_CAP_MAY_BLOCK)\n"
+          "\n"
+          "  --enable WHAT\n"
+          "      Convenience enablement. Supported WHAT values:\n"
+          "        file:fs | async:default | sys:info | env | argv\n"
+          "\n"
+          "  --inherit-env    Snapshot host env into zi_ctl env ops (enables env)\n"
+          "  --clear-env      Clear env snapshot (enables env, empty)\n"
+          "  --env KEY=VAL    Set/override one env var in snapshot (enables env)\n"
+          "  --params ARG     Append one guest argv param (enables argv)\n"
           "\n"
           "  --cap-file-fs       Sugar for --cap file:fs:open,block\n"
           "  --cap-async-default Sugar for --cap async:default:open,block\n"
@@ -213,11 +223,11 @@ static void sem_emit_check_case(sem_check_format_t fmt, const char* mode, const 
   fprintf(out, "}\n");
 }
 
-static int sem_do_check_one(const char* path, bool do_run, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root,
-                            sem_check_format_t check_format, sem_diag_format_t diag_format, bool diag_all) {
+static int sem_do_check_one(const char* path, bool do_run, sem_run_host_cfg_t host_cfg, sem_check_format_t check_format,
+                            sem_diag_format_t diag_format, bool diag_all) {
   if (do_run) {
     int prog_rc = 0;
-    const int tool_rc = sem_run_sir_jsonl_capture_ex(path, caps, cap_count, fs_root, diag_format, diag_all, &prog_rc);
+    const int tool_rc = sem_run_sir_jsonl_capture_host_ex(path, host_cfg, diag_format, diag_all, &prog_rc);
     sem_emit_check_case(check_format, "run", path, tool_rc == 0, tool_rc, prog_rc);
     return tool_rc;
   }
@@ -227,9 +237,8 @@ static int sem_do_check_one(const char* path, bool do_run, const sem_cap_t* caps
   return rc;
 }
 
-static int sem_do_check_dir(const char* dir, bool do_run, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root,
-                            sem_check_format_t check_format, sem_diag_format_t diag_format, bool diag_all, uint32_t* inout_ok,
-                            uint32_t* inout_fail) {
+static int sem_do_check_dir(const char* dir, bool do_run, sem_run_host_cfg_t host_cfg, sem_check_format_t check_format,
+                            sem_diag_format_t diag_format, bool diag_all, uint32_t* inout_ok, uint32_t* inout_fail) {
   if (!dir || !inout_ok || !inout_fail) return 2;
   DIR* d = opendir(dir);
   if (!d) {
@@ -253,7 +262,7 @@ static int sem_do_check_dir(const char* dir, bool do_run, const sem_cap_t* caps,
     }
     if (!sem_path_is_file(full)) continue;
 
-    const int rc = sem_do_check_one(full, do_run, caps, cap_count, fs_root, check_format, diag_format, diag_all);
+    const int rc = sem_do_check_one(full, do_run, host_cfg, check_format, diag_format, diag_all);
     if (rc == 0)
       (*inout_ok)++;
     else
@@ -424,6 +433,58 @@ static char* sem_strdup(const char* s) {
   if (!r) return NULL;
   memcpy(r, s, n + 1);
   return r;
+}
+
+static void sem_free_argv(char** argv, uint32_t argc) {
+  if (!argv) return;
+  for (uint32_t i = 0; i < argc; i++) free(argv[i]);
+}
+
+static void sem_free_env(sem_env_kv_t* env, uint32_t n) {
+  if (!env) return;
+  for (uint32_t i = 0; i < n; i++) {
+    free((void*)env[i].key);
+    free((void*)env[i].val);
+  }
+}
+
+static bool sem_env_set(sem_env_kv_t* env, uint32_t* inout_n, uint32_t max, const char* key, const char* val) {
+  if (!env || !inout_n || !key || !key[0]) return false;
+  const char* v = val ? val : "";
+
+  for (uint32_t i = 0; i < *inout_n; i++) {
+    if (!env[i].key) continue;
+    if (strcmp(env[i].key, key) != 0) continue;
+    char* nv = sem_strdup(v);
+    if (!nv) return false;
+    free((void*)env[i].val);
+    env[i].val = nv;
+    return true;
+  }
+
+  if (*inout_n >= max) return false;
+  char* nk = sem_strdup(key);
+  char* nv = sem_strdup(v);
+  if (!nk || !nv) {
+    free(nk);
+    free(nv);
+    return false;
+  }
+  env[*inout_n] = (sem_env_kv_t){.key = nk, .val = nv};
+  (*inout_n)++;
+  return true;
+}
+
+static bool sem_env_set_kv(sem_env_kv_t* env, uint32_t* inout_n, uint32_t max, const char* kv) {
+  if (!kv) return false;
+  const char* eq = strchr(kv, '=');
+  if (!eq || eq == kv) return false;
+  const size_t klen = (size_t)(eq - kv);
+  if (klen >= 1024) return false;
+  char kbuf[1024];
+  memcpy(kbuf, kv, klen);
+  kbuf[klen] = '\0';
+  return sem_env_set(env, inout_n, max, kbuf, eq + 1);
 }
 
 static bool sem_parse_flags(const char* s, uint32_t* out_flags) {
@@ -946,16 +1007,36 @@ int main(int argc, char** argv) {
   uint32_t dyn_n = 0;
   memset(dyn_caps, 0, sizeof(dyn_caps));
 
+  bool argv_enabled = false;
+  char* guest_argv[128];
+  uint32_t guest_argc = 0;
+  memset(guest_argv, 0, sizeof(guest_argv));
+
+  bool env_enabled = false;
+  sem_env_kv_t env_buf[256];
+  uint32_t env_n = 0;
+  memset(env_buf, 0, sizeof(env_buf));
+
+  bool env_inherited = false;
+
+#if defined(__APPLE__) || defined(__unix__) || defined(__linux__)
+  extern char** environ;
+#endif
+
   for (int i = 1; i < argc; i++) {
     const char* a = argv[i];
     if (strcmp(a, "--help") == 0) {
       sem_print_help(stdout);
       sem_free_caps(dyn_caps, dyn_n);
+      sem_free_argv(guest_argv, guest_argc);
+      sem_free_env(env_buf, env_n);
       return 0;
     }
     if (strcmp(a, "--version") == 0) {
       sem_print_version(stdout);
       sem_free_caps(dyn_caps, dyn_n);
+      sem_free_argv(guest_argv, guest_argc);
+      sem_free_env(env_buf, env_n);
       return 0;
     }
     if (strcmp(a, "--caps") == 0) {
@@ -1006,6 +1087,8 @@ int main(int argc, char** argv) {
       else {
         fprintf(stderr, "sem: bad --diagnostics value (expected text|json)\n");
         sem_free_caps(dyn_caps, dyn_n);
+        sem_free_argv(guest_argv, guest_argc);
+        sem_free_env(env_buf, env_n);
         return 2;
       }
       continue;
@@ -1054,10 +1137,126 @@ int main(int argc, char** argv) {
       trace_op = argv[++i];
       continue;
     }
+
+    if (strcmp(a, "--enable") == 0 && i + 1 < argc) {
+      const char* what = argv[++i];
+      if (!what || !what[0]) {
+        fprintf(stderr, "sem: bad --enable value\n");
+        sem_free_caps(dyn_caps, dyn_n);
+        sem_free_argv(guest_argv, guest_argc);
+        sem_free_env(env_buf, env_n);
+        return 2;
+      }
+      if (strcmp(what, "env") == 0) {
+        env_enabled = true;
+        continue;
+      }
+      if (strcmp(what, "argv") == 0) {
+        argv_enabled = true;
+        continue;
+      }
+      if (strcmp(what, "file:fs") == 0) {
+        if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "file:fs:open,block")) {
+          fprintf(stderr, "sem: failed to add cap\n");
+          sem_free_caps(dyn_caps, dyn_n);
+          sem_free_argv(guest_argv, guest_argc);
+          sem_free_env(env_buf, env_n);
+          return 2;
+        }
+        continue;
+      }
+      if (strcmp(what, "async:default") == 0) {
+        if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "async:default:open,block")) {
+          fprintf(stderr, "sem: failed to add cap\n");
+          sem_free_caps(dyn_caps, dyn_n);
+          sem_free_argv(guest_argv, guest_argc);
+          sem_free_env(env_buf, env_n);
+          return 2;
+        }
+        continue;
+      }
+      if (strcmp(what, "sys:info") == 0) {
+        if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "sys:info:pure")) {
+          fprintf(stderr, "sem: failed to add cap\n");
+          sem_free_caps(dyn_caps, dyn_n);
+          sem_free_argv(guest_argv, guest_argc);
+          sem_free_env(env_buf, env_n);
+          return 2;
+        }
+        continue;
+      }
+
+      fprintf(stderr, "sem: unknown --enable value: %s\n", what);
+      sem_free_caps(dyn_caps, dyn_n);
+      sem_free_argv(guest_argv, guest_argc);
+      sem_free_env(env_buf, env_n);
+      return 2;
+    }
+
+    if (strcmp(a, "--params") == 0 && i + 1 < argc) {
+      const char* p = argv[++i];
+      if (!p) p = "";
+      if (guest_argc >= (uint32_t)(sizeof(guest_argv) / sizeof(guest_argv[0]))) {
+        fprintf(stderr, "sem: too many --params\n");
+        sem_free_caps(dyn_caps, dyn_n);
+        sem_free_argv(guest_argv, guest_argc);
+        sem_free_env(env_buf, env_n);
+        return 2;
+      }
+      guest_argv[guest_argc] = sem_strdup(p);
+      if (!guest_argv[guest_argc]) {
+        fprintf(stderr, "sem: out of memory\n");
+        sem_free_caps(dyn_caps, dyn_n);
+        sem_free_argv(guest_argv, guest_argc);
+        sem_free_env(env_buf, env_n);
+        return 2;
+      }
+      guest_argc++;
+      argv_enabled = true;
+      continue;
+    }
+
+    if (strcmp(a, "--inherit-env") == 0) {
+      env_enabled = true;
+#if defined(__APPLE__) || defined(__unix__) || defined(__linux__)
+      if (!env_inherited) {
+        env_inherited = true;
+        if (environ) {
+          for (char** p = environ; *p; p++) {
+            (void)sem_env_set_kv(env_buf, &env_n, (uint32_t)(sizeof(env_buf) / sizeof(env_buf[0])), *p);
+          }
+        }
+      }
+#endif
+      continue;
+    }
+
+    if (strcmp(a, "--clear-env") == 0) {
+      env_enabled = true;
+      sem_free_env(env_buf, env_n);
+      env_n = 0;
+      continue;
+    }
+
+    if (strcmp(a, "--env") == 0 && i + 1 < argc) {
+      env_enabled = true;
+      const char* kv = argv[++i];
+      if (!sem_env_set_kv(env_buf, &env_n, (uint32_t)(sizeof(env_buf) / sizeof(env_buf[0])), kv)) {
+        fprintf(stderr, "sem: bad --env (expected KEY=VAL)\n");
+        sem_free_caps(dyn_caps, dyn_n);
+        sem_free_argv(guest_argv, guest_argc);
+        sem_free_env(env_buf, env_n);
+        return 2;
+      }
+      continue;
+    }
+
     if (strcmp(a, "--cap") == 0 && i + 1 < argc) {
       if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), argv[++i])) {
         fprintf(stderr, "sem: bad --cap spec\n");
         sem_free_caps(dyn_caps, dyn_n);
+        sem_free_argv(guest_argv, guest_argc);
+        sem_free_env(env_buf, env_n);
         return 2;
       }
       continue;
@@ -1066,6 +1265,8 @@ int main(int argc, char** argv) {
       if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "file:fs:open,block")) {
         fprintf(stderr, "sem: failed to add cap\n");
         sem_free_caps(dyn_caps, dyn_n);
+        sem_free_argv(guest_argv, guest_argc);
+        sem_free_env(env_buf, env_n);
         return 2;
       }
       continue;
@@ -1075,6 +1276,8 @@ int main(int argc, char** argv) {
                        "async:default:open,block")) {
         fprintf(stderr, "sem: failed to add cap\n");
         sem_free_caps(dyn_caps, dyn_n);
+        sem_free_argv(guest_argv, guest_argc);
+        sem_free_env(env_buf, env_n);
         return 2;
       }
       continue;
@@ -1083,6 +1286,8 @@ int main(int argc, char** argv) {
       if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "sys:info:pure")) {
         fprintf(stderr, "sem: failed to add cap\n");
         sem_free_caps(dyn_caps, dyn_n);
+        sem_free_argv(guest_argv, guest_argc);
+        sem_free_env(env_buf, env_n);
         return 2;
       }
       continue;
@@ -1092,6 +1297,8 @@ int main(int argc, char** argv) {
       if (check_path_count >= (uint32_t)(sizeof(check_paths_buf) / sizeof(check_paths_buf[0]))) {
         fprintf(stderr, "sem: --check: too many paths\n");
         sem_free_caps(dyn_caps, dyn_n);
+        sem_free_argv(guest_argv, guest_argc);
+        sem_free_env(env_buf, env_n);
         return 2;
       }
       check_paths_buf[check_path_count++] = a;
@@ -1101,6 +1308,8 @@ int main(int argc, char** argv) {
       if (list_path_count >= (uint32_t)(sizeof(list_paths_buf) / sizeof(list_paths_buf[0]))) {
         fprintf(stderr, "sem: --list: too many paths\n");
         sem_free_caps(dyn_caps, dyn_n);
+        sem_free_argv(guest_argv, guest_argc);
+        sem_free_env(env_buf, env_n);
         return 2;
       }
       list_paths_buf[list_path_count++] = a;
@@ -1110,6 +1319,8 @@ int main(int argc, char** argv) {
     fprintf(stderr, "sem: unknown argument: %s\n", a);
     sem_print_help(stderr);
     sem_free_caps(dyn_caps, dyn_n);
+    sem_free_argv(guest_argv, guest_argc);
+    sem_free_env(env_buf, env_n);
     return 2;
   }
 
@@ -1126,6 +1337,8 @@ int main(int argc, char** argv) {
     } else {
       fprintf(stderr, "sem: bad --format value (expected text|json)\n");
       sem_free_caps(dyn_caps, dyn_n);
+      sem_free_argv(guest_argv, guest_argc);
+      sem_free_env(env_buf, env_n);
       return 2;
     }
   }
@@ -1133,34 +1346,46 @@ int main(int argc, char** argv) {
   if (want_support) {
     sem_print_support(stdout, json);
     sem_free_caps(dyn_caps, dyn_n);
+    sem_free_argv(guest_argv, guest_argc);
+    sem_free_env(env_buf, env_n);
     return 0;
   }
 
   if (run_path && verify_path) {
     fprintf(stderr, "sem: choose either --run or --verify\n");
     sem_free_caps(dyn_caps, dyn_n);
+    sem_free_argv(guest_argv, guest_argc);
+    sem_free_env(env_buf, env_n);
     return 2;
   }
   if (list_path_count && check_path_count) {
     fprintf(stderr, "sem: choose either --list or --check\n");
     sem_free_caps(dyn_caps, dyn_n);
+    sem_free_argv(guest_argv, guest_argc);
+    sem_free_env(env_buf, env_n);
     return 2;
   }
 
   if (check_mode && check_path_count == 0) {
     fprintf(stderr, "sem: --check: expected at least one file/dir path\n");
     sem_free_caps(dyn_caps, dyn_n);
+    sem_free_argv(guest_argv, guest_argc);
+    sem_free_env(env_buf, env_n);
     return 2;
   }
   if (list_mode && list_path_count == 0) {
     fprintf(stderr, "sem: --list: expected at least one file/dir path\n");
     sem_free_caps(dyn_caps, dyn_n);
+    sem_free_argv(guest_argv, guest_argc);
+    sem_free_env(env_buf, env_n);
     return 2;
   }
 
   if (!want_caps && !cat_path && !sir_hello && !sir_module_hello && !run_path && !verify_path && !check_path_count && !list_path_count) {
     sem_print_help(stdout);
     sem_free_caps(dyn_caps, dyn_n);
+    sem_free_argv(guest_argv, guest_argc);
+    sem_free_env(env_buf, env_n);
     return 0;
   }
 
@@ -1169,6 +1394,8 @@ int main(int argc, char** argv) {
     if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "file:fs:open,block")) {
       fprintf(stderr, "sem: failed to add file/fs cap\n");
       sem_free_caps(dyn_caps, dyn_n);
+      sem_free_argv(guest_argv, guest_argc);
+      sem_free_env(env_buf, env_n);
       return 2;
     }
   }
@@ -1183,9 +1410,23 @@ int main(int argc, char** argv) {
     caps[i].meta_len = dyn_caps[i].meta_len;
   }
 
+  const sem_run_host_cfg_t host_cfg = {
+      .caps = caps,
+      .cap_count = cap_n,
+      .fs_root = fs_root,
+      .argv_enabled = argv_enabled,
+      .argv = (const char* const*)guest_argv,
+      .argv_count = guest_argc,
+      .env_enabled = env_enabled,
+      .env = env_buf,
+      .env_count = env_n,
+  };
+
   if (cat_path) {
     const int rc = sem_do_cat(caps, cap_n, fs_root, cat_path);
     sem_free_caps(dyn_caps, dyn_n);
+    sem_free_argv(guest_argv, guest_argc);
+    sem_free_env(env_buf, env_n);
     return rc;
   }
   if (list_path_count) {
@@ -1197,29 +1438,34 @@ int main(int argc, char** argv) {
       if (rc != 0) tool_rc = rc;
     }
     sem_free_caps(dyn_caps, dyn_n);
+    sem_free_argv(guest_argv, guest_argc);
+    sem_free_env(env_buf, env_n);
     return tool_rc;
   }
   if (sir_hello) {
     sem_free_caps(dyn_caps, dyn_n);
+    sem_free_argv(guest_argv, guest_argc);
+    sem_free_env(env_buf, env_n);
     return sem_do_sir_hello();
   }
   if (sir_module_hello) {
     sem_free_caps(dyn_caps, dyn_n);
+    sem_free_argv(guest_argv, guest_argc);
+    sem_free_env(env_buf, env_n);
     return sem_do_sir_module_hello();
   }
   if (run_path) {
-    int rc = 0;
-    if ((trace_jsonl_out && trace_jsonl_out[0]) || (coverage_jsonl_out && coverage_jsonl_out[0])) {
-      rc = sem_run_sir_jsonl_events_ex(run_path, caps, cap_n, fs_root, diag_format, diag_all, trace_jsonl_out, coverage_jsonl_out, trace_func, trace_op);
-    } else {
-      rc = sem_run_sir_jsonl_ex(run_path, caps, cap_n, fs_root, diag_format, diag_all);
-    }
+    const int rc = sem_run_sir_jsonl_events_host_ex(run_path, host_cfg, diag_format, diag_all, trace_jsonl_out, coverage_jsonl_out, trace_func, trace_op);
     sem_free_caps(dyn_caps, dyn_n);
+    sem_free_argv(guest_argv, guest_argc);
+    sem_free_env(env_buf, env_n);
     return rc;
   }
   if (verify_path) {
     const int rc = sem_verify_sir_jsonl_ex(verify_path, diag_format, diag_all);
     sem_free_caps(dyn_caps, dyn_n);
+    sem_free_argv(guest_argv, guest_argc);
+    sem_free_env(env_buf, env_n);
     return rc;
   }
   if (check_path_count) {
@@ -1230,14 +1476,14 @@ int main(int argc, char** argv) {
       const char* p = check_paths[i];
       if (!p || p[0] == '\0') continue;
       if (sem_path_is_dir(p)) {
-        const int rc = sem_do_check_dir(p, check_run, caps, cap_n, fs_root, check_format, diag_format, diag_all, &ok, &fail);
+        const int rc = sem_do_check_dir(p, check_run, host_cfg, check_format, diag_format, diag_all, &ok, &fail);
         if (rc != 0) tool_rc = rc;
       } else if (sem_path_is_file(p)) {
         if (!sem_is_sir_jsonl_path(p)) {
           fprintf(stderr, "sem: --check: skipping non-.sir.jsonl file: %s\n", p);
           continue;
         }
-        const int rc = sem_do_check_one(p, check_run, caps, cap_n, fs_root, check_format, diag_format, diag_all);
+        const int rc = sem_do_check_one(p, check_run, host_cfg, check_format, diag_format, diag_all);
         if (rc == 0)
           ok++;
         else
@@ -1254,14 +1500,27 @@ int main(int argc, char** argv) {
       fprintf(stdout, "sem: --check: ok=%u fail=%u\n", (unsigned)ok, (unsigned)fail);
     }
     sem_free_caps(dyn_caps, dyn_n);
+    sem_free_argv(guest_argv, guest_argc);
+    sem_free_env(env_buf, env_n);
     if (tool_rc != 0) return tool_rc;
     return (fail == 0) ? 0 : 1;
   }
 
   sem_host_t host;
-  sem_host_init(&host, (sem_host_cfg_t){.caps = caps, .cap_count = cap_n});
+  sem_host_init(&host, (sem_host_cfg_t){
+                         .caps = caps,
+                         .cap_count = cap_n,
+                         .argv_enabled = argv_enabled,
+                         .argv = (const char* const*)guest_argv,
+                         .argv_count = guest_argc,
+                         .env_enabled = env_enabled,
+                         .env = env_buf,
+                         .env_count = env_n,
+                     });
 
   const int rc = sem_do_caps(&host, json, tape_out, tape_in, tape_strict);
   sem_free_caps(dyn_caps, dyn_n);
+  sem_free_argv(guest_argv, guest_argc);
+  sem_free_env(env_buf, env_n);
   return rc;
 }

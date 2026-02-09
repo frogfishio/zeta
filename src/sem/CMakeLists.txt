@@ -37,6 +37,23 @@ target_compile_options(sem_unit_caps_list PRIVATE
 
 add_test(NAME sem_caps_list_empty COMMAND sem_unit_caps_list)
 
+add_executable(sem_unit_sem_host_env_argv
+  tests/test_sem_host_env_argv.c
+)
+
+target_compile_definitions(sem_unit_sem_host_env_argv PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_include_directories(sem_unit_sem_host_env_argv PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore)
+target_link_libraries(sem_unit_sem_host_env_argv PRIVATE sircore_hosted_zabi)
+
+target_compile_options(sem_unit_sem_host_env_argv PRIVATE
+  -Wall
+  -Wextra
+  -Wpedantic
+  -Werror
+)
+
+add_test(NAME sem_sem_host_env_argv COMMAND sem_unit_sem_host_env_argv)
+
 add_executable(sem_unit_semrt_write
   tests/test_semrt_write.c
 )

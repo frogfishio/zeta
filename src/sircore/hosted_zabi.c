@@ -303,7 +303,16 @@ bool sir_hosted_zabi_init_with_mem(sir_hosted_zabi_t* rt, sem_guest_mem_t* mem, 
   rt->abi_version = cfg.abi_version ? cfg.abi_version : 0x00020005u;
   rt->fs_root = (cfg.fs_root && cfg.fs_root[0] != '\0') ? cfg.fs_root : NULL;
 
-  sem_host_init(&rt->ctl_host, (sem_host_cfg_t){.caps = cfg.caps, .cap_count = cfg.cap_count});
+  sem_host_init(&rt->ctl_host, (sem_host_cfg_t){
+                                 .caps = cfg.caps,
+                                 .cap_count = cfg.cap_count,
+                                 .argv_enabled = cfg.argv_enabled,
+                                 .argv = cfg.argv,
+                                 .argv_count = cfg.argv_count,
+                                 .env_enabled = cfg.env_enabled,
+                                 .env = cfg.env,
+                                 .env_count = cfg.env_count,
+                             });
 
   sir_stdio_stream_t* in = (sir_stdio_stream_t*)calloc(1, sizeof(*in));
   sir_stdio_stream_t* out = (sir_stdio_stream_t*)calloc(1, sizeof(*out));

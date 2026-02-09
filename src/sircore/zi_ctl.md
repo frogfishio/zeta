@@ -144,3 +144,66 @@ Integration choices (frontends decide, `sircore` stays policy-free):
 2) **Tool-defined mode**: reserve `op >= 1000` for a “sem host protocol” (argv/env/fs/stdio) when running purely under `sem` without binding to a specific zABI runtime.
 
 `sircore` is compatible with either, as long as the embedding layer provides deterministic behavior and stable diagnostics.
+
+## 6. Tool-defined SEM host protocol (op >= 1000)
+
+When running under `sem`, the host may expose additional deterministic “snapshotted” data via `zi_ctl` ops `>= 1000`.
+
+Notes:
+
+- These ops are **deny-by-default**. If not enabled, the host returns `status=0` with a ZCL1 error payload (see §3) and a `trace` like `sem.zi_ctl.denied`.
+- Strings are UTF-8 **bytes** (no implicit NUL terminators).
+- All integers are little-endian.
+
+### 6.1 `SEM_ARGV_COUNT` (op=1000)
+
+Request: empty payload.
+
+Success response payload:
+
+```
+u32 count;
+```
+
+### 6.2 `SEM_ARGV_GET` (op=1001)
+
+Request payload:
+
+```
+u32 index;
+```
+
+Success response payload:
+
+```
+u32 len;
+u8  bytes[len];
+```
+
+### 6.3 `SEM_ENV_COUNT` (op=1002)
+
+Request: empty payload.
+
+Success response payload:
+
+```
+u32 count;
+```
+
+### 6.4 `SEM_ENV_GET` (op=1003)
+
+Request payload:
+
+```
+u32 index;
+```
+
+Success response payload:
+
+```
+u32 key_len;
+u8  key[key_len];
+u32 val_len;
+u8  val[val_len];
+```
+

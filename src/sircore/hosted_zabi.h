@@ -38,6 +38,15 @@ typedef struct sir_hosted_zabi_cfg {
   const sem_cap_t* caps;
   uint32_t cap_count;
 
+  // Optional argv/env snapshots exposed via tool-defined zi_ctl ops.
+  bool argv_enabled;
+  const char* const* argv;
+  uint32_t argv_count;
+
+  bool env_enabled;
+  const sem_env_kv_t* env;
+  uint32_t env_count;
+
   // Optional: enable file/fs sandbox.
   const char* fs_root;
 } sir_hosted_zabi_cfg_t;

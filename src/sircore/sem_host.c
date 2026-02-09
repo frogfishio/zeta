@@ -2,6 +2,7 @@
 
 #include "zcl1.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 void sem_host_init(sem_host_t* h, sem_host_cfg_t cfg) {
@@ -61,6 +62,22 @@ static int32_t sem_write_error(uint8_t* resp, uint32_t resp_cap, uint16_t op, ui
   return (int32_t)resp_len;
 }
 
+static int32_t sem_write_ok(uint8_t* resp, uint32_t resp_cap, uint16_t op, uint32_t rid, const uint8_t* payload, uint32_t payload_len) {
+  uint32_t out_len = 0;
+  if (!zcl1_write(resp, resp_cap, op, rid, 1, payload, payload_len, &out_len)) {
+    return SEM_ZI_E_BOUNDS;
+  }
+  return (int32_t)out_len;
+}
+
+static int32_t sem_write_denied(uint8_t* resp, uint32_t resp_cap, uint16_t op, uint32_t rid, const char* what) {
+  return sem_write_error(resp, resp_cap, op, rid, "sem.zi_ctl.denied", what ? what : "capability not enabled", "");
+}
+
+enum {
+  SEM_HOST_MAX_BLOB = 64u * 1024u,
+};
+
 int32_t sem_zi_ctl(void* user, const uint8_t* req, uint32_t req_len, uint8_t* resp, uint32_t resp_cap) {
   const sem_host_t* h = (const sem_host_t*)user;
 
@@ -89,6 +106,89 @@ int32_t sem_zi_ctl(void* user, const uint8_t* req, uint32_t req_len, uint8_t* re
       return SEM_ZI_E_BOUNDS;
     }
     return (int32_t)out_len;
+  }
+
+  // --- sem host protocol ops (op >= 1000) ---
+  if (rh.op == SEM_ZI_CTL_OP_SEM_ARGV_COUNT) {
+    if (!h || !h->cfg.argv_enabled) return sem_write_denied(resp, resp_cap, rh.op, rh.rid, "argv not enabled");
+    if (rh.payload_len != 0) {
+      return sem_write_error(resp, resp_cap, rh.op, rh.rid, "sem.zi_ctl.invalid", "ARGV_COUNT payload must be empty", "");
+    }
+    uint8_t payload_buf[4];
+    zcl1_write_u32le(payload_buf + 0, h->cfg.argv_count);
+    return sem_write_ok(resp, resp_cap, rh.op, rh.rid, payload_buf, (uint32_t)sizeof(payload_buf));
+  }
+
+  if (rh.op == SEM_ZI_CTL_OP_SEM_ARGV_GET) {
+    if (!h || !h->cfg.argv_enabled) return sem_write_denied(resp, resp_cap, rh.op, rh.rid, "argv not enabled");
+    if (rh.payload_len != 4) {
+      return sem_write_error(resp, resp_cap, rh.op, rh.rid, "sem.zi_ctl.invalid", "ARGV_GET payload must be u32 index", "");
+    }
+    const uint32_t index = zcl1_read_u32le(payload + 0);
+    if (index >= h->cfg.argv_count) {
+      return sem_write_error(resp, resp_cap, rh.op, rh.rid, "sem.zi_ctl.bounds", "ARGV index out of range", "");
+    }
+    const char* s = (h->cfg.argv && h->cfg.argv[index]) ? h->cfg.argv[index] : "";
+    const uint32_t sl = (uint32_t)strlen(s);
+    const uint64_t need = 4ull + (uint64_t)sl;
+    if (need > SEM_HOST_MAX_BLOB) {
+      return sem_write_error(resp, resp_cap, rh.op, rh.rid, "sem.zi_ctl.invalid", "ARGV item too large", "");
+    }
+    uint8_t* payload_buf = (uint8_t*)malloc((size_t)need);
+    if (!payload_buf) {
+      return sem_write_error(resp, resp_cap, rh.op, rh.rid, "sem.zi_ctl.oom", "out of memory", "");
+    }
+    zcl1_write_u32le(payload_buf + 0, sl);
+    if (sl) memcpy(payload_buf + 4, s, sl);
+    const int32_t r = sem_write_ok(resp, resp_cap, rh.op, rh.rid, payload_buf, (uint32_t)need);
+    free(payload_buf);
+    return r;
+  }
+
+  if (rh.op == SEM_ZI_CTL_OP_SEM_ENV_COUNT) {
+    if (!h || !h->cfg.env_enabled) return sem_write_denied(resp, resp_cap, rh.op, rh.rid, "env not enabled");
+    if (rh.payload_len != 0) {
+      return sem_write_error(resp, resp_cap, rh.op, rh.rid, "sem.zi_ctl.invalid", "ENV_COUNT payload must be empty", "");
+    }
+    uint8_t payload_buf[4];
+    zcl1_write_u32le(payload_buf + 0, h->cfg.env_count);
+    return sem_write_ok(resp, resp_cap, rh.op, rh.rid, payload_buf, (uint32_t)sizeof(payload_buf));
+  }
+
+  if (rh.op == SEM_ZI_CTL_OP_SEM_ENV_GET) {
+    if (!h || !h->cfg.env_enabled) return sem_write_denied(resp, resp_cap, rh.op, rh.rid, "env not enabled");
+    if (rh.payload_len != 4) {
+      return sem_write_error(resp, resp_cap, rh.op, rh.rid, "sem.zi_ctl.invalid", "ENV_GET payload must be u32 index", "");
+    }
+    const uint32_t index = zcl1_read_u32le(payload + 0);
+    if (index >= h->cfg.env_count) {
+      return sem_write_error(resp, resp_cap, rh.op, rh.rid, "sem.zi_ctl.bounds", "ENV index out of range", "");
+    }
+    const sem_env_kv_t* kv = (h->cfg.env) ? &h->cfg.env[index] : NULL;
+    const char* k = (kv && kv->key) ? kv->key : "";
+    const char* v = (kv && kv->val) ? kv->val : "";
+    const uint32_t kl = (uint32_t)strlen(k);
+    const uint32_t vl = (uint32_t)strlen(v);
+    const uint64_t need = 4ull + (uint64_t)kl + 4ull + (uint64_t)vl;
+    if (need > SEM_HOST_MAX_BLOB) {
+      return sem_write_error(resp, resp_cap, rh.op, rh.rid, "sem.zi_ctl.invalid", "ENV item too large", "");
+    }
+    uint8_t* payload_buf = (uint8_t*)malloc((size_t)need);
+    if (!payload_buf) {
+      return sem_write_error(resp, resp_cap, rh.op, rh.rid, "sem.zi_ctl.oom", "out of memory", "");
+    }
+    uint32_t off = 0;
+    zcl1_write_u32le(payload_buf + off, kl);
+    off += 4;
+    if (kl) memcpy(payload_buf + off, k, kl);
+    off += kl;
+    zcl1_write_u32le(payload_buf + off, vl);
+    off += 4;
+    if (vl) memcpy(payload_buf + off, v, vl);
+    off += vl;
+    const int32_t r = sem_write_ok(resp, resp_cap, rh.op, rh.rid, payload_buf, off);
+    free(payload_buf);
+    return r;
   }
 
   return sem_write_error(resp, resp_cap, rh.op, rh.rid, "sem.zi_ctl.nosys", "unsupported zi_ctl op", "");

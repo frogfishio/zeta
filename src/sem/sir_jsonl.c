@@ -8133,7 +8133,7 @@ static const char* sem_zi_err_name(int32_t rc) {
   }
 }
 
-static int sem_run_or_verify_sir_jsonl_impl(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root,
+static int sem_run_or_verify_sir_jsonl_impl(const char* path, sem_run_host_cfg_t host_cfg,
                                            sem_diag_format_t diag_format, bool diag_all, bool do_run, int* out_prog_rc,
                                            const sir_exec_event_sink_t* sink, void (*post_run)(void* user, const sir_module_t* m, int32_t exec_rc),
                                            void* post_user) {
@@ -8307,9 +8307,15 @@ static int sem_run_or_verify_sir_jsonl_impl(const char* path, const sem_cap_t* c
           &hz, (sir_hosted_zabi_cfg_t){.abi_version = 0x00020005u,
                                        .guest_mem_cap = 16u * 1024u * 1024u,
                                        .guest_mem_base = 0x10000ull,
-                                       .caps = caps,
-                                       .cap_count = cap_count,
-                                       .fs_root = fs_root})) {
+                                       .caps = host_cfg.caps,
+                                       .cap_count = host_cfg.cap_count,
+                                       .argv_enabled = host_cfg.argv_enabled,
+                                       .argv = host_cfg.argv,
+                                       .argv_count = host_cfg.argv_count,
+                                       .env_enabled = host_cfg.env_enabled,
+                                       .env = host_cfg.env,
+                                       .env_count = host_cfg.env_count,
+                                       .fs_root = host_cfg.fs_root})) {
     sir_module_free(m);
     sirj_diag_setf(&c, "sem.runtime_init", path, 0, 0, NULL, "failed to init runtime");
     sem_print_diag(&c);
@@ -8375,8 +8381,18 @@ static int sem_run_or_verify_sir_jsonl_impl(const char* path, const sem_cap_t* c
 
 int sem_run_sir_jsonl(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root) {
   int prog_rc = 0;
-  const int tool_rc =
-      sem_run_or_verify_sir_jsonl_impl(path, caps, cap_count, fs_root, SEM_DIAG_TEXT, false, true, &prog_rc, NULL, NULL, NULL);
+  const sem_run_host_cfg_t host_cfg = {
+      .caps = caps,
+      .cap_count = cap_count,
+      .fs_root = fs_root,
+      .argv_enabled = false,
+      .argv = NULL,
+      .argv_count = 0,
+      .env_enabled = false,
+      .env = NULL,
+      .env_count = 0,
+  };
+  const int tool_rc = sem_run_or_verify_sir_jsonl_impl(path, host_cfg, SEM_DIAG_TEXT, false, true, &prog_rc, NULL, NULL, NULL);
   if (tool_rc != 0) return tool_rc;
   return prog_rc;
 }
@@ -8384,7 +8400,18 @@ int sem_run_sir_jsonl(const char* path, const sem_cap_t* caps, uint32_t cap_coun
 int sem_run_sir_jsonl_ex(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root, sem_diag_format_t diag_format,
                          bool diag_all) {
   int prog_rc = 0;
-  const int tool_rc = sem_run_or_verify_sir_jsonl_impl(path, caps, cap_count, fs_root, diag_format, diag_all, true, &prog_rc, NULL, NULL, NULL);
+  const sem_run_host_cfg_t host_cfg = {
+      .caps = caps,
+      .cap_count = cap_count,
+      .fs_root = fs_root,
+      .argv_enabled = false,
+      .argv = NULL,
+      .argv_count = 0,
+      .env_enabled = false,
+      .env = NULL,
+      .env_count = 0,
+  };
+  const int tool_rc = sem_run_or_verify_sir_jsonl_impl(path, host_cfg, diag_format, diag_all, true, &prog_rc, NULL, NULL, NULL);
   if (tool_rc != 0) return tool_rc;
   return prog_rc;
 }
@@ -8392,7 +8419,27 @@ int sem_run_sir_jsonl_ex(const char* path, const sem_cap_t* caps, uint32_t cap_c
 int sem_run_sir_jsonl_capture_ex(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root, sem_diag_format_t diag_format,
                                  bool diag_all, int* out_prog_rc) {
   int prog_rc = 0;
-  const int tool_rc = sem_run_or_verify_sir_jsonl_impl(path, caps, cap_count, fs_root, diag_format, diag_all, true, &prog_rc, NULL, NULL, NULL);
+  const sem_run_host_cfg_t host_cfg = {
+      .caps = caps,
+      .cap_count = cap_count,
+      .fs_root = fs_root,
+      .argv_enabled = false,
+      .argv = NULL,
+      .argv_count = 0,
+      .env_enabled = false,
+      .env = NULL,
+      .env_count = 0,
+  };
+  const int tool_rc = sem_run_or_verify_sir_jsonl_impl(path, host_cfg, diag_format, diag_all, true, &prog_rc, NULL, NULL, NULL);
+  if (tool_rc != 0) return tool_rc;
+  if (out_prog_rc) *out_prog_rc = prog_rc;
+  return 0;
+}
+
+int sem_run_sir_jsonl_capture_host_ex(const char* path, sem_run_host_cfg_t host_cfg, sem_diag_format_t diag_format, bool diag_all,
+                                      int* out_prog_rc) {
+  int prog_rc = 0;
+  const int tool_rc = sem_run_or_verify_sir_jsonl_impl(path, host_cfg, diag_format, diag_all, true, &prog_rc, NULL, NULL, NULL);
   if (tool_rc != 0) return tool_rc;
   if (out_prog_rc) *out_prog_rc = prog_rc;
   return 0;
@@ -8566,9 +8613,9 @@ static void sem_events_post_run(void* user, const sir_module_t* m, int32_t exec_
           (uint64_t)e->cov->total_steps);
 }
 
-int sem_run_sir_jsonl_events_ex(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root, sem_diag_format_t diag_format,
-                                bool diag_all, const char* trace_jsonl_out_path, const char* coverage_jsonl_out_path, const char* trace_func_filter,
-                                const char* trace_op_filter) {
+int sem_run_sir_jsonl_events_host_ex(const char* path, sem_run_host_cfg_t host_cfg, sem_diag_format_t diag_format, bool diag_all,
+                                     const char* trace_jsonl_out_path, const char* coverage_jsonl_out_path, const char* trace_func_filter,
+                                     const char* trace_op_filter) {
   FILE* trace_out = NULL;
   FILE* cov_out = NULL;
 
@@ -8601,7 +8648,7 @@ int sem_run_sir_jsonl_events_ex(const char* path, const sem_cap_t* caps, uint32_
   };
 
   int prog_rc = 0;
-  const int tool_rc = sem_run_or_verify_sir_jsonl_impl(path, caps, cap_count, fs_root, diag_format, diag_all, true, &prog_rc,
+  const int tool_rc = sem_run_or_verify_sir_jsonl_impl(path, host_cfg, diag_format, diag_all, true, &prog_rc,
                                                        (trace_out || cov_out) ? &sink : NULL, cov_out ? sem_events_post_run : NULL, &ev);
 
   if (trace_out) fclose(trace_out);
@@ -8611,6 +8658,24 @@ int sem_run_sir_jsonl_events_ex(const char* path, const sem_cap_t* caps, uint32_
 
   if (tool_rc != 0) return tool_rc;
   return prog_rc;
+}
+
+int sem_run_sir_jsonl_events_ex(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root, sem_diag_format_t diag_format,
+                                bool diag_all, const char* trace_jsonl_out_path, const char* coverage_jsonl_out_path, const char* trace_func_filter,
+                                const char* trace_op_filter) {
+  const sem_run_host_cfg_t host_cfg = {
+      .caps = caps,
+      .cap_count = cap_count,
+      .fs_root = fs_root,
+      .argv_enabled = false,
+      .argv = NULL,
+      .argv_count = 0,
+      .env_enabled = false,
+      .env = NULL,
+      .env_count = 0,
+  };
+  return sem_run_sir_jsonl_events_host_ex(path, host_cfg, diag_format, diag_all, trace_jsonl_out_path, coverage_jsonl_out_path, trace_func_filter,
+                                         trace_op_filter);
 }
 
 int sem_run_sir_jsonl_trace_ex(const char* path, const sem_cap_t* caps, uint32_t cap_count, const char* fs_root, sem_diag_format_t diag_format,
@@ -8636,5 +8701,16 @@ int sem_verify_sir_jsonl(const char* path, sem_diag_format_t diag_format) {
 }
 
 int sem_verify_sir_jsonl_ex(const char* path, sem_diag_format_t diag_format, bool diag_all) {
-  return sem_run_or_verify_sir_jsonl_impl(path, NULL, 0, NULL, diag_format, diag_all, false, NULL, NULL, NULL, NULL);
+  const sem_run_host_cfg_t host_cfg = {
+      .caps = NULL,
+      .cap_count = 0,
+      .fs_root = NULL,
+      .argv_enabled = false,
+      .argv = NULL,
+      .argv_count = 0,
+      .env_enabled = false,
+      .env = NULL,
+      .env_count = 0,
+  };
+  return sem_run_or_verify_sir_jsonl_impl(path, host_cfg, diag_format, diag_all, false, NULL, NULL, NULL, NULL);
 }

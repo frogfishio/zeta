@@ -13,6 +13,14 @@ enum {
 
 enum {
   SEM_ZI_CTL_OP_CAPS_LIST = 1,
+
+  // Tool-defined SEM host protocol ops.
+  // These are only supported when explicitly enabled in sem_host_cfg.
+  // See `src/sem/spec.md` and `src/sircore/zi_ctl.md` (op >= 1000 reserved).
+  SEM_ZI_CTL_OP_SEM_ARGV_COUNT = 1000,
+  SEM_ZI_CTL_OP_SEM_ARGV_GET = 1001,
+  SEM_ZI_CTL_OP_SEM_ENV_COUNT = 1002,
+  SEM_ZI_CTL_OP_SEM_ENV_GET = 1003,
 };
 
 enum {
@@ -29,9 +37,24 @@ typedef struct sem_cap {
   uint32_t meta_len;
 } sem_cap_t;
 
+typedef struct sem_env_kv {
+  const char* key;
+  const char* val;
+} sem_env_kv_t;
+
 typedef struct sem_host_cfg {
   const sem_cap_t* caps;
   uint32_t cap_count;
+
+  // Optional argv snapshot exposed via SEM_ZI_CTL_OP_SEM_ARGV_*.
+  bool argv_enabled;
+  const char* const* argv;
+  uint32_t argv_count;
+
+  // Optional env snapshot exposed via SEM_ZI_CTL_OP_SEM_ENV_*.
+  bool env_enabled;
+  const sem_env_kv_t* env;
+  uint32_t env_count;
 } sem_host_cfg_t;
 
 typedef struct sem_host {
