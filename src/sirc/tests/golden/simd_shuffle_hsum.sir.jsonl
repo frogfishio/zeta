@@ -1,0 +1,96 @@
+{"ir":"sir-v1.0","k":"meta","producer":"sirc","unit":"simd_shuffle_hsum","ext":{"features":["simd:v1"]}}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:3:21","file":"simd_shuffle_hsum.sir","line":3,"col":21,"text":"type V4i32 = vec(i32, 4)"}
+{"ir":"sir-v1.0","k":"type","id":"prim:i32","kind":"prim","prim":"i32","loc":{"line":3,"col":21,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:3:21"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:3:24","file":"simd_shuffle_hsum.sir","line":3,"col":24,"text":"type V4i32 = vec(i32, 4)"}
+{"ir":"sir-v1.0","k":"type","id":"vec(prim:i32,4)","kind":"vec","lane":"prim:i32","lanes":4,"loc":{"line":3,"col":24,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:3:24"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:7:34","file":"simd_shuffle_hsum.sir","line":7,"col":34,"text":"  let v0: V4i32 = vec.splat(1:i32) as V4i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:7:0","tag":"const.i32","type_ref":"prim:i32","fields":{"value":1},"loc":{"line":7,"col":34,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:7:34"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:8:1","file":"simd_shuffle_hsum.sir","line":8,"col":1,"text":"  let v1: V4i32 = vec.replace(v0, 1:i32, 2:i32) as V4i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:8:0","tag":"vec.splat","type_ref":"vec(prim:i32,4)","fields":{"args":[{"t":"ref","id":"n:7:0"}]},"loc":{"line":8,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:8:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:8:1","tag":"let","fields":{"name":"v0","value":{"t":"ref","id":"n:8:0"}},"loc":{"line":8,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:8:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:8:33","file":"simd_shuffle_hsum.sir","line":8,"col":33,"text":"  let v1: V4i32 = vec.replace(v0, 1:i32, 2:i32) as V4i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:8:2","tag":"name","type_ref":"vec(prim:i32,4)","fields":{"name":"v0"},"loc":{"line":8,"col":33,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:8:33"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:8:40","file":"simd_shuffle_hsum.sir","line":8,"col":40,"text":"  let v1: V4i32 = vec.replace(v0, 1:i32, 2:i32) as V4i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:8:3","tag":"const.i32","type_ref":"prim:i32","fields":{"value":1},"loc":{"line":8,"col":40,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:8:40"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:8:47","file":"simd_shuffle_hsum.sir","line":8,"col":47,"text":"  let v1: V4i32 = vec.replace(v0, 1:i32, 2:i32) as V4i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:8:4","tag":"const.i32","type_ref":"prim:i32","fields":{"value":2},"loc":{"line":8,"col":47,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:8:47"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:9:1","file":"simd_shuffle_hsum.sir","line":9,"col":1,"text":"  let v2: V4i32 = vec.replace(v1, 2:i32, 3:i32) as V4i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:9:0","tag":"vec.replace","type_ref":"vec(prim:i32,4)","fields":{"args":[{"t":"ref","id":"n:8:2"},{"t":"ref","id":"n:8:3"},{"t":"ref","id":"n:8:4"}]},"loc":{"line":9,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:9:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:9:1","tag":"let","fields":{"name":"v1","value":{"t":"ref","id":"n:9:0"}},"loc":{"line":9,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:9:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:9:33","file":"simd_shuffle_hsum.sir","line":9,"col":33,"text":"  let v2: V4i32 = vec.replace(v1, 2:i32, 3:i32) as V4i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:9:2","tag":"name","type_ref":"vec(prim:i32,4)","fields":{"name":"v1"},"loc":{"line":9,"col":33,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:9:33"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:9:40","file":"simd_shuffle_hsum.sir","line":9,"col":40,"text":"  let v2: V4i32 = vec.replace(v1, 2:i32, 3:i32) as V4i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:9:3","tag":"const.i32","type_ref":"prim:i32","fields":{"value":2},"loc":{"line":9,"col":40,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:9:40"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:9:47","file":"simd_shuffle_hsum.sir","line":9,"col":47,"text":"  let v2: V4i32 = vec.replace(v1, 2:i32, 3:i32) as V4i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:9:4","tag":"const.i32","type_ref":"prim:i32","fields":{"value":3},"loc":{"line":9,"col":47,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:9:47"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:10:1","file":"simd_shuffle_hsum.sir","line":10,"col":1,"text":"  let v3: V4i32 = vec.replace(v2, 3:i32, 4:i32) as V4i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:10:0","tag":"vec.replace","type_ref":"vec(prim:i32,4)","fields":{"args":[{"t":"ref","id":"n:9:2"},{"t":"ref","id":"n:9:3"},{"t":"ref","id":"n:9:4"}]},"loc":{"line":10,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:10:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:10:1","tag":"let","fields":{"name":"v2","value":{"t":"ref","id":"n:10:0"}},"loc":{"line":10,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:10:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:10:33","file":"simd_shuffle_hsum.sir","line":10,"col":33,"text":"  let v3: V4i32 = vec.replace(v2, 3:i32, 4:i32) as V4i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:10:2","tag":"name","type_ref":"vec(prim:i32,4)","fields":{"name":"v2"},"loc":{"line":10,"col":33,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:10:33"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:10:40","file":"simd_shuffle_hsum.sir","line":10,"col":40,"text":"  let v3: V4i32 = vec.replace(v2, 3:i32, 4:i32) as V4i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:10:3","tag":"const.i32","type_ref":"prim:i32","fields":{"value":3},"loc":{"line":10,"col":40,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:10:40"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:10:47","file":"simd_shuffle_hsum.sir","line":10,"col":47,"text":"  let v3: V4i32 = vec.replace(v2, 3:i32, 4:i32) as V4i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:10:4","tag":"const.i32","type_ref":"prim:i32","fields":{"value":4},"loc":{"line":10,"col":47,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:10:47"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:11:1","file":"simd_shuffle_hsum.sir","line":11,"col":1}
+{"ir":"sir-v1.0","k":"node","id":"n:11:0","tag":"vec.replace","type_ref":"vec(prim:i32,4)","fields":{"args":[{"t":"ref","id":"n:10:2"},{"t":"ref","id":"n:10:3"},{"t":"ref","id":"n:10:4"}]},"loc":{"line":11,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:11:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:11:1","tag":"let","fields":{"name":"v3","value":{"t":"ref","id":"n:11:0"}},"loc":{"line":11,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:11:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:13:32","file":"simd_shuffle_hsum.sir","line":13,"col":32,"text":"  let r: V4i32 = vec.shuffle(v3, v3) +idx=[3,2,1,0] as V4i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:13:0","tag":"name","type_ref":"vec(prim:i32,4)","fields":{"name":"v3"},"loc":{"line":13,"col":32,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:13:32"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:13:36","file":"simd_shuffle_hsum.sir","line":13,"col":36,"text":"  let r: V4i32 = vec.shuffle(v3, v3) +idx=[3,2,1,0] as V4i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:13:1","tag":"name","type_ref":"vec(prim:i32,4)","fields":{"name":"v3"},"loc":{"line":13,"col":36,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:13:36"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:14:1","file":"simd_shuffle_hsum.sir","line":14,"col":1}
+{"ir":"sir-v1.0","k":"node","id":"n:14:0","tag":"vec.shuffle","type_ref":"vec(prim:i32,4)","fields":{"args":[{"t":"ref","id":"n:13:0"},{"t":"ref","id":"n:13:1"}],"flags":{"idx":[3,2,1,0]}},"loc":{"line":14,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:14:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:14:1","tag":"let","fields":{"name":"r","value":{"t":"ref","id":"n:14:0"}},"loc":{"line":14,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:14:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:16:30","file":"simd_shuffle_hsum.sir","line":16,"col":30,"text":"  let a0: i32 = vec.extract(r, 0:i32) as i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:16:0","tag":"name","type_ref":"vec(prim:i32,4)","fields":{"name":"r"},"loc":{"line":16,"col":30,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:16:30"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:16:37","file":"simd_shuffle_hsum.sir","line":16,"col":37,"text":"  let a0: i32 = vec.extract(r, 0:i32) as i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:16:1","tag":"const.i32","type_ref":"prim:i32","fields":{"value":0},"loc":{"line":16,"col":37,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:16:37"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:17:1","file":"simd_shuffle_hsum.sir","line":17,"col":1,"text":"  let a1: i32 = vec.extract(r, 1:i32) as i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:17:0","tag":"vec.extract","type_ref":"prim:i32","fields":{"args":[{"t":"ref","id":"n:16:0"},{"t":"ref","id":"n:16:1"}]},"loc":{"line":17,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:17:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:17:1","tag":"let","fields":{"name":"a0","value":{"t":"ref","id":"n:17:0"}},"loc":{"line":17,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:17:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:17:30","file":"simd_shuffle_hsum.sir","line":17,"col":30,"text":"  let a1: i32 = vec.extract(r, 1:i32) as i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:17:2","tag":"name","type_ref":"vec(prim:i32,4)","fields":{"name":"r"},"loc":{"line":17,"col":30,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:17:30"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:17:37","file":"simd_shuffle_hsum.sir","line":17,"col":37,"text":"  let a1: i32 = vec.extract(r, 1:i32) as i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:17:3","tag":"const.i32","type_ref":"prim:i32","fields":{"value":1},"loc":{"line":17,"col":37,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:17:37"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:18:1","file":"simd_shuffle_hsum.sir","line":18,"col":1,"text":"  let a2: i32 = vec.extract(r, 2:i32) as i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:18:0","tag":"vec.extract","type_ref":"prim:i32","fields":{"args":[{"t":"ref","id":"n:17:2"},{"t":"ref","id":"n:17:3"}]},"loc":{"line":18,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:18:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:18:1","tag":"let","fields":{"name":"a1","value":{"t":"ref","id":"n:18:0"}},"loc":{"line":18,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:18:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:18:30","file":"simd_shuffle_hsum.sir","line":18,"col":30,"text":"  let a2: i32 = vec.extract(r, 2:i32) as i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:18:2","tag":"name","type_ref":"vec(prim:i32,4)","fields":{"name":"r"},"loc":{"line":18,"col":30,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:18:30"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:18:37","file":"simd_shuffle_hsum.sir","line":18,"col":37,"text":"  let a2: i32 = vec.extract(r, 2:i32) as i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:18:3","tag":"const.i32","type_ref":"prim:i32","fields":{"value":2},"loc":{"line":18,"col":37,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:18:37"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:19:1","file":"simd_shuffle_hsum.sir","line":19,"col":1,"text":"  let a3: i32 = vec.extract(r, 3:i32) as i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:19:0","tag":"vec.extract","type_ref":"prim:i32","fields":{"args":[{"t":"ref","id":"n:18:2"},{"t":"ref","id":"n:18:3"}]},"loc":{"line":19,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:19:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:19:1","tag":"let","fields":{"name":"a2","value":{"t":"ref","id":"n:19:0"}},"loc":{"line":19,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:19:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:19:30","file":"simd_shuffle_hsum.sir","line":19,"col":30,"text":"  let a3: i32 = vec.extract(r, 3:i32) as i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:19:2","tag":"name","type_ref":"vec(prim:i32,4)","fields":{"name":"r"},"loc":{"line":19,"col":30,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:19:30"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:19:37","file":"simd_shuffle_hsum.sir","line":19,"col":37,"text":"  let a3: i32 = vec.extract(r, 3:i32) as i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:19:3","tag":"const.i32","type_ref":"prim:i32","fields":{"value":3},"loc":{"line":19,"col":37,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:19:37"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:20:1","file":"simd_shuffle_hsum.sir","line":20,"col":1,"text":"  let s01: i32 = i32.add(a0, a1)"}
+{"ir":"sir-v1.0","k":"node","id":"n:20:0","tag":"vec.extract","type_ref":"prim:i32","fields":{"args":[{"t":"ref","id":"n:19:2"},{"t":"ref","id":"n:19:3"}]},"loc":{"line":20,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:20:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:20:1","tag":"let","fields":{"name":"a3","value":{"t":"ref","id":"n:20:0"}},"loc":{"line":20,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:20:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:20:28","file":"simd_shuffle_hsum.sir","line":20,"col":28,"text":"  let s01: i32 = i32.add(a0, a1)"}
+{"ir":"sir-v1.0","k":"node","id":"n:20:2","tag":"name","type_ref":"prim:i32","fields":{"name":"a0"},"loc":{"line":20,"col":28,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:20:28"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:20:32","file":"simd_shuffle_hsum.sir","line":20,"col":32,"text":"  let s01: i32 = i32.add(a0, a1)"}
+{"ir":"sir-v1.0","k":"node","id":"n:20:3","tag":"name","type_ref":"prim:i32","fields":{"name":"a1"},"loc":{"line":20,"col":32,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:20:32"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:21:1","file":"simd_shuffle_hsum.sir","line":21,"col":1,"text":"  let s23: i32 = i32.add(a2, a3)"}
+{"ir":"sir-v1.0","k":"node","id":"n:21:0","tag":"i32.add","fields":{"args":[{"t":"ref","id":"n:20:2"},{"t":"ref","id":"n:20:3"}]},"loc":{"line":21,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:21:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:21:1","tag":"let","fields":{"name":"s01","value":{"t":"ref","id":"n:21:0"}},"loc":{"line":21,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:21:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:21:28","file":"simd_shuffle_hsum.sir","line":21,"col":28,"text":"  let s23: i32 = i32.add(a2, a3)"}
+{"ir":"sir-v1.0","k":"node","id":"n:21:2","tag":"name","type_ref":"prim:i32","fields":{"name":"a2"},"loc":{"line":21,"col":28,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:21:28"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:21:32","file":"simd_shuffle_hsum.sir","line":21,"col":32,"text":"  let s23: i32 = i32.add(a2, a3)"}
+{"ir":"sir-v1.0","k":"node","id":"n:21:3","tag":"name","type_ref":"prim:i32","fields":{"name":"a3"},"loc":{"line":21,"col":32,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:21:32"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:22:1","file":"simd_shuffle_hsum.sir","line":22,"col":1,"text":"  return i32.add(s01, s23)"}
+{"ir":"sir-v1.0","k":"node","id":"n:22:0","tag":"i32.add","fields":{"args":[{"t":"ref","id":"n:21:2"},{"t":"ref","id":"n:21:3"}]},"loc":{"line":22,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:22:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:22:1","tag":"let","fields":{"name":"s23","value":{"t":"ref","id":"n:22:0"}},"loc":{"line":22,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:22:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:22:21","file":"simd_shuffle_hsum.sir","line":22,"col":21,"text":"  return i32.add(s01, s23)"}
+{"ir":"sir-v1.0","k":"node","id":"n:22:2","tag":"name","type_ref":"prim:i32","fields":{"name":"s01"},"loc":{"line":22,"col":21,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:22:21"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:22:26","file":"simd_shuffle_hsum.sir","line":22,"col":26,"text":"  return i32.add(s01, s23)"}
+{"ir":"sir-v1.0","k":"node","id":"n:22:3","tag":"name","type_ref":"prim:i32","fields":{"name":"s23"},"loc":{"line":22,"col":26,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:22:26"}
+{"ir":"sir-v1.0","k":"src","id":"src:simd_shuffle_hsum.sir:23:1","file":"simd_shuffle_hsum.sir","line":23,"col":1,"text":"end"}
+{"ir":"sir-v1.0","k":"node","id":"n:23:0","tag":"i32.add","fields":{"args":[{"t":"ref","id":"n:22:2"},{"t":"ref","id":"n:22:3"}]},"loc":{"line":23,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:23:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:23:1","tag":"term.ret","fields":{"value":{"t":"ref","id":"n:23:0"}},"loc":{"line":23,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:23:1"}
+{"ir":"sir-v1.0","k":"type","id":"fn()->prim:i32","kind":"fn","params":[],"ret":"prim:i32","loc":{"line":23,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:23:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:23:2","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:8:1"},{"t":"ref","id":"n:9:1"},{"t":"ref","id":"n:10:1"},{"t":"ref","id":"n:11:1"},{"t":"ref","id":"n:14:1"},{"t":"ref","id":"n:17:1"},{"t":"ref","id":"n:18:1"},{"t":"ref","id":"n:19:1"},{"t":"ref","id":"n:20:1"},{"t":"ref","id":"n:21:1"},{"t":"ref","id":"n:22:1"},{"t":"ref","id":"n:23:1"}]},"loc":{"line":23,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:23:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:23:3","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","linkage":"public","params":[],"body":{"t":"ref","id":"n:23:2"}},"loc":{"line":23,"col":1,"unit":"simd_shuffle_hsum.sir"},"src_ref":"src:simd_shuffle_hsum.sir:23:1"}

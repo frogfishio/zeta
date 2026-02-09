@@ -1,0 +1,17 @@
+unit simd_atomic_mix target host +simd:v1 +atomics:v1
+
+type V4i32 = vec(i32, 4)
+
+fn main() -> i32 public
+  let p: ptr = alloca.i32() +align=4 +zero=true
+
+  atomic.store.i32(p, 7:i32) +mode=seqcst +align=4
+  let x: i32 = atomic.load.i32(p) +mode=seqcst +align=4
+
+  let v: V4i32 = vec.splat(x) as V4i32
+  let w: V4i32 = vec.add(v, v) as V4i32
+
+  ;; return one lane so it stays simple for future backends
+  return vec.extract(w, 0:i32) as i32
+end
+

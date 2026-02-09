@@ -11,6 +11,7 @@ typedef struct SircNodeList SircNodeList;
 typedef struct SircExprList SircExprList;
 typedef struct SircSwitchCaseList SircSwitchCaseList;
 typedef struct SircAttrList SircAttrList;
+typedef struct SircIntList SircIntList;
 typedef struct SircTypeList SircTypeList;
 typedef struct SircSumVariantList SircSumVariantList;
 typedef struct SircSemSwitchCaseList SircSemSwitchCaseList;
@@ -109,9 +110,14 @@ SircAttrList* sirc_attrs_add_field_scalar_bool(SircAttrList* l, char* key, int v
 SircAttrList* sirc_attrs_add_flags_scalar_str(SircAttrList* l, char* key, char* v); // takes ownership
 SircAttrList* sirc_attrs_add_flags_scalar_int(SircAttrList* l, char* key, long long v); // takes ownership of key
 SircAttrList* sirc_attrs_add_flags_scalar_bool(SircAttrList* l, char* key, int v); // takes ownership of key
+SircAttrList* sirc_attrs_add_flags_scalar_int_list(SircAttrList* l, char* key, SircIntList* v); // takes ownership
 SircAttrList* sirc_attrs_add_sig(SircAttrList* l, char* fn_name);               // takes ownership
 SircAttrList* sirc_attrs_add_count(SircAttrList* l, int64_t node_ref);
 void sirc_attrs_free(SircAttrList* l);
+
+SircIntList* sirc_ints_empty(void);
+SircIntList* sirc_ints_append(SircIntList* l, long long v);
+void sirc_ints_free(SircIntList* l);
 
 int64_t sirc_call(char* name, SircExprList* args, SircAttrList* attrs);
 int64_t sirc_call_typed(char* name, SircExprList* args, SircAttrList* attrs, int64_t type_ref);

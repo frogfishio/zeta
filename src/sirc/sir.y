@@ -30,6 +30,7 @@ void yyerror(const char* s);
   SircBranch br;
   SircSemSwitchCase sem_case;
   SircSemMatchCase match_case;
+  SircIntList* ilist;
   int64_t       node;
 }
 
@@ -62,6 +63,7 @@ void yyerror(const char* s);
 
 %destructor { free($$); } T_ID T_STRING
 %destructor { sirc_attrs_free($$); } <attrs>
+%destructor { sirc_ints_free($$); } <ilist>
 
 %type <ty> type type_ctor
 %type <tys> type_list_opt type_list
@@ -83,6 +85,7 @@ void yyerror(const char* s);
 %type <i> attr_int
 %type <b> attr_bool
 %type <s> attr_ident
+%type <ilist> int_list_opt int_list
 %type <br> branch_operand
 %type <sem_cases> sem_switch_cases_opt sem_switch_cases
 %type <sem_case> sem_switch_case
@@ -472,6 +475,7 @@ attr_item
   | '+' T_ID '=' T_STRING       { $$ = sirc_attrs_add_flags_scalar_str(sirc_attrs_empty(), $2, $4); }
   | '+' T_ID '=' attr_bool      { $$ = sirc_attrs_add_flags_scalar_bool(sirc_attrs_empty(), $2, $4); }
   | '+' T_ID '=' attr_ident     { $$ = sirc_attrs_add_flags_scalar_str(sirc_attrs_empty(), $2, $4); }
+  | '+' T_ID '=' '[' nl_star int_list_opt nl_star ']' { $$ = sirc_attrs_add_flags_scalar_int_list(sirc_attrs_empty(), $2, $6); }
   | flags_list                  { $$ = $1; }
   | T_FLAGS T_ID attr_int       { $$ = sirc_attrs_add_flags_scalar_int(sirc_attrs_empty(), $2, $3); }
   | T_FLAGS T_ID T_STRING       { $$ = sirc_attrs_add_flags_scalar_str(sirc_attrs_empty(), $2, $3); }
@@ -483,6 +487,16 @@ attr_item
   | T_ID '=' attr_ident         { $$ = sirc_attrs_add_field_scalar_str(sirc_attrs_empty(), $1, $3); }
   | T_SIG T_ID                  { $$ = sirc_attrs_add_sig(sirc_attrs_empty(), $2); }
   | T_COUNT expr                { $$ = sirc_attrs_add_count(sirc_attrs_empty(), $2); }
+  ;
+
+int_list_opt
+  : /* empty */                { $$ = sirc_ints_empty(); }
+  | int_list                   { $$ = $1; }
+  ;
+
+int_list
+  : T_INT                      { $$ = sirc_ints_append(sirc_ints_empty(), $1); }
+  | int_list comma_sep T_INT   { $$ = sirc_ints_append($1, $3); }
   ;
 
 flags_list

@@ -1,0 +1,66 @@
+{"ir":"sir-v1.0","k":"meta","producer":"sirc","unit":"ptr_arith"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:3:22","file":"ptr_arith.sir","line":3,"col":22,"text":"type buf16 = array(i8, 16)"}
+{"ir":"sir-v1.0","k":"type","id":"prim:i8","kind":"prim","prim":"i8","loc":{"line":3,"col":22,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:3:22"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:3:26","file":"ptr_arith.sir","line":3,"col":26,"text":"type buf16 = array(i8, 16)"}
+{"ir":"sir-v1.0","k":"type","id":"array(prim:i8,16)","kind":"array","of":"prim:i8","len":16,"loc":{"line":3,"col":26,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:3:26"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:5:18","file":"ptr_arith.sir","line":5,"col":18,"text":"fn main() -> i32 public"}
+{"ir":"sir-v1.0","k":"type","id":"prim:i32","kind":"prim","prim":"i32","loc":{"line":5,"col":18,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:5:18"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:6:14","file":"ptr_arith.sir","line":6,"col":14,"text":"  let p: ptr = alloca(buf16) +align=16 +zero=true"}
+{"ir":"sir-v1.0","k":"type","id":"ptr(prim:i8)","kind":"ptr","of":"prim:i8","loc":{"line":6,"col":14,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:6:14"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:6:28","file":"ptr_arith.sir","line":6,"col":28,"text":"  let p: ptr = alloca(buf16) +align=16 +zero=true"}
+{"ir":"sir-v1.0","k":"node","id":"n:6:0","tag":"name","fields":{"name":"buf16"},"loc":{"line":6,"col":28,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:6:28"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:7:1","file":"ptr_arith.sir","line":7,"col":1}
+{"ir":"sir-v1.0","k":"node","id":"n:7:0","tag":"alloca","fields":{"ty":{"t":"ref","k":"type","id":"array(prim:i8,16)"},"flags":{"align":16,"zero":true}},"loc":{"line":7,"col":1,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:7:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:7:1","tag":"let","fields":{"name":"p","value":{"t":"ref","id":"n:7:0"}},"loc":{"line":7,"col":1,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:7:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:9:34","file":"ptr_arith.sir","line":9,"col":34,"text":"  let pi: ptr = ptr.offset(i32, p, 2:i64) ;; byte offset = 8"}
+{"ir":"sir-v1.0","k":"node","id":"n:9:0","tag":"name","type_ref":"ptr(prim:i8)","fields":{"name":"p"},"loc":{"line":9,"col":34,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:9:34"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:9:41","file":"ptr_arith.sir","line":9,"col":41,"text":"  let pi: ptr = ptr.offset(i32, p, 2:i64) ;; byte offset = 8"}
+{"ir":"sir-v1.0","k":"type","id":"prim:i64","kind":"prim","prim":"i64","loc":{"line":9,"col":41,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:9:41"}
+{"ir":"sir-v1.0","k":"node","id":"n:9:1","tag":"const.i64","type_ref":"prim:i64","fields":{"value":2},"loc":{"line":9,"col":41,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:9:41"}
+{"ir":"sir-v1.0","k":"node","id":"n:9:2","tag":"ptr.offset","fields":{"ty":{"t":"ref","k":"type","id":"prim:i32"},"args":[{"t":"ref","id":"n:9:0"},{"t":"ref","id":"n:9:1"}]},"loc":{"line":9,"col":41,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:9:41"}
+{"ir":"sir-v1.0","k":"node","id":"n:9:3","tag":"let","fields":{"name":"pi","value":{"t":"ref","id":"n:9:2"}},"loc":{"line":9,"col":41,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:9:41"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:10:15","file":"ptr_arith.sir","line":10,"col":15,"text":"  store.i32(pi, 0x11223344:i32) +align=4"}
+{"ir":"sir-v1.0","k":"node","id":"n:10:0","tag":"name","type_ref":"ptr(prim:i8)","fields":{"name":"pi"},"loc":{"line":10,"col":15,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:10:15"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:10:31","file":"ptr_arith.sir","line":10,"col":31,"text":"  store.i32(pi, 0x11223344:i32) +align=4"}
+{"ir":"sir-v1.0","k":"node","id":"n:10:1","tag":"const.i32","type_ref":"prim:i32","fields":{"value":287454020},"loc":{"line":10,"col":31,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:10:31"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:11:1","file":"ptr_arith.sir","line":11,"col":1}
+{"ir":"sir-v1.0","k":"node","id":"n:11:0","tag":"store.i32","fields":{"addr":{"t":"ref","id":"n:10:0"},"value":{"t":"ref","id":"n:10:1"}},"loc":{"line":11,"col":1,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:11:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:13:33","file":"ptr_arith.sir","line":13,"col":33,"text":"  let pb: ptr = ptr.offset(i8, p, 8:i64)"}
+{"ir":"sir-v1.0","k":"node","id":"n:13:0","tag":"name","type_ref":"ptr(prim:i8)","fields":{"name":"p"},"loc":{"line":13,"col":33,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:13:33"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:13:40","file":"ptr_arith.sir","line":13,"col":40,"text":"  let pb: ptr = ptr.offset(i8, p, 8:i64)"}
+{"ir":"sir-v1.0","k":"node","id":"n:13:1","tag":"const.i64","type_ref":"prim:i64","fields":{"value":8},"loc":{"line":13,"col":40,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:13:40"}
+{"ir":"sir-v1.0","k":"node","id":"n:13:2","tag":"ptr.offset","fields":{"ty":{"t":"ref","k":"type","id":"prim:i8"},"args":[{"t":"ref","id":"n:13:0"},{"t":"ref","id":"n:13:1"}]},"loc":{"line":13,"col":40,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:13:40"}
+{"ir":"sir-v1.0","k":"node","id":"n:13:3","tag":"let","fields":{"name":"pb","value":{"t":"ref","id":"n:13:2"}},"loc":{"line":13,"col":40,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:13:40"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:14:27","file":"ptr_arith.sir","line":14,"col":27,"text":"  let x: i32 = load.i32(pb) +align=4"}
+{"ir":"sir-v1.0","k":"node","id":"n:14:0","tag":"name","type_ref":"ptr(prim:i8)","fields":{"name":"pb"},"loc":{"line":14,"col":27,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:14:27"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:15:1","file":"ptr_arith.sir","line":15,"col":1}
+{"ir":"sir-v1.0","k":"node","id":"n:15:0","tag":"load.i32","type_ref":"prim:i32","fields":{"addr":{"t":"ref","id":"n:14:0"}},"loc":{"line":15,"col":1,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:15:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:15:1","tag":"let","fields":{"name":"x","value":{"t":"ref","id":"n:15:0"}},"loc":{"line":15,"col":1,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:15:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:17:31","file":"ptr_arith.sir","line":17,"col":31,"text":"  let sz: i64 = ptr.sizeof(i32)"}
+{"ir":"sir-v1.0","k":"node","id":"n:17:0","tag":"ptr.sizeof","type_ref":"prim:i64","fields":{"ty":{"t":"ref","k":"type","id":"prim:i32"},"args":[]},"loc":{"line":17,"col":31,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:17:31"}
+{"ir":"sir-v1.0","k":"node","id":"n:17:1","tag":"let","fields":{"name":"sz","value":{"t":"ref","id":"n:17:0"}},"loc":{"line":17,"col":31,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:17:31"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:18:32","file":"ptr_arith.sir","line":18,"col":32,"text":"  let al: i32 = ptr.alignof(i32)"}
+{"ir":"sir-v1.0","k":"node","id":"n:18:0","tag":"ptr.alignof","type_ref":"prim:i32","fields":{"ty":{"t":"ref","k":"type","id":"prim:i32"},"args":[]},"loc":{"line":18,"col":32,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:18:32"}
+{"ir":"sir-v1.0","k":"node","id":"n:18:1","tag":"let","fields":{"name":"al","value":{"t":"ref","id":"n:18:0"}},"loc":{"line":18,"col":32,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:18:32"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:19:35","file":"ptr_arith.sir","line":19,"col":35,"text":"  let sz32: i32 = i32.trunc.i64(sz)"}
+{"ir":"sir-v1.0","k":"node","id":"n:19:0","tag":"name","type_ref":"prim:i64","fields":{"name":"sz"},"loc":{"line":19,"col":35,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:19:35"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:20:1","file":"ptr_arith.sir","line":20,"col":1}
+{"ir":"sir-v1.0","k":"node","id":"n:20:0","tag":"i32.trunc.i64","fields":{"args":[{"t":"ref","id":"n:19:0"}]},"loc":{"line":20,"col":1,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:20:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:20:1","tag":"let","fields":{"name":"sz32","value":{"t":"ref","id":"n:20:0"}},"loc":{"line":20,"col":1,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:20:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:21:25","file":"ptr_arith.sir","line":21,"col":25,"text":"  let y: i32 = i32.add(x, sz32)"}
+{"ir":"sir-v1.0","k":"node","id":"n:21:0","tag":"name","type_ref":"prim:i32","fields":{"name":"x"},"loc":{"line":21,"col":25,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:21:25"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:21:31","file":"ptr_arith.sir","line":21,"col":31,"text":"  let y: i32 = i32.add(x, sz32)"}
+{"ir":"sir-v1.0","k":"node","id":"n:21:1","tag":"name","type_ref":"prim:i32","fields":{"name":"sz32"},"loc":{"line":21,"col":31,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:21:31"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:22:1","file":"ptr_arith.sir","line":22,"col":1,"text":"  return i32.add(y, al)"}
+{"ir":"sir-v1.0","k":"node","id":"n:22:0","tag":"i32.add","fields":{"args":[{"t":"ref","id":"n:21:0"},{"t":"ref","id":"n:21:1"}]},"loc":{"line":22,"col":1,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:22:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:22:1","tag":"let","fields":{"name":"y","value":{"t":"ref","id":"n:22:0"}},"loc":{"line":22,"col":1,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:22:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:22:19","file":"ptr_arith.sir","line":22,"col":19,"text":"  return i32.add(y, al)"}
+{"ir":"sir-v1.0","k":"node","id":"n:22:2","tag":"name","type_ref":"prim:i32","fields":{"name":"y"},"loc":{"line":22,"col":19,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:22:19"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:22:23","file":"ptr_arith.sir","line":22,"col":23,"text":"  return i32.add(y, al)"}
+{"ir":"sir-v1.0","k":"node","id":"n:22:3","tag":"name","type_ref":"prim:i32","fields":{"name":"al"},"loc":{"line":22,"col":23,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:22:23"}
+{"ir":"sir-v1.0","k":"src","id":"src:ptr_arith.sir:23:1","file":"ptr_arith.sir","line":23,"col":1,"text":"end"}
+{"ir":"sir-v1.0","k":"node","id":"n:23:0","tag":"i32.add","fields":{"args":[{"t":"ref","id":"n:22:2"},{"t":"ref","id":"n:22:3"}]},"loc":{"line":23,"col":1,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:23:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:23:1","tag":"term.ret","fields":{"value":{"t":"ref","id":"n:23:0"}},"loc":{"line":23,"col":1,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:23:1"}
+{"ir":"sir-v1.0","k":"type","id":"fn()->prim:i32","kind":"fn","params":[],"ret":"prim:i32","loc":{"line":23,"col":1,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:23:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:23:2","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:7:1"},{"t":"ref","id":"n:9:3"},{"t":"ref","id":"n:11:0"},{"t":"ref","id":"n:13:3"},{"t":"ref","id":"n:15:1"},{"t":"ref","id":"n:17:1"},{"t":"ref","id":"n:18:1"},{"t":"ref","id":"n:20:1"},{"t":"ref","id":"n:22:1"},{"t":"ref","id":"n:23:1"}]},"loc":{"line":23,"col":1,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:23:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:23:3","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","linkage":"public","params":[],"body":{"t":"ref","id":"n:23:2"}},"loc":{"line":23,"col":1,"unit":"ptr_arith.sir"},"src_ref":"src:ptr_arith.sir:23:1"}

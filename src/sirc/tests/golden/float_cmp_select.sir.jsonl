@@ -1,0 +1,38 @@
+{"ir":"sir-v1.0","k":"meta","producer":"sirc","unit":"float_cmp_select"}
+{"ir":"sir-v1.0","k":"src","id":"src:float_cmp_select.sir:3:18","file":"float_cmp_select.sir","line":3,"col":18,"text":"fn main() -> i32 public"}
+{"ir":"sir-v1.0","k":"type","id":"prim:i32","kind":"prim","prim":"i32","loc":{"line":3,"col":18,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:3:18"}
+{"ir":"sir-v1.0","k":"src","id":"src:float_cmp_select.sir:4:14","file":"float_cmp_select.sir","line":4,"col":14,"text":"  let a: f64 = f64.from_i32.s(7:i32)"}
+{"ir":"sir-v1.0","k":"type","id":"prim:f64","kind":"prim","prim":"f64","loc":{"line":4,"col":14,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:4:14"}
+{"ir":"sir-v1.0","k":"src","id":"src:float_cmp_select.sir:4:36","file":"float_cmp_select.sir","line":4,"col":36,"text":"  let a: f64 = f64.from_i32.s(7:i32)"}
+{"ir":"sir-v1.0","k":"node","id":"n:4:0","tag":"const.i32","type_ref":"prim:i32","fields":{"value":7},"loc":{"line":4,"col":36,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:4:36"}
+{"ir":"sir-v1.0","k":"src","id":"src:float_cmp_select.sir:5:1","file":"float_cmp_select.sir","line":5,"col":1,"text":"  let b: f64 = f64.div(a, 2.0:f64)"}
+{"ir":"sir-v1.0","k":"node","id":"n:5:0","tag":"f64.from_i32.s","fields":{"args":[{"t":"ref","id":"n:4:0"}]},"loc":{"line":5,"col":1,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:5:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:5:1","tag":"let","fields":{"name":"a","value":{"t":"ref","id":"n:5:0"}},"loc":{"line":5,"col":1,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:5:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:float_cmp_select.sir:5:25","file":"float_cmp_select.sir","line":5,"col":25,"text":"  let b: f64 = f64.div(a, 2.0:f64)"}
+{"ir":"sir-v1.0","k":"node","id":"n:5:2","tag":"name","type_ref":"prim:f64","fields":{"name":"a"},"loc":{"line":5,"col":25,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:5:25"}
+{"ir":"sir-v1.0","k":"src","id":"src:float_cmp_select.sir:5:34","file":"float_cmp_select.sir","line":5,"col":34,"text":"  let b: f64 = f64.div(a, 2.0:f64)"}
+{"ir":"sir-v1.0","k":"node","id":"n:5:3","tag":"const.f64","type_ref":"prim:f64","fields":{"bits":"0x4000000000000000"},"loc":{"line":5,"col":34,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:5:34"}
+{"ir":"sir-v1.0","k":"src","id":"src:float_cmp_select.sir:6:1","file":"float_cmp_select.sir","line":6,"col":1,"text":"  let ok: bool = f64.cmp.olt(b, 4.0:f64)"}
+{"ir":"sir-v1.0","k":"node","id":"n:6:0","tag":"f64.div","fields":{"args":[{"t":"ref","id":"n:5:2"},{"t":"ref","id":"n:5:3"}]},"loc":{"line":6,"col":1,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:6:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:6:1","tag":"let","fields":{"name":"b","value":{"t":"ref","id":"n:6:0"}},"loc":{"line":6,"col":1,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:6:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:float_cmp_select.sir:6:16","file":"float_cmp_select.sir","line":6,"col":16,"text":"  let ok: bool = f64.cmp.olt(b, 4.0:f64)"}
+{"ir":"sir-v1.0","k":"type","id":"prim:bool","kind":"prim","prim":"bool","loc":{"line":6,"col":16,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:6:16"}
+{"ir":"sir-v1.0","k":"src","id":"src:float_cmp_select.sir:6:31","file":"float_cmp_select.sir","line":6,"col":31,"text":"  let ok: bool = f64.cmp.olt(b, 4.0:f64)"}
+{"ir":"sir-v1.0","k":"node","id":"n:6:2","tag":"name","type_ref":"prim:f64","fields":{"name":"b"},"loc":{"line":6,"col":31,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:6:31"}
+{"ir":"sir-v1.0","k":"src","id":"src:float_cmp_select.sir:6:40","file":"float_cmp_select.sir","line":6,"col":40,"text":"  let ok: bool = f64.cmp.olt(b, 4.0:f64)"}
+{"ir":"sir-v1.0","k":"node","id":"n:6:3","tag":"const.f64","type_ref":"prim:f64","fields":{"bits":"0x4010000000000000"},"loc":{"line":6,"col":40,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:6:40"}
+{"ir":"sir-v1.0","k":"src","id":"src:float_cmp_select.sir:7:1","file":"float_cmp_select.sir","line":7,"col":1,"text":"  return select(i32, ok, 1:i32, 0:i32)"}
+{"ir":"sir-v1.0","k":"node","id":"n:7:0","tag":"f64.cmp.olt","fields":{"args":[{"t":"ref","id":"n:6:2"},{"t":"ref","id":"n:6:3"}]},"loc":{"line":7,"col":1,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:7:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:7:1","tag":"let","fields":{"name":"ok","value":{"t":"ref","id":"n:7:0"}},"loc":{"line":7,"col":1,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:7:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:float_cmp_select.sir:7:24","file":"float_cmp_select.sir","line":7,"col":24,"text":"  return select(i32, ok, 1:i32, 0:i32)"}
+{"ir":"sir-v1.0","k":"node","id":"n:7:2","tag":"name","type_ref":"prim:bool","fields":{"name":"ok"},"loc":{"line":7,"col":24,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:7:24"}
+{"ir":"sir-v1.0","k":"src","id":"src:float_cmp_select.sir:7:31","file":"float_cmp_select.sir","line":7,"col":31,"text":"  return select(i32, ok, 1:i32, 0:i32)"}
+{"ir":"sir-v1.0","k":"node","id":"n:7:3","tag":"const.i32","type_ref":"prim:i32","fields":{"value":1},"loc":{"line":7,"col":31,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:7:31"}
+{"ir":"sir-v1.0","k":"src","id":"src:float_cmp_select.sir:7:38","file":"float_cmp_select.sir","line":7,"col":38,"text":"  return select(i32, ok, 1:i32, 0:i32)"}
+{"ir":"sir-v1.0","k":"node","id":"n:7:4","tag":"const.i32","type_ref":"prim:i32","fields":{"value":0},"loc":{"line":7,"col":38,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:7:38"}
+{"ir":"sir-v1.0","k":"node","id":"n:7:5","tag":"select","type_ref":"prim:i32","fields":{"args":[{"t":"ref","id":"n:7:2"},{"t":"ref","id":"n:7:3"},{"t":"ref","id":"n:7:4"}]},"loc":{"line":7,"col":38,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:7:38"}
+{"ir":"sir-v1.0","k":"node","id":"n:7:6","tag":"term.ret","fields":{"value":{"t":"ref","id":"n:7:5"}},"loc":{"line":7,"col":38,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:7:38"}
+{"ir":"sir-v1.0","k":"src","id":"src:float_cmp_select.sir:8:1","file":"float_cmp_select.sir","line":8,"col":1,"text":"end"}
+{"ir":"sir-v1.0","k":"type","id":"fn()->prim:i32","kind":"fn","params":[],"ret":"prim:i32","loc":{"line":8,"col":1,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:8:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:8:0","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:5:1"},{"t":"ref","id":"n:6:1"},{"t":"ref","id":"n:7:1"},{"t":"ref","id":"n:7:6"}]},"loc":{"line":8,"col":1,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:8:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:8:1","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","linkage":"public","params":[],"body":{"t":"ref","id":"n:8:0"}},"loc":{"line":8,"col":1,"unit":"float_cmp_select.sir"},"src_ref":"src:float_cmp_select.sir:8:1"}

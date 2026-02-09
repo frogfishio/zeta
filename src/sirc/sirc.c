@@ -1448,6 +1448,7 @@ typedef enum AttrScalarKind {
   ATTR_SCALAR_STR = 1,
   ATTR_SCALAR_INT = 2,
   ATTR_SCALAR_BOOL = 3,
+  ATTR_SCALAR_INT_LIST = 4,
 } AttrScalarKind;
 
 typedef struct AttrScalar {
@@ -1456,6 +1457,10 @@ typedef struct AttrScalar {
     char* s;
     long long i;
     int b;
+    struct {
+      long long* items;
+      size_t len;
+    } ilist;
   } v;
 } AttrScalar;
 
@@ -1479,6 +1484,12 @@ typedef struct SircAttrList {
   size_t len;
   size_t cap;
 } SircAttrList;
+
+typedef struct SircIntList {
+  long long* items;
+  size_t len;
+  size_t cap;
+} SircIntList;
 
 static SircParamList* params_new(bool is_block) {
   SircParamList* p = (SircParamList*)calloc(1, sizeof(SircParamList));
@@ -1649,6 +1660,18 @@ SircAttrList* sirc_attrs_add_flags_scalar_bool(SircAttrList* l, char* key, int v
   return attrs_add_item(l, it);
 }
 
+SircAttrList* sirc_attrs_add_flags_scalar_int_list(SircAttrList* l, char* key, SircIntList* v) {
+  long long* items = NULL;
+  size_t len = 0;
+  if (v) {
+    items = v->items;
+    len = v->len;
+    free(v);
+  }
+  AttrItem it = {.kind = ATTR_FLAGS_SCALAR, .key = key, .scalar = {.kind = ATTR_SCALAR_INT_LIST, .v = {.ilist = {.items = items, .len = len}}}};
+  return attrs_add_item(l, it);
+}
+
 SircAttrList* sirc_attrs_add_sig(SircAttrList* l, char* fn_name) {
   AttrItem it = {.kind = ATTR_SIG, .key = fn_name};
   return attrs_add_item(l, it);
@@ -1667,7 +1690,32 @@ void sirc_attrs_free(SircAttrList* l) {
     if ((it->kind == ATTR_FIELD_SCALAR || it->kind == ATTR_FLAGS_SCALAR) && it->scalar.kind == ATTR_SCALAR_STR && it->scalar.v.s) {
       free(it->scalar.v.s);
     }
+    if ((it->kind == ATTR_FIELD_SCALAR || it->kind == ATTR_FLAGS_SCALAR) && it->scalar.kind == ATTR_SCALAR_INT_LIST && it->scalar.v.ilist.items) {
+      free(it->scalar.v.ilist.items);
+    }
   }
+  free(l->items);
+  free(l);
+}
+
+SircIntList* sirc_ints_empty(void) {
+  SircIntList* l = (SircIntList*)calloc(1, sizeof(SircIntList));
+  if (!l) die_at_last("sirc: out of memory");
+  return l;
+}
+
+SircIntList* sirc_ints_append(SircIntList* l, long long v) {
+  if (!l) l = sirc_ints_empty();
+  if (l->len == l->cap) {
+    l->cap = l->cap ? l->cap * 2 : 8;
+    l->items = (long long*)xrealloc(l->items, l->cap * sizeof(long long));
+  }
+  l->items[l->len++] = v;
+  return l;
+}
+
+void sirc_ints_free(SircIntList* l) {
+  if (!l) return;
   free(l->items);
   free(l);
 }
@@ -1828,6 +1876,14 @@ static void emit_attr_scalar(const AttrScalar* s) {
     case ATTR_SCALAR_INT: emitf("%lld", (long long)s->v.i); return;
     case ATTR_SCALAR_BOOL: emitf("%s", s->v.b ? "true" : "false"); return;
     case ATTR_SCALAR_STR: json_write_escaped(g_emit.out, s->v.s ? s->v.s : ""); return;
+    case ATTR_SCALAR_INT_LIST:
+      emitf("[");
+      for (size_t i = 0; i < s->v.ilist.len; i++) {
+        if (i) emitf(",");
+        emitf("%lld", (long long)s->v.ilist.items[i]);
+      }
+      emitf("]");
+      return;
     default: emitf("null"); return;
   }
 }

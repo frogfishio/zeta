@@ -1,0 +1,24 @@
+unit ptr_arith target host
+
+type buf16 = array(i8, 16)
+
+fn main() -> i32 public
+  let p: ptr = alloca(buf16) +align=16 +zero=true
+
+  ;; element-offset (scaled by sizeof(i32))
+  let pi: ptr = ptr.offset(i32, p, 2:i64) ;; byte offset = 8
+  store.i32(pi, 0x11223344:i32) +align=4
+
+  ;; byte-offset (scaled by sizeof(i8)==1)
+  let pb: ptr = ptr.offset(i8, p, 8:i64)
+  let x: i32 = load.i32(pb) +align=4
+
+  ;; prove addr math: sizeof(i32)==4 and alignof(i32)==4 on all targets
+  let sz: i64 = ptr.sizeof(i32)
+  let al: i32 = ptr.alignof(i32)
+  let sz32: i32 = i32.trunc.i64(sz)
+
+  let y: i32 = i32.add(x, sz32)
+  return i32.add(y, al)
+end
+
