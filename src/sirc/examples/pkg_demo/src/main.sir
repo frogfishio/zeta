@@ -1,7 +1,7 @@
 unit pkg_demo target host
 @mod pkg
 
-@include "include/defs.sir.inc"
+@include "include/defs.sir"
 
 fn main() -> i32 public
   return helper()

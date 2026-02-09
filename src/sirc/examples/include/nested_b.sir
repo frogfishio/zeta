@@ -1,0 +1,6 @@
+;; Fragment included by nested_a.sir
+@mod nest_b
+
+fn mul2_impl(x:i32) -> i32
+  return i32.mul(x, 2:i32)
+end

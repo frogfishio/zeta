@@ -1,0 +1,9 @@
+unit include_multi_nested target host
+@mod main
+
+@include "include/defs.sir"
+@include "include/nested_a.sir"
+
+fn main() -> i32 public
+  return mul2(add42(0:i32))
+end

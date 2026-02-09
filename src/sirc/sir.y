@@ -102,25 +102,7 @@ void yyerror(const char* s);
 %%
 
 program
-  : unit_header nl_star directives_opt decls_opt nl_star
-  ;
-
-directives_opt
-  : /* empty */
-  | directives
-  ;
-
-directives
-  : directive
-  | directives nl_star directive
-  | directives nl_plus
-  ;
-
-directive
-  : T_ATMOD T_ID          { sirc_set_id_scope($2); }
-  | T_ATMOD T_STRING      { sirc_set_id_scope($2); }
-  | T_ATINCLUDE T_STRING  { if (!sirc_include_file($2)) YYERROR; }
-  | error nl_plus         { yyerrok; }
+  : unit_header nl_star decls_opt nl_star
   ;
 
 unit_header
@@ -156,6 +138,9 @@ decl
   : fn_decl
   | extern_fn_decl
   | type_decl
+  | T_ATMOD T_ID              { sirc_set_id_scope($2); }
+  | T_ATMOD T_STRING          { sirc_set_id_scope($2); }
+  | T_ATINCLUDE T_STRING      { if (!sirc_include_file($2)) YYERROR; }
   | error nl_plus              { yyerrok; }
   ;
 
@@ -167,6 +152,7 @@ type_decl
 decls_rest
   : /* empty */
   | nl_plus decl decls_rest
+  | decl decls_rest
   | nl_plus
   ;
 

@@ -108,6 +108,7 @@ sirc_add_golden_test(sirc_golden_sem_scope_cfg examples/sem_scope_cfg.sir tests/
 sirc_add_golden_test(sirc_golden_hello examples/hello.sir tests/golden/hello.sir.jsonl)
 sirc_add_golden_test(sirc_golden_add examples/add.sir tests/golden/add.sir.jsonl)
 sirc_add_golden_test(sirc_golden_include_basic examples/include_basic.sir tests/golden/include_basic.sir.jsonl)
+sirc_add_golden_test(sirc_golden_include_multi_nested examples/include_multi_nested.sir tests/golden/include_multi_nested.sir.jsonl)
 sirc_add_golden_test(sirc_golden_pkg_demo_main examples/pkg_demo/src/main.sir tests/golden/pkg_demo_main.sir.jsonl)
 sirc_add_golden_test(sirc_golden_cfg_if examples/cfg_if.sir tests/golden/cfg_if.sir.jsonl)
 sirc_add_golden_test(sirc_golden_cfg_switch examples/cfg_switch.sir tests/golden/cfg_switch.sir.jsonl)

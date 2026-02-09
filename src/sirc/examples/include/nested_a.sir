@@ -1,0 +1,8 @@
+;; Fragment that itself includes another fragment
+@mod nest_a
+
+@include "nested_b.sir"
+
+fn mul2(x:i32) -> i32
+  return mul2_impl(x)
+end

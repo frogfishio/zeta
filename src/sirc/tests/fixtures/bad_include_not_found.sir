@@ -1,6 +1,6 @@
 unit u0 target host
 
-@include "no_such_file.sir.inc"
+@include "no_such_file.sir"
 
 fn main() -> i32 public
   return 0:i32

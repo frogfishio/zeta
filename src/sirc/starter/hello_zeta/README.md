@@ -21,5 +21,5 @@ $SIRCC /tmp/hello_zeta.sir.jsonl -o /tmp/hello_zeta && /tmp/hello_zeta
 ## Layout
 
 - `src/main.sir` is the entry file.
-- `include/defs.sir.inc` is a fragment included via `@include "include/defs.sir.inc"`.
+- `include/defs.sir` is a fragment included via `@include "include/defs.sir"`.
 
