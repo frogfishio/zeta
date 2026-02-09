@@ -210,7 +210,7 @@ Each package must be fully skippable unless its `unit.features` gate is enabled.
   - [x] `atomic.load.i8/i16/i32/i64` (LLVM atomic load)
   - [x] `atomic.store.i8/i16/i32/i64` (LLVM atomic store)
   - [x] `atomic.rmw.{add,and,or,xor,xchg}.i8/i16/i32/i64` (LLVM atomicrmw)
-  - [ ] `atomic.cmpxchg.*` (blocked: current node model is single-result; cmpxchg is multi-result in spec)
+  - [x] `atomic.cmpxchg.i8/i16/i32/i64` (LLVM cmpxchg; sircc single-result returns old only; ok is derivable as `old==expected`)
 
 ### 4.2 SIMD (simd:v1) — 13
 - [x] **Phase 0: contracts + representation (must be explicit)**

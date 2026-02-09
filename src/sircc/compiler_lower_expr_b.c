@@ -841,6 +841,114 @@ bool lower_expr_part_b(FunctionCtx* f, int64_t node_id, NodeRec* n, LLVMValueRef
     goto done;
   }
 
+  if (strncmp(n->tag, "atomic.cmpxchg.", 15) == 0) {
+    const char* tname = n->tag + 15;
+    if (!n->fields) {
+      err_codef(f->p, "sircc.atomic.cmpxchg.missing_fields", "sircc: %s node %lld missing fields", n->tag, (long long)node_id);
+      goto done;
+    }
+    JsonValue* args = json_obj_get(n->fields, "args");
+    if (!args || args->type != JSON_ARRAY || args->v.arr.len != 3) {
+      err_codef(f->p, "sircc.atomic.cmpxchg.args.bad", "sircc: %s node %lld requires args:[addr, expected, desired]", n->tag, (long long)node_id);
+      goto done;
+    }
+    int64_t aid = 0, eid = 0, did = 0;
+    if (!parse_node_ref_id(f->p, args->v.arr.items[0], &aid) || !parse_node_ref_id(f->p, args->v.arr.items[1], &eid) ||
+        !parse_node_ref_id(f->p, args->v.arr.items[2], &did)) {
+      err_codef(f->p, "sircc.atomic.cmpxchg.args.ref_bad", "sircc: %s node %lld args must be node refs", n->tag, (long long)node_id);
+      goto done;
+    }
+    LLVMValueRef pval = lower_expr(f, aid);
+    LLVMValueRef expected = lower_expr(f, eid);
+    LLVMValueRef desired = lower_expr(f, did);
+    if (!pval || !expected || !desired) goto done;
+
+    LLVMTypeRef pty = LLVMTypeOf(pval);
+    if (LLVMGetTypeKind(pty) != LLVMPointerTypeKind) {
+      err_codef(f->p, "sircc.atomic.cmpxchg.addr.not_ptr", "sircc: %s requires pointer addr", n->tag);
+      goto done;
+    }
+
+    LLVMTypeRef el = lower_type_prim(f->ctx, tname);
+    if (!el || LLVMGetTypeKind(el) != LLVMIntegerTypeKind) {
+      err_codef(f->p, "sircc.atomic.cmpxchg.type_unsupported", "sircc: unsupported atomic.cmpxchg type '%s'", tname);
+      goto done;
+    }
+    const unsigned w = LLVMGetIntTypeWidth(el);
+    if (LLVMGetTypeKind(LLVMTypeOf(expected)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(expected)) != w) {
+      expected = LLVMBuildTruncOrBitCast(f->builder, expected, el, "atomic.cmpxchg.expected");
+    }
+    if (LLVMGetTypeKind(LLVMTypeOf(desired)) != LLVMIntegerTypeKind || LLVMGetIntTypeWidth(LLVMTypeOf(desired)) != w) {
+      desired = LLVMBuildTruncOrBitCast(f->builder, desired, el, "atomic.cmpxchg.desired");
+    }
+
+    LLVMTypeRef want_ptr = LLVMPointerType(el, 0);
+    if (want_ptr != pty) pval = LLVMBuildBitCast(f->builder, pval, want_ptr, "atomic.cmpxchg.cast");
+
+    unsigned natural_align = (unsigned)((w + 7u) / 8u);
+    unsigned align = natural_align ? natural_align : 1u;
+    JsonValue* flags = json_obj_get(n->fields, "flags");
+    JsonValue* alignv = NULL;
+    if (flags && flags->type == JSON_OBJECT) alignv = json_obj_get(flags, "align");
+    if (!alignv) alignv = json_obj_get(n->fields, "align");
+    if (alignv) {
+      int64_t a = 0;
+      if (!json_get_i64(alignv, &a)) {
+        err_codef(f->p, "sircc.atomic.cmpxchg.align.not_int", "sircc: %s node %lld flags.align must be an integer", n->tag, (long long)node_id);
+        goto done;
+      }
+      if (a <= 0 || a > (int64_t)UINT_MAX) {
+        err_codef(f->p, "sircc.atomic.cmpxchg.align.range", "sircc: %s node %lld flags.align must be > 0", n->tag, (long long)node_id);
+        goto done;
+      }
+      align = (unsigned)a;
+    }
+    if ((align & (align - 1u)) != 0u) {
+      err_codef(f->p, "sircc.atomic.cmpxchg.align.not_pow2", "sircc: %s node %lld flags.align must be a power of two", n->tag, (long long)node_id);
+      goto done;
+    }
+    if (!emit_trap_if_misaligned(f, pval, align)) goto done;
+
+    const char* mode_succ = NULL;
+    const char* mode_fail = NULL;
+    if (flags && flags->type == JSON_OBJECT) {
+      mode_succ = json_get_string(json_obj_get(flags, "modeSucc"));
+      mode_fail = json_get_string(json_obj_get(flags, "modeFail"));
+    }
+    if (!mode_succ) mode_succ = json_get_string(json_obj_get(n->fields, "modeSucc"));
+    if (!mode_fail) mode_fail = json_get_string(json_obj_get(n->fields, "modeFail"));
+    if (!mode_succ || !mode_fail) {
+      err_codef(f->p, "sircc.atomic.cmpxchg.mode.missing", "sircc: %s node %lld missing flags.modeSucc/modeFail", n->tag, (long long)node_id);
+      goto done;
+    }
+
+    LLVMAtomicOrdering succ;
+    if (strcmp(mode_succ, "relaxed") == 0) succ = LLVMAtomicOrderingMonotonic;
+    else if (strcmp(mode_succ, "acquire") == 0) succ = LLVMAtomicOrderingAcquire;
+    else if (strcmp(mode_succ, "release") == 0) succ = LLVMAtomicOrderingRelease;
+    else if (strcmp(mode_succ, "acqrel") == 0) succ = LLVMAtomicOrderingAcquireRelease;
+    else if (strcmp(mode_succ, "seqcst") == 0) succ = LLVMAtomicOrderingSequentiallyConsistent;
+    else {
+      err_codef(f->p, "sircc.atomic.cmpxchg.mode.bad", "sircc: %s node %lld invalid modeSucc '%s'", n->tag, (long long)node_id, mode_succ);
+      goto done;
+    }
+
+    LLVMAtomicOrdering fail;
+    if (strcmp(mode_fail, "relaxed") == 0) fail = LLVMAtomicOrderingMonotonic;
+    else if (strcmp(mode_fail, "acquire") == 0) fail = LLVMAtomicOrderingAcquire;
+    else if (strcmp(mode_fail, "seqcst") == 0) fail = LLVMAtomicOrderingSequentiallyConsistent;
+    else {
+      err_codef(f->p, "sircc.atomic.cmpxchg.mode.bad", "sircc: %s node %lld invalid modeFail '%s'", n->tag, (long long)node_id, mode_fail);
+      goto done;
+    }
+
+    // BuildAtomicCmpXchg returns {iN, i1}. Our single-result node model returns old only.
+    LLVMValueRef pair = LLVMBuildAtomicCmpXchg(f->builder, pval, expected, desired, succ, fail, 0);
+    LLVMSetAlignment(pair, align);
+    out = LLVMBuildExtractValue(f->builder, pair, 0, "atomic.cmpxchg.old");
+    goto done;
+  }
+
   if (strncmp(n->tag, "load.", 5) == 0) {
     const char* tname = n->tag + 5;
     if (!n->fields) {

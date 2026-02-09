@@ -1172,6 +1172,134 @@ target_compile_options(sem_unit_exec_failure_diag_fields_json PRIVATE -Wall -Wex
 
 add_test(NAME sem_exec_failure_diag_fields_json COMMAND sem_unit_exec_failure_diag_fields_json)
 
+add_executable(sem_unit_run_atomic_cmpxchg_i32
+  tests/test_run_atomic_cmpxchg_i32.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_atomic_cmpxchg_i32 PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_atomic_cmpxchg_i32 PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_atomic_cmpxchg_i32 PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_atomic_cmpxchg_i32 PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_atomic_cmpxchg_i32 PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_atomic_cmpxchg_i32 COMMAND sem_unit_run_atomic_cmpxchg_i32)
+
+add_executable(sem_unit_run_simd_i32_add_extract_replace
+  tests/test_run_simd_i32_add_extract_replace.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_simd_i32_add_extract_replace PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_simd_i32_add_extract_replace PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_simd_i32_add_extract_replace PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_simd_i32_add_extract_replace PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_simd_i32_add_extract_replace PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_simd_i32_add_extract_replace COMMAND sem_unit_run_simd_i32_add_extract_replace)
+
+add_executable(sem_unit_run_simd_splat_extract_load_store_vec
+  tests/test_run_simd_splat_extract_load_store_vec.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_simd_splat_extract_load_store_vec PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_simd_splat_extract_load_store_vec PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_simd_splat_extract_load_store_vec PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_simd_splat_extract_load_store_vec PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_simd_splat_extract_load_store_vec PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_simd_splat_extract_load_store_vec COMMAND sem_unit_run_simd_splat_extract_load_store_vec)
+
+add_executable(sem_unit_run_simd_shuffle_two_inputs
+  tests/test_run_simd_shuffle_two_inputs.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_simd_shuffle_two_inputs PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_simd_shuffle_two_inputs PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_simd_shuffle_two_inputs PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_simd_shuffle_two_inputs PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_simd_shuffle_two_inputs PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_simd_shuffle_two_inputs COMMAND sem_unit_run_simd_shuffle_two_inputs)
+
+add_executable(sem_unit_run_simd_cmp_select_bool_mask
+  tests/test_run_simd_cmp_select_bool_mask.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_simd_cmp_select_bool_mask PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_simd_cmp_select_bool_mask PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_simd_cmp_select_bool_mask PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_simd_cmp_select_bool_mask PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_simd_cmp_select_bool_mask PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_simd_cmp_select_bool_mask COMMAND sem_unit_run_simd_cmp_select_bool_mask)
+
+add_executable(sem_unit_run_simd_extract_oob_traps
+  tests/test_run_simd_extract_oob_traps.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_simd_extract_oob_traps PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_simd_extract_oob_traps PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_simd_extract_oob_traps PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_simd_extract_oob_traps PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_simd_extract_oob_traps PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_simd_extract_oob_traps COMMAND sem_unit_run_simd_extract_oob_traps)
+
+add_executable(sem_unit_run_simd_replace_oob_traps
+  tests/test_run_simd_replace_oob_traps.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_simd_replace_oob_traps PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_simd_replace_oob_traps PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_simd_replace_oob_traps PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_simd_replace_oob_traps PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_simd_replace_oob_traps PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_simd_replace_oob_traps COMMAND sem_unit_run_simd_replace_oob_traps)
+
+add_executable(sem_unit_run_simd_shuffle_oob_traps
+  tests/test_run_simd_shuffle_oob_traps.c
+  sem_hosted.c
+  sir_jsonl.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/json.c
+  ${CMAKE_SOURCE_DIR}/src/sircc/sircc.c
+)
+
+target_compile_definitions(sem_unit_run_simd_shuffle_oob_traps PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_compile_definitions(sem_unit_run_simd_shuffle_oob_traps PRIVATE SEM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_include_directories(sem_unit_run_simd_shuffle_oob_traps PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore ${CMAKE_SOURCE_DIR}/src/sircc)
+target_link_libraries(sem_unit_run_simd_shuffle_oob_traps PRIVATE sircore_hosted_zabi sircore_module)
+target_compile_options(sem_unit_run_simd_shuffle_oob_traps PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+add_test(NAME sem_run_simd_shuffle_oob_traps COMMAND sem_unit_run_simd_shuffle_oob_traps)
+
 add_test(
   NAME sem_check_smoke
   COMMAND $<TARGET_FILE:sem> --check

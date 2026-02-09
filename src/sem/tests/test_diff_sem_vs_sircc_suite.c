@@ -136,8 +136,13 @@ int main(void) {
   // Add fixtures here once they pass sem and sircc deterministically.
   const char* fixtures[] = {
       "src/sircc/examples/atomic_basic_i32.sir.jsonl",
+      "src/sircc/examples/atomic_cmpxchg_i32.sir.jsonl",
       "src/sircc/examples/mem_copy_fill.sir.jsonl",
       "src/sircc/examples/float_load_canon.sir.jsonl",
+      "src/sircc/examples/simd_splat_extract.sir.jsonl",
+      "src/sircc/examples/simd_i32_add_extract_replace.sir.jsonl",
+      "src/sircc/examples/simd_cmp_select_bool_mask.sir.jsonl",
+      "src/sircc/examples/simd_shuffle_two_inputs.sir.jsonl",
       "src/sircc/examples/sem_if_val_to_select.sir.jsonl",
       "src/sircc/examples/sem_and_sc_thunk_trap_not_taken.sir.jsonl",
       "src/sircc/examples/sem_or_sc_thunk_trap_not_taken.sir.jsonl",

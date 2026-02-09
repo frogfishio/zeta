@@ -21,6 +21,7 @@ typedef struct type_info {
   bool is_array;
   bool is_ptr;
   bool is_struct;
+  bool is_vec;
   bool is_fun;
   bool is_sum;
   bool is_closure;
@@ -32,6 +33,8 @@ typedef struct type_info {
   uint32_t array_of;
   uint32_t array_len;
   uint32_t ptr_of;
+  uint32_t vec_lane;
+  uint32_t vec_lanes;
   uint32_t fun_sig; // for fun: SIR type id of underlying fn signature
   uint32_t closure_call_sig; // for closure: SIR type id of callSig (fn)
   uint32_t closure_env;      // for closure: SIR type id of envTy
@@ -1261,6 +1264,19 @@ static bool type_layout(sirj_ctx_t* c, uint32_t type_ref, uint32_t* out_size, ui
     return true;
   }
 
+  if (t->is_vec) {
+    if (t->vec_lane == 0) return false;
+    if (t->vec_lanes == 0) return false;
+    uint32_t es = 0, ea = 0;
+    if (!type_layout(c, t->vec_lane, &es, &ea)) return false;
+    if (es == 0) return false;
+    const uint64_t size64 = (uint64_t)es * (uint64_t)t->vec_lanes;
+    if (size64 > 0x7FFFFFFFull) return false;
+    *out_size = (uint32_t)size64;
+    *out_align = ea ? ea : 1;
+    return true;
+  }
+
   if (t->is_struct) {
     if (t->layout_visiting) return false;
     t->layout_visiting = true;
@@ -1801,6 +1817,63 @@ static bool eval_alloca_mnemonic(sirj_ctx_t* c, uint32_t node_id, const node_inf
   return true;
 }
 
+static bool eval_alloca(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+
+  uint32_t ty_id = 0;
+  if (!parse_ref_id(c, json_obj_get(n->fields_obj, "ty"), &ty_id) || ty_id == 0) return false;
+  uint32_t es = 0, ea = 0;
+  if (!type_layout(c, ty_id, &es, &ea)) return false;
+  if (es == 0) return false;
+  if (ea == 0) ea = 1;
+
+  uint32_t count = 1;
+  uint32_t align = ea;
+  bool zero = false;
+
+  const JsonValue* flags = json_obj_get(n->fields_obj, "flags");
+  if (flags) {
+    if (!json_is_object(flags)) return false;
+    const JsonValue* cv = json_obj_get((JsonValue*)flags, "count");
+    if (cv) {
+      if (!json_get_u32(cv, &count) || count == 0) return false;
+    }
+    const JsonValue* av = json_obj_get((JsonValue*)flags, "align");
+    if (av) {
+      if (!json_get_u32(av, &align) || align == 0) return false;
+      if (!is_pow2_u32(align)) return false;
+      if (align < ea) return false;
+    }
+    const JsonValue* zv = json_obj_get((JsonValue*)flags, "zero");
+    if (zv) {
+      if (!json_get_bool(zv, &zero)) return false;
+    }
+  }
+
+  const uint64_t size64 = (uint64_t)es * (uint64_t)count;
+  if (size64 == 0 || size64 > 0x7FFFFFFFull) return false;
+  const uint32_t size = (uint32_t)size64;
+
+  const sir_val_id_t ptr_slot = alloc_slot(c, VK_PTR);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_alloca(c->mb, c->fn, ptr_slot, size, align)) return false;
+
+  if (zero) {
+    const sir_val_id_t zbyte = alloc_slot(c, VK_I8);
+    const sir_val_id_t zlen = alloc_slot(c, VK_I32);
+    if (!sir_mb_emit_const_i8(c->mb, c->fn, zbyte, 0)) return false;
+    if (!sir_mb_emit_const_i32(c->mb, c->fn, zlen, (int32_t)size)) return false;
+    if (!sir_mb_emit_mem_fill(c->mb, c->fn, ptr_slot, zbyte, zlen)) return false;
+  }
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, ptr_slot, VK_PTR)) return false;
+  *out_slot = ptr_slot;
+  *out_kind = VK_PTR;
+  return true;
+}
+
 static bool eval_store_mnemonic(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_inst_kind_t k) {
   if (!c || !n) return false;
   if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) {
@@ -1899,6 +1972,62 @@ static bool parse_atomic_flags(sirj_ctx_t* c, uint32_t node_id, const node_info_
   }
 
   *out_mode = mode;
+  *out_align = align;
+  return true;
+}
+
+static bool parse_cmpxchg_flags(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, uint32_t natural_align, const char** out_succ,
+                                const char** out_fail, uint32_t* out_align) {
+  if (!c || !n || !out_succ || !out_fail || !out_align) return false;
+  *out_succ = NULL;
+  *out_fail = NULL;
+  *out_align = natural_align ? natural_align : 1u;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+
+  const JsonValue* fv = json_obj_get(n->fields_obj, "flags");
+  if (fv && !json_is_object(fv)) {
+    sirj_diag_setf(c, "sem.parse.atomic.flags", c->cur_path, n->loc_line, node_id, n->tag, "%s flags must be an object", n->tag);
+    return false;
+  }
+
+  const char* succ = NULL;
+  const char* fail = NULL;
+  if (fv) {
+    succ = json_get_string(json_obj_get(fv, "modeSucc"));
+    fail = json_get_string(json_obj_get(fv, "modeFail"));
+  }
+  if (!succ) succ = json_get_string(json_obj_get(n->fields_obj, "modeSucc"));
+  if (!fail) fail = json_get_string(json_obj_get(n->fields_obj, "modeFail"));
+  if (!succ || !fail) {
+    sirj_diag_setf(c, "sem.parse.atomic.cmpxchg.mode", c->cur_path, n->loc_line, node_id, n->tag, "%s missing flags.modeSucc/modeFail", n->tag);
+    return false;
+  }
+
+  bool ok_succ = (strcmp(succ, "relaxed") == 0 || strcmp(succ, "acquire") == 0 || strcmp(succ, "release") == 0 || strcmp(succ, "acqrel") == 0 ||
+                  strcmp(succ, "seqcst") == 0);
+  bool ok_fail = (strcmp(fail, "relaxed") == 0 || strcmp(fail, "acquire") == 0 || strcmp(fail, "seqcst") == 0);
+  if (!ok_succ || !ok_fail) {
+    sirj_diag_setf(c, "sem.parse.atomic.cmpxchg.mode", c->cur_path, n->loc_line, node_id, n->tag, "%s invalid modeSucc/modeFail", n->tag);
+    return false;
+  }
+
+  uint32_t align = *out_align;
+  const JsonValue* av = NULL;
+  if (fv) av = json_obj_get(fv, "align");
+  if (!av) av = json_obj_get(n->fields_obj, "align");
+  if (av) {
+    if (!json_get_u32(av, &align) || align == 0) {
+      sirj_diag_setf(c, "sem.parse.atomic.align", c->cur_path, n->loc_line, node_id, n->tag, "%s flags.align must be a positive integer", n->tag);
+      return false;
+    }
+  }
+  if (!is_pow2_u32(align)) {
+    sirj_diag_setf(c, "sem.parse.atomic.align", c->cur_path, n->loc_line, node_id, n->tag, "%s flags.align must be a power of two", n->tag);
+    return false;
+  }
+
+  *out_succ = succ;
+  *out_fail = fail;
   *out_align = align;
   return true;
 }
@@ -2232,6 +2361,194 @@ static bool eval_atomic_rmw_i32(sirj_ctx_t* c, uint32_t node_id, const node_info
   return true;
 }
 
+static bool eval_atomic_cmpxchg_i32(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 3) {
+    sirj_diag_setf(c, "sem.parse.atomic.cmpxchg.args", c->cur_path, n->loc_line, node_id, n->tag, "%s args must be [addr, expected, desired]", n->tag);
+    return false;
+  }
+  uint32_t addr_id = 0, exp_id = 0, des_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &addr_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[1], &exp_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[2], &des_id)) return false;
+
+  const char* succ = NULL;
+  const char* fail = NULL;
+  uint32_t align = 4;
+  if (!parse_cmpxchg_flags(c, node_id, n, 4, &succ, &fail, &align)) return false;
+  (void)succ;
+  (void)fail;
+
+  sir_val_id_t addr_slot = 0, exp_slot = 0, des_slot = 0;
+  val_kind_t ak = VK_INVALID, ek = VK_INVALID, dk = VK_INVALID;
+  if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
+  if (!eval_node(c, exp_id, &exp_slot, &ek)) return false;
+  if (!eval_node(c, des_id, &des_slot, &dk)) return false;
+  if (ak != VK_PTR || ek != VK_I32 || dk != VK_I32) {
+    sirj_diag_setf(c, "sem.atomic.cmpxchg.arg_type", c->cur_path, n->loc_line, node_id, n->tag, "%s requires (ptr, i32, i32)", n->tag);
+    return false;
+  }
+
+  const sir_val_id_t oldv = alloc_slot(c, VK_I32);
+  const sir_val_id_t ok = alloc_slot(c, VK_BOOL);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_load_i32(c->mb, c->fn, oldv, addr_slot, align)) return false;
+  if (!sir_mb_emit_i32_cmp_eq(c->mb, c->fn, ok, oldv, exp_slot)) return false;
+
+  uint32_t ip_cbr = 0;
+  if (!sir_mb_emit_cbr(c->mb, c->fn, ok, 0, 0, &ip_cbr)) return false;
+
+  const uint32_t then_ip = sir_mb_func_ip(c->mb, c->fn);
+  if (!sir_mb_emit_store_i32(c->mb, c->fn, addr_slot, des_slot, align)) return false;
+  uint32_t ip_br_then = 0;
+  if (!sir_mb_emit_br(c->mb, c->fn, 0, &ip_br_then)) return false;
+
+  const uint32_t else_ip = sir_mb_func_ip(c->mb, c->fn);
+  uint32_t ip_br_else = 0;
+  if (!sir_mb_emit_br(c->mb, c->fn, 0, &ip_br_else)) return false;
+
+  const uint32_t join_ip = sir_mb_func_ip(c->mb, c->fn);
+  if (!sir_mb_patch_cbr(c->mb, c->fn, ip_cbr, then_ip, else_ip)) return false;
+  if (!sir_mb_patch_br(c->mb, c->fn, ip_br_then, join_ip)) return false;
+  if (!sir_mb_patch_br(c->mb, c->fn, ip_br_else, join_ip)) return false;
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, oldv, VK_I32)) return false;
+  *out_slot = oldv;
+  *out_kind = VK_I32;
+  return true;
+}
+
+static bool eval_atomic_cmpxchg_i8(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 3) {
+    sirj_diag_setf(c, "sem.parse.atomic.cmpxchg.args", c->cur_path, n->loc_line, node_id, n->tag, "%s args must be [addr, expected, desired]", n->tag);
+    return false;
+  }
+  uint32_t addr_id = 0, exp_id = 0, des_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &addr_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[1], &exp_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[2], &des_id)) return false;
+
+  const char* succ = NULL;
+  const char* fail = NULL;
+  uint32_t align = 1;
+  if (!parse_cmpxchg_flags(c, node_id, n, 1, &succ, &fail, &align)) return false;
+  (void)succ;
+  (void)fail;
+
+  sir_val_id_t addr_slot = 0, exp_slot = 0, des_slot = 0;
+  val_kind_t ak = VK_INVALID, ek = VK_INVALID, dk = VK_INVALID;
+  if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
+  if (!eval_node(c, exp_id, &exp_slot, &ek)) return false;
+  if (!eval_node(c, des_id, &des_slot, &dk)) return false;
+  if (ak != VK_PTR || ek != VK_I8 || dk != VK_I8) {
+    sirj_diag_setf(c, "sem.atomic.cmpxchg.arg_type", c->cur_path, n->loc_line, node_id, n->tag, "%s requires (ptr, i8, i8)", n->tag);
+    return false;
+  }
+
+  const sir_val_id_t oldv = alloc_slot(c, VK_I8);
+  const sir_val_id_t ok = alloc_slot(c, VK_BOOL);
+  const sir_val_id_t old32 = alloc_slot(c, VK_I32);
+  const sir_val_id_t exp32 = alloc_slot(c, VK_I32);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_load_i8(c->mb, c->fn, oldv, addr_slot, align)) return false;
+  if (!sir_mb_emit_i32_zext_i8(c->mb, c->fn, old32, oldv)) return false;
+  if (!sir_mb_emit_i32_zext_i8(c->mb, c->fn, exp32, exp_slot)) return false;
+  if (!sir_mb_emit_i32_cmp_eq(c->mb, c->fn, ok, old32, exp32)) return false;
+
+  uint32_t ip_cbr = 0;
+  if (!sir_mb_emit_cbr(c->mb, c->fn, ok, 0, 0, &ip_cbr)) return false;
+
+  const uint32_t then_ip = sir_mb_func_ip(c->mb, c->fn);
+  if (!sir_mb_emit_store_i8(c->mb, c->fn, addr_slot, des_slot, align)) return false;
+  uint32_t ip_br_then = 0;
+  if (!sir_mb_emit_br(c->mb, c->fn, 0, &ip_br_then)) return false;
+
+  const uint32_t else_ip = sir_mb_func_ip(c->mb, c->fn);
+  uint32_t ip_br_else = 0;
+  if (!sir_mb_emit_br(c->mb, c->fn, 0, &ip_br_else)) return false;
+
+  const uint32_t join_ip = sir_mb_func_ip(c->mb, c->fn);
+  if (!sir_mb_patch_cbr(c->mb, c->fn, ip_cbr, then_ip, else_ip)) return false;
+  if (!sir_mb_patch_br(c->mb, c->fn, ip_br_then, join_ip)) return false;
+  if (!sir_mb_patch_br(c->mb, c->fn, ip_br_else, join_ip)) return false;
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, oldv, VK_I8)) return false;
+  *out_slot = oldv;
+  *out_kind = VK_I8;
+  return true;
+}
+
+static bool eval_atomic_cmpxchg_i16(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 3) {
+    sirj_diag_setf(c, "sem.parse.atomic.cmpxchg.args", c->cur_path, n->loc_line, node_id, n->tag, "%s args must be [addr, expected, desired]", n->tag);
+    return false;
+  }
+  uint32_t addr_id = 0, exp_id = 0, des_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &addr_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[1], &exp_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[2], &des_id)) return false;
+
+  const char* succ = NULL;
+  const char* fail = NULL;
+  uint32_t align = 2;
+  if (!parse_cmpxchg_flags(c, node_id, n, 2, &succ, &fail, &align)) return false;
+  (void)succ;
+  (void)fail;
+
+  sir_val_id_t addr_slot = 0, exp_slot = 0, des_slot = 0;
+  val_kind_t ak = VK_INVALID, ek = VK_INVALID, dk = VK_INVALID;
+  if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
+  if (!eval_node(c, exp_id, &exp_slot, &ek)) return false;
+  if (!eval_node(c, des_id, &des_slot, &dk)) return false;
+  if (ak != VK_PTR || ek != VK_I16 || dk != VK_I16) {
+    sirj_diag_setf(c, "sem.atomic.cmpxchg.arg_type", c->cur_path, n->loc_line, node_id, n->tag, "%s requires (ptr, i16, i16)", n->tag);
+    return false;
+  }
+
+  const sir_val_id_t oldv = alloc_slot(c, VK_I16);
+  const sir_val_id_t ok = alloc_slot(c, VK_BOOL);
+  const sir_val_id_t old32 = alloc_slot(c, VK_I32);
+  const sir_val_id_t exp32 = alloc_slot(c, VK_I32);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_load_i16(c->mb, c->fn, oldv, addr_slot, align)) return false;
+  if (!sir_mb_emit_i32_zext_i16(c->mb, c->fn, old32, oldv)) return false;
+  if (!sir_mb_emit_i32_zext_i16(c->mb, c->fn, exp32, exp_slot)) return false;
+  if (!sir_mb_emit_i32_cmp_eq(c->mb, c->fn, ok, old32, exp32)) return false;
+
+  uint32_t ip_cbr = 0;
+  if (!sir_mb_emit_cbr(c->mb, c->fn, ok, 0, 0, &ip_cbr)) return false;
+
+  const uint32_t then_ip = sir_mb_func_ip(c->mb, c->fn);
+  if (!sir_mb_emit_store_i16(c->mb, c->fn, addr_slot, des_slot, align)) return false;
+  uint32_t ip_br_then = 0;
+  if (!sir_mb_emit_br(c->mb, c->fn, 0, &ip_br_then)) return false;
+
+  const uint32_t else_ip = sir_mb_func_ip(c->mb, c->fn);
+  uint32_t ip_br_else = 0;
+  if (!sir_mb_emit_br(c->mb, c->fn, 0, &ip_br_else)) return false;
+
+  const uint32_t join_ip = sir_mb_func_ip(c->mb, c->fn);
+  if (!sir_mb_patch_cbr(c->mb, c->fn, ip_cbr, then_ip, else_ip)) return false;
+  if (!sir_mb_patch_br(c->mb, c->fn, ip_br_then, join_ip)) return false;
+  if (!sir_mb_patch_br(c->mb, c->fn, ip_br_else, join_ip)) return false;
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, oldv, VK_I16)) return false;
+  *out_slot = oldv;
+  *out_kind = VK_I16;
+  return true;
+}
+
 static bool eval_mem_copy_stmt(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n) {
   if (!c || !n) return false;
   if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
@@ -2360,6 +2677,662 @@ static bool eval_load_mnemonic(sirj_ctx_t* c, uint32_t node_id, const node_info_
   if (!set_node_val(c, node_id, dst, outk)) return false;
   *out_slot = dst;
   *out_kind = outk;
+  return true;
+}
+
+static bool vec_type_info(sirj_ctx_t* c, uint32_t vec_type_id, uint32_t* out_lane_type_id, uint32_t* out_lanes, val_kind_t* out_lane_kind,
+                          uint32_t* out_lane_size, uint32_t* out_lane_align) {
+  if (!c || !out_lane_type_id || !out_lanes || !out_lane_kind || !out_lane_size || !out_lane_align) return false;
+  *out_lane_type_id = 0;
+  *out_lanes = 0;
+  *out_lane_kind = VK_INVALID;
+  *out_lane_size = 0;
+  *out_lane_align = 0;
+  if (vec_type_id == 0 || vec_type_id >= c->type_cap) return false;
+  const type_info_t* vt = &c->types[vec_type_id];
+  if (!vt->present || vt->is_fn || !vt->is_vec) return false;
+  if (vt->vec_lane == 0 || vt->vec_lanes == 0) return false;
+
+  uint32_t lane_size = 0, lane_align = 0;
+  if (!type_layout(c, vt->vec_lane, &lane_size, &lane_align)) return false;
+  if (lane_size == 0) return false;
+
+  val_kind_t lk = VK_INVALID;
+  if (!type_to_val_kind(c, vt->vec_lane, &lk)) return false;
+
+  *out_lane_type_id = vt->vec_lane;
+  *out_lanes = vt->vec_lanes;
+  *out_lane_kind = lk;
+  *out_lane_size = lane_size;
+  *out_lane_align = lane_align ? lane_align : 1;
+  return true;
+}
+
+static bool emit_vec_lane_ptr(sirj_ctx_t* c, uint32_t node_id, uint32_t loc_line, sir_val_id_t vec_ptr, sir_val_id_t lane_index_i32,
+                              uint32_t lane_size, sir_val_id_t* out_lane_ptr) {
+  if (!c || !out_lane_ptr) return false;
+  const sir_val_id_t p = alloc_slot(c, VK_PTR);
+  sir_mb_set_src(c->mb, node_id, loc_line);
+  if (!sir_mb_emit_ptr_offset(c->mb, c->fn, p, vec_ptr, lane_index_i32, lane_size)) return false;
+  *out_lane_ptr = p;
+  return true;
+}
+
+static bool emit_vec_load_lane_bool(sirj_ctx_t* c, uint32_t node_id, uint32_t loc_line, sir_val_id_t lane_ptr, uint32_t align,
+                                    sir_val_id_t* out_bool) {
+  if (!c || !out_bool) return false;
+  const sir_val_id_t b8 = alloc_slot(c, VK_I8);
+  const sir_val_id_t i32 = alloc_slot(c, VK_I32);
+  const sir_val_id_t zero = alloc_slot(c, VK_I32);
+  const sir_val_id_t is_nz = alloc_slot(c, VK_BOOL);
+  sir_mb_set_src(c->mb, node_id, loc_line);
+  if (!sir_mb_emit_load_i8(c->mb, c->fn, b8, lane_ptr, align ? align : 1)) return false;
+  if (!sir_mb_emit_i32_zext_i8(c->mb, c->fn, i32, b8)) return false;
+  if (!sir_mb_emit_const_i32(c->mb, c->fn, zero, 0)) return false;
+  if (!sir_mb_emit_i32_cmp_ne(c->mb, c->fn, is_nz, i32, zero)) return false;
+  *out_bool = is_nz;
+  return true;
+}
+
+static bool emit_vec_store_lane_bool_as_i8(sirj_ctx_t* c, uint32_t node_id, uint32_t loc_line, sir_val_id_t lane_ptr, uint32_t align,
+                                          sir_val_id_t bool_slot) {
+  if (!c) return false;
+  const sir_val_id_t one = alloc_slot(c, VK_I8);
+  const sir_val_id_t zero = alloc_slot(c, VK_I8);
+  const sir_val_id_t b8 = alloc_slot(c, VK_I8);
+  sir_mb_set_src(c->mb, node_id, loc_line);
+  if (!sir_mb_emit_const_i8(c->mb, c->fn, one, 1)) return false;
+  if (!sir_mb_emit_const_i8(c->mb, c->fn, zero, 0)) return false;
+  if (!sir_mb_emit_select(c->mb, c->fn, b8, bool_slot, one, zero)) return false;
+  if (!sir_mb_emit_store_i8(c->mb, c->fn, lane_ptr, b8, align ? align : 1)) return false;
+  return true;
+}
+
+static bool eval_load_vec(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (n->type_ref == 0) return false;
+
+  uint32_t lane_ty = 0, lanes = 0, lane_size = 0, lane_align = 0;
+  val_kind_t lane_k = VK_INVALID;
+  if (!vec_type_info(c, n->type_ref, &lane_ty, &lanes, &lane_k, &lane_size, &lane_align)) return false;
+
+  uint32_t addr_id = 0;
+  if (!parse_ref_id(c, json_obj_get(n->fields_obj, "addr"), &addr_id)) return false;
+  sir_val_id_t addr_slot = 0;
+  val_kind_t ak = VK_INVALID;
+  if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
+  if (ak != VK_PTR) return false;
+
+  uint32_t vec_size = 0, vec_align = 0;
+  if (!type_layout(c, n->type_ref, &vec_size, &vec_align)) return false;
+  if (vec_size == 0) return false;
+
+  uint32_t align = 0;
+  const JsonValue* alignv = json_obj_get(n->fields_obj, "align");
+  if (alignv) {
+    if (!json_get_u32(alignv, &align) || align == 0) return false;
+    if (!is_pow2_u32(align)) return false;
+  } else {
+    align = vec_align ? vec_align : 1;
+  }
+  (void)align;
+
+  const sir_val_id_t vec_ptr = alloc_slot(c, VK_PTR);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_alloca(c->mb, c->fn, vec_ptr, vec_size, vec_align ? vec_align : 1)) return false;
+
+  const sir_val_id_t len = alloc_slot(c, VK_I32);
+  if (!sir_mb_emit_const_i32(c->mb, c->fn, len, (int32_t)vec_size)) return false;
+  if (!sir_mb_emit_mem_copy(c->mb, c->fn, vec_ptr, addr_slot, len, true)) return false;
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, vec_ptr, VK_PTR)) return false;
+  *out_slot = vec_ptr;
+  *out_kind = VK_PTR;
+  return true;
+}
+
+static bool eval_store_vec_stmt(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n) {
+  if (!c || !n) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  uint32_t addr_id = 0, val_id = 0;
+  if (!parse_ref_id(c, json_obj_get(n->fields_obj, "addr"), &addr_id)) return false;
+  if (!parse_ref_id(c, json_obj_get(n->fields_obj, "value"), &val_id)) return false;
+  sir_val_id_t addr_slot = 0, val_slot = 0;
+  val_kind_t ak = VK_INVALID, vk = VK_INVALID;
+  if (!eval_node(c, addr_id, &addr_slot, &ak)) return false;
+  if (!eval_node(c, val_id, &val_slot, &vk)) return false;
+  if (ak != VK_PTR || vk != VK_PTR) return false;
+  if (val_id >= c->node_cap || !c->nodes[val_id].present) return false;
+  const node_info_t* vn = &c->nodes[val_id];
+  if (vn->type_ref == 0) return false;
+
+  uint32_t vec_size = 0, vec_align = 0;
+  if (!type_layout(c, vn->type_ref, &vec_size, &vec_align)) return false;
+  if (vec_size == 0) return false;
+
+  uint32_t align = 0;
+  const JsonValue* alignv = json_obj_get(n->fields_obj, "align");
+  if (alignv) {
+    if (!json_get_u32(alignv, &align) || align == 0) return false;
+    if (!is_pow2_u32(align)) return false;
+  } else {
+    align = vec_align ? vec_align : 1;
+  }
+  (void)align;
+
+  const sir_val_id_t len = alloc_slot(c, VK_I32);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_const_i32(c->mb, c->fn, len, (int32_t)vec_size)) return false;
+  if (!sir_mb_emit_mem_copy(c->mb, c->fn, addr_slot, val_slot, len, true)) return false;
+  sir_mb_clear_src(c->mb);
+  return true;
+}
+
+static bool eval_vec_splat(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (n->type_ref == 0) return false;
+
+  uint32_t lane_ty = 0, lanes = 0, lane_size = 0, lane_align = 0;
+  val_kind_t lane_k = VK_INVALID;
+  if (!vec_type_info(c, n->type_ref, &lane_ty, &lanes, &lane_k, &lane_size, &lane_align)) return false;
+  if (lane_k != VK_I32 && lane_k != VK_BOOL) return false;
+
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 1) return false;
+  uint32_t x_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &x_id)) return false;
+  sir_val_id_t x_slot = 0;
+  val_kind_t xk = VK_INVALID;
+  if (!eval_node(c, x_id, &x_slot, &xk)) return false;
+  if (xk != lane_k) return false;
+
+  uint32_t vec_size = 0, vec_align = 0;
+  if (!type_layout(c, n->type_ref, &vec_size, &vec_align)) return false;
+  if (vec_size == 0) return false;
+
+  const sir_val_id_t vec_ptr = alloc_slot(c, VK_PTR);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_alloca(c->mb, c->fn, vec_ptr, vec_size, vec_align ? vec_align : 1)) return false;
+
+  for (uint32_t i = 0; i < lanes; i++) {
+    const sir_val_id_t idx = alloc_slot(c, VK_I32);
+    if (!sir_mb_emit_const_i32(c->mb, c->fn, idx, (int32_t)i)) return false;
+    sir_val_id_t lane_ptr = 0;
+    if (!emit_vec_lane_ptr(c, node_id, n->loc_line, vec_ptr, idx, lane_size, &lane_ptr)) return false;
+    if (lane_k == VK_I32) {
+      if (!sir_mb_emit_store_i32(c->mb, c->fn, lane_ptr, x_slot, lane_align ? lane_align : 4)) return false;
+    } else {
+      if (!emit_vec_store_lane_bool_as_i8(c, node_id, n->loc_line, lane_ptr, lane_align ? lane_align : 1, x_slot)) return false;
+    }
+  }
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, vec_ptr, VK_PTR)) return false;
+  *out_slot = vec_ptr;
+  *out_kind = VK_PTR;
+  return true;
+}
+
+static bool eval_vec_add_i32(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (n->type_ref == 0) return false;
+
+  uint32_t lane_ty = 0, lanes = 0, lane_size = 0, lane_align = 0;
+  val_kind_t lane_k = VK_INVALID;
+  if (!vec_type_info(c, n->type_ref, &lane_ty, &lanes, &lane_k, &lane_size, &lane_align)) return false;
+  if (lane_k != VK_I32) return false;
+
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 2) return false;
+  uint32_t a_id = 0, b_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &a_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[1], &b_id)) return false;
+  sir_val_id_t a_slot = 0, b_slot = 0;
+  val_kind_t ak = VK_INVALID, bk = VK_INVALID;
+  if (!eval_node(c, a_id, &a_slot, &ak)) return false;
+  if (!eval_node(c, b_id, &b_slot, &bk)) return false;
+  if (ak != VK_PTR || bk != VK_PTR) return false;
+
+  uint32_t vec_size = 0, vec_align = 0;
+  if (!type_layout(c, n->type_ref, &vec_size, &vec_align)) return false;
+  if (vec_size == 0) return false;
+
+  const sir_val_id_t out_ptr = alloc_slot(c, VK_PTR);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_alloca(c->mb, c->fn, out_ptr, vec_size, vec_align ? vec_align : 1)) return false;
+
+  for (uint32_t i = 0; i < lanes; i++) {
+    const sir_val_id_t idx = alloc_slot(c, VK_I32);
+    if (!sir_mb_emit_const_i32(c->mb, c->fn, idx, (int32_t)i)) return false;
+    sir_val_id_t ap = 0, bp = 0, op = 0;
+    if (!emit_vec_lane_ptr(c, node_id, n->loc_line, a_slot, idx, lane_size, &ap)) return false;
+    if (!emit_vec_lane_ptr(c, node_id, n->loc_line, b_slot, idx, lane_size, &bp)) return false;
+    if (!emit_vec_lane_ptr(c, node_id, n->loc_line, out_ptr, idx, lane_size, &op)) return false;
+    const sir_val_id_t av = alloc_slot(c, VK_I32);
+    const sir_val_id_t bv = alloc_slot(c, VK_I32);
+    const sir_val_id_t rv = alloc_slot(c, VK_I32);
+    if (!sir_mb_emit_load_i32(c->mb, c->fn, av, ap, lane_align ? lane_align : 4)) return false;
+    if (!sir_mb_emit_load_i32(c->mb, c->fn, bv, bp, lane_align ? lane_align : 4)) return false;
+    if (!sir_mb_emit_i32_add(c->mb, c->fn, rv, av, bv)) return false;
+    if (!sir_mb_emit_store_i32(c->mb, c->fn, op, rv, lane_align ? lane_align : 4)) return false;
+  }
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, out_ptr, VK_PTR)) return false;
+  *out_slot = out_ptr;
+  *out_kind = VK_PTR;
+  return true;
+}
+
+static bool eval_vec_extract(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (n->type_ref == 0) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 2) return false;
+
+  uint32_t vec_id = 0, idx_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &vec_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[1], &idx_id)) return false;
+
+  sir_val_id_t vec_slot = 0, idx_slot = 0;
+  val_kind_t vk = VK_INVALID, ik = VK_INVALID;
+  if (!eval_node(c, vec_id, &vec_slot, &vk)) return false;
+  if (!eval_node(c, idx_id, &idx_slot, &ik)) return false;
+  if (vk != VK_PTR) return false;
+  if (ik != VK_I32) return false;
+
+  if (vec_id >= c->node_cap || !c->nodes[vec_id].present) return false;
+  const node_info_t* vn = &c->nodes[vec_id];
+  if (vn->type_ref == 0) return false;
+
+  uint32_t lane_ty = 0, lanes = 0, lane_size = 0, lane_align = 0;
+  val_kind_t lane_k = VK_INVALID;
+  if (!vec_type_info(c, vn->type_ref, &lane_ty, &lanes, &lane_k, &lane_size, &lane_align)) return false;
+  if (lane_k != VK_I32 && lane_k != VK_BOOL) return false;
+
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+
+  // Deterministic out-of-bounds trap.
+  {
+    const sir_val_id_t lanes_slot = alloc_slot(c, VK_I32);
+    const sir_val_id_t ok = alloc_slot(c, VK_BOOL);
+    if (!sir_mb_emit_const_i32(c->mb, c->fn, lanes_slot, (int32_t)lanes)) return false;
+    if (!sir_mb_emit_i32_cmp_ult(c->mb, c->fn, ok, idx_slot, lanes_slot)) return false;
+    uint32_t ip_cbr = 0;
+    if (!sir_mb_emit_cbr(c->mb, c->fn, ok, 0, 0, &ip_cbr)) return false;
+    const uint32_t trap_ip = sir_mb_func_ip(c->mb, c->fn);
+    if (!sir_mb_emit_exit(c->mb, c->fn, 255)) return false;
+    const uint32_t ok_ip = sir_mb_func_ip(c->mb, c->fn);
+    if (!sir_mb_patch_cbr(c->mb, c->fn, ip_cbr, ok_ip, trap_ip)) return false;
+  }
+
+  const sir_val_id_t lane_ptr = alloc_slot(c, VK_PTR);
+  if (!sir_mb_emit_ptr_offset(c->mb, c->fn, lane_ptr, vec_slot, idx_slot, lane_size)) return false;
+
+  if (lane_k == VK_I32) {
+    const sir_val_id_t dst = alloc_slot(c, VK_I32);
+    if (!sir_mb_emit_load_i32(c->mb, c->fn, dst, lane_ptr, lane_align ? lane_align : 4)) return false;
+    sir_mb_clear_src(c->mb);
+    if (!set_node_val(c, node_id, dst, VK_I32)) return false;
+    *out_slot = dst;
+    *out_kind = VK_I32;
+    return true;
+  }
+
+  sir_val_id_t bv = 0;
+  if (!emit_vec_load_lane_bool(c, node_id, n->loc_line, lane_ptr, lane_align ? lane_align : 1, &bv)) return false;
+  sir_mb_clear_src(c->mb);
+  if (!set_node_val(c, node_id, bv, VK_BOOL)) return false;
+  *out_slot = bv;
+  *out_kind = VK_BOOL;
+  return true;
+}
+
+static bool eval_vec_replace(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (n->type_ref == 0) return false;
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 3) return false;
+
+  uint32_t vec_id = 0, idx_id = 0, val_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &vec_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[1], &idx_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[2], &val_id)) return false;
+
+  sir_val_id_t vec_slot = 0, idx_slot = 0, val_slot = 0;
+  val_kind_t vk = VK_INVALID, ik = VK_INVALID, valk = VK_INVALID;
+  if (!eval_node(c, vec_id, &vec_slot, &vk)) return false;
+  if (!eval_node(c, idx_id, &idx_slot, &ik)) return false;
+  if (!eval_node(c, val_id, &val_slot, &valk)) return false;
+  if (vk != VK_PTR) return false;
+  if (ik != VK_I32) return false;
+
+  uint32_t lane_ty = 0, lanes = 0, lane_size = 0, lane_align = 0;
+  val_kind_t lane_k = VK_INVALID;
+  if (!vec_type_info(c, n->type_ref, &lane_ty, &lanes, &lane_k, &lane_size, &lane_align)) return false;
+  if (lane_k != VK_I32 && lane_k != VK_BOOL) return false;
+  if (valk != lane_k) return false;
+
+  uint32_t vec_size = 0, vec_align = 0;
+  if (!type_layout(c, n->type_ref, &vec_size, &vec_align)) return false;
+  if (vec_size == 0) return false;
+
+  const sir_val_id_t out_ptr = alloc_slot(c, VK_PTR);
+  const sir_val_id_t len = alloc_slot(c, VK_I32);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+
+  // Deterministic out-of-bounds trap.
+  {
+    const sir_val_id_t lanes_slot = alloc_slot(c, VK_I32);
+    const sir_val_id_t ok = alloc_slot(c, VK_BOOL);
+    if (!sir_mb_emit_const_i32(c->mb, c->fn, lanes_slot, (int32_t)lanes)) return false;
+    if (!sir_mb_emit_i32_cmp_ult(c->mb, c->fn, ok, idx_slot, lanes_slot)) return false;
+    uint32_t ip_cbr = 0;
+    if (!sir_mb_emit_cbr(c->mb, c->fn, ok, 0, 0, &ip_cbr)) return false;
+    const uint32_t trap_ip = sir_mb_func_ip(c->mb, c->fn);
+    if (!sir_mb_emit_exit(c->mb, c->fn, 255)) return false;
+    const uint32_t ok_ip = sir_mb_func_ip(c->mb, c->fn);
+    if (!sir_mb_patch_cbr(c->mb, c->fn, ip_cbr, ok_ip, trap_ip)) return false;
+  }
+
+  if (!sir_mb_emit_alloca(c->mb, c->fn, out_ptr, vec_size, vec_align ? vec_align : 1)) return false;
+  if (!sir_mb_emit_const_i32(c->mb, c->fn, len, (int32_t)vec_size)) return false;
+  if (!sir_mb_emit_mem_copy(c->mb, c->fn, out_ptr, vec_slot, len, true)) return false;
+
+  const sir_val_id_t lane_ptr = alloc_slot(c, VK_PTR);
+  if (!sir_mb_emit_ptr_offset(c->mb, c->fn, lane_ptr, out_ptr, idx_slot, lane_size)) return false;
+  if (lane_k == VK_I32) {
+    if (!sir_mb_emit_store_i32(c->mb, c->fn, lane_ptr, val_slot, lane_align ? lane_align : 4)) return false;
+  } else {
+    if (!emit_vec_store_lane_bool_as_i8(c, node_id, n->loc_line, lane_ptr, lane_align ? lane_align : 1, val_slot)) return false;
+  }
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, out_ptr, VK_PTR)) return false;
+  *out_slot = out_ptr;
+  *out_kind = VK_PTR;
+  return true;
+}
+
+static bool eval_vec_cmp_eq_i32(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (n->type_ref == 0) return false;
+
+  uint32_t out_lane_ty = 0, lanes = 0, lane_size = 0, lane_align = 0;
+  val_kind_t out_lane_k = VK_INVALID;
+  if (!vec_type_info(c, n->type_ref, &out_lane_ty, &lanes, &out_lane_k, &lane_size, &lane_align)) return false;
+  if (out_lane_k != VK_BOOL) return false;
+
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 2) return false;
+  uint32_t a_id = 0, b_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &a_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[1], &b_id)) return false;
+  sir_val_id_t a_slot = 0, b_slot = 0;
+  val_kind_t ak = VK_INVALID, bk = VK_INVALID;
+  if (!eval_node(c, a_id, &a_slot, &ak)) return false;
+  if (!eval_node(c, b_id, &b_slot, &bk)) return false;
+  if (ak != VK_PTR || bk != VK_PTR) return false;
+
+  if (a_id >= c->node_cap || b_id >= c->node_cap) return false;
+  if (!c->nodes[a_id].present || !c->nodes[b_id].present) return false;
+  const node_info_t* an = &c->nodes[a_id];
+  const node_info_t* bn = &c->nodes[b_id];
+  if (an->type_ref == 0 || bn->type_ref == 0) return false;
+
+  uint32_t a_lane_ty = 0, a_lanes = 0, a_lane_size = 0, a_lane_align = 0;
+  val_kind_t a_lane_k = VK_INVALID;
+  uint32_t b_lane_ty = 0, b_lanes = 0, b_lane_size = 0, b_lane_align = 0;
+  val_kind_t b_lane_k = VK_INVALID;
+  if (!vec_type_info(c, an->type_ref, &a_lane_ty, &a_lanes, &a_lane_k, &a_lane_size, &a_lane_align)) return false;
+  if (!vec_type_info(c, bn->type_ref, &b_lane_ty, &b_lanes, &b_lane_k, &b_lane_size, &b_lane_align)) return false;
+  if (a_lane_k != VK_I32 || b_lane_k != VK_I32) return false;
+  if (a_lanes != lanes || b_lanes != lanes) return false;
+
+  uint32_t vec_size = 0, vec_align = 0;
+  if (!type_layout(c, n->type_ref, &vec_size, &vec_align)) return false;
+
+  const sir_val_id_t out_ptr = alloc_slot(c, VK_PTR);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_alloca(c->mb, c->fn, out_ptr, vec_size, vec_align ? vec_align : 1)) return false;
+
+  for (uint32_t i = 0; i < lanes; i++) {
+    const sir_val_id_t idx = alloc_slot(c, VK_I32);
+    if (!sir_mb_emit_const_i32(c->mb, c->fn, idx, (int32_t)i)) return false;
+    sir_val_id_t ap = 0, bp = 0, op = 0;
+    if (!emit_vec_lane_ptr(c, node_id, n->loc_line, a_slot, idx, a_lane_size, &ap)) return false;
+    if (!emit_vec_lane_ptr(c, node_id, n->loc_line, b_slot, idx, b_lane_size, &bp)) return false;
+    if (!emit_vec_lane_ptr(c, node_id, n->loc_line, out_ptr, idx, lane_size, &op)) return false;
+    const sir_val_id_t av = alloc_slot(c, VK_I32);
+    const sir_val_id_t bv = alloc_slot(c, VK_I32);
+    const sir_val_id_t eq = alloc_slot(c, VK_BOOL);
+    if (!sir_mb_emit_load_i32(c->mb, c->fn, av, ap, a_lane_align ? a_lane_align : 4)) return false;
+    if (!sir_mb_emit_load_i32(c->mb, c->fn, bv, bp, b_lane_align ? b_lane_align : 4)) return false;
+    if (!sir_mb_emit_i32_cmp_eq(c->mb, c->fn, eq, av, bv)) return false;
+    if (!emit_vec_store_lane_bool_as_i8(c, node_id, n->loc_line, op, lane_align ? lane_align : 1, eq)) return false;
+  }
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, out_ptr, VK_PTR)) return false;
+  *out_slot = out_ptr;
+  *out_kind = VK_PTR;
+  return true;
+}
+
+static bool eval_vec_cmp_lt_i32(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (n->type_ref == 0) return false;
+
+  uint32_t out_lane_ty = 0, lanes = 0, lane_size = 0, lane_align = 0;
+  val_kind_t out_lane_k = VK_INVALID;
+  if (!vec_type_info(c, n->type_ref, &out_lane_ty, &lanes, &out_lane_k, &lane_size, &lane_align)) return false;
+  if (out_lane_k != VK_BOOL) return false;
+
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 2) return false;
+  uint32_t a_id = 0, b_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &a_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[1], &b_id)) return false;
+  sir_val_id_t a_slot = 0, b_slot = 0;
+  val_kind_t ak = VK_INVALID, bk = VK_INVALID;
+  if (!eval_node(c, a_id, &a_slot, &ak)) return false;
+  if (!eval_node(c, b_id, &b_slot, &bk)) return false;
+  if (ak != VK_PTR || bk != VK_PTR) return false;
+
+  if (a_id >= c->node_cap || b_id >= c->node_cap) return false;
+  if (!c->nodes[a_id].present || !c->nodes[b_id].present) return false;
+  const node_info_t* an = &c->nodes[a_id];
+  const node_info_t* bn = &c->nodes[b_id];
+  if (an->type_ref == 0 || bn->type_ref == 0) return false;
+
+  uint32_t a_lane_ty = 0, a_lanes = 0, a_lane_size = 0, a_lane_align = 0;
+  val_kind_t a_lane_k = VK_INVALID;
+  uint32_t b_lane_ty = 0, b_lanes = 0, b_lane_size = 0, b_lane_align = 0;
+  val_kind_t b_lane_k = VK_INVALID;
+  if (!vec_type_info(c, an->type_ref, &a_lane_ty, &a_lanes, &a_lane_k, &a_lane_size, &a_lane_align)) return false;
+  if (!vec_type_info(c, bn->type_ref, &b_lane_ty, &b_lanes, &b_lane_k, &b_lane_size, &b_lane_align)) return false;
+  if (a_lane_k != VK_I32 || b_lane_k != VK_I32) return false;
+  if (a_lanes != lanes || b_lanes != lanes) return false;
+
+  uint32_t vec_size = 0, vec_align = 0;
+  if (!type_layout(c, n->type_ref, &vec_size, &vec_align)) return false;
+
+  const sir_val_id_t out_ptr = alloc_slot(c, VK_PTR);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_alloca(c->mb, c->fn, out_ptr, vec_size, vec_align ? vec_align : 1)) return false;
+
+  for (uint32_t i = 0; i < lanes; i++) {
+    const sir_val_id_t idx = alloc_slot(c, VK_I32);
+    if (!sir_mb_emit_const_i32(c->mb, c->fn, idx, (int32_t)i)) return false;
+    sir_val_id_t ap = 0, bp = 0, op = 0;
+    if (!emit_vec_lane_ptr(c, node_id, n->loc_line, a_slot, idx, a_lane_size, &ap)) return false;
+    if (!emit_vec_lane_ptr(c, node_id, n->loc_line, b_slot, idx, b_lane_size, &bp)) return false;
+    if (!emit_vec_lane_ptr(c, node_id, n->loc_line, out_ptr, idx, lane_size, &op)) return false;
+    const sir_val_id_t av = alloc_slot(c, VK_I32);
+    const sir_val_id_t bv = alloc_slot(c, VK_I32);
+    const sir_val_id_t lt = alloc_slot(c, VK_BOOL);
+    if (!sir_mb_emit_load_i32(c->mb, c->fn, av, ap, a_lane_align ? a_lane_align : 4)) return false;
+    if (!sir_mb_emit_load_i32(c->mb, c->fn, bv, bp, b_lane_align ? b_lane_align : 4)) return false;
+    if (!sir_mb_emit_i32_cmp_slt(c->mb, c->fn, lt, av, bv)) return false;
+    if (!emit_vec_store_lane_bool_as_i8(c, node_id, n->loc_line, op, lane_align ? lane_align : 1, lt)) return false;
+  }
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, out_ptr, VK_PTR)) return false;
+  *out_slot = out_ptr;
+  *out_kind = VK_PTR;
+  return true;
+}
+
+static bool eval_vec_select_mask_i32(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (n->type_ref == 0) return false;
+
+  uint32_t out_lane_ty = 0, lanes = 0, lane_size = 0, lane_align = 0;
+  val_kind_t out_lane_k = VK_INVALID;
+  if (!vec_type_info(c, n->type_ref, &out_lane_ty, &lanes, &out_lane_k, &lane_size, &lane_align)) return false;
+  if (out_lane_k != VK_I32) return false;
+
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 3) return false;
+  uint32_t m_id = 0, a_id = 0, b_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &m_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[1], &a_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[2], &b_id)) return false;
+  sir_val_id_t m_slot = 0, a_slot = 0, b_slot = 0;
+  val_kind_t mk = VK_INVALID, ak = VK_INVALID, bk = VK_INVALID;
+  if (!eval_node(c, m_id, &m_slot, &mk)) return false;
+  if (!eval_node(c, a_id, &a_slot, &ak)) return false;
+  if (!eval_node(c, b_id, &b_slot, &bk)) return false;
+  if (mk != VK_PTR || ak != VK_PTR || bk != VK_PTR) return false;
+
+  if (m_id >= c->node_cap || a_id >= c->node_cap || b_id >= c->node_cap) return false;
+  const node_info_t* mn = &c->nodes[m_id];
+  const node_info_t* an = &c->nodes[a_id];
+  const node_info_t* bn = &c->nodes[b_id];
+  if (!mn->present || !an->present || !bn->present) return false;
+  if (mn->type_ref == 0 || an->type_ref == 0 || bn->type_ref == 0) return false;
+
+  uint32_t m_lane_ty = 0, m_lanes = 0, m_lane_size = 0, m_lane_align = 0;
+  val_kind_t m_lane_k = VK_INVALID;
+  uint32_t a_lane_ty = 0, a_lanes = 0, a_lane_size = 0, a_lane_align = 0;
+  val_kind_t a_lane_k = VK_INVALID;
+  uint32_t b_lane_ty = 0, b_lanes = 0, b_lane_size = 0, b_lane_align = 0;
+  val_kind_t b_lane_k = VK_INVALID;
+  if (!vec_type_info(c, mn->type_ref, &m_lane_ty, &m_lanes, &m_lane_k, &m_lane_size, &m_lane_align)) return false;
+  if (!vec_type_info(c, an->type_ref, &a_lane_ty, &a_lanes, &a_lane_k, &a_lane_size, &a_lane_align)) return false;
+  if (!vec_type_info(c, bn->type_ref, &b_lane_ty, &b_lanes, &b_lane_k, &b_lane_size, &b_lane_align)) return false;
+  if (m_lane_k != VK_BOOL) return false;
+  if (a_lane_k != VK_I32 || b_lane_k != VK_I32) return false;
+  if (m_lanes != lanes || a_lanes != lanes || b_lanes != lanes) return false;
+
+  uint32_t vec_size = 0, vec_align = 0;
+  if (!type_layout(c, n->type_ref, &vec_size, &vec_align)) return false;
+  const sir_val_id_t out_ptr = alloc_slot(c, VK_PTR);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_alloca(c->mb, c->fn, out_ptr, vec_size, vec_align ? vec_align : 1)) return false;
+
+  for (uint32_t i = 0; i < lanes; i++) {
+    const sir_val_id_t idx = alloc_slot(c, VK_I32);
+    if (!sir_mb_emit_const_i32(c->mb, c->fn, idx, (int32_t)i)) return false;
+    sir_val_id_t mp = 0, ap = 0, bp = 0, op = 0;
+    if (!emit_vec_lane_ptr(c, node_id, n->loc_line, m_slot, idx, m_lane_size, &mp)) return false;
+    if (!emit_vec_lane_ptr(c, node_id, n->loc_line, a_slot, idx, a_lane_size, &ap)) return false;
+    if (!emit_vec_lane_ptr(c, node_id, n->loc_line, b_slot, idx, b_lane_size, &bp)) return false;
+    if (!emit_vec_lane_ptr(c, node_id, n->loc_line, out_ptr, idx, lane_size, &op)) return false;
+
+    sir_val_id_t cond = 0;
+    if (!emit_vec_load_lane_bool(c, node_id, n->loc_line, mp, m_lane_align ? m_lane_align : 1, &cond)) return false;
+
+    const sir_val_id_t av = alloc_slot(c, VK_I32);
+    const sir_val_id_t bv = alloc_slot(c, VK_I32);
+    const sir_val_id_t rv = alloc_slot(c, VK_I32);
+    if (!sir_mb_emit_load_i32(c->mb, c->fn, av, ap, a_lane_align ? a_lane_align : 4)) return false;
+    if (!sir_mb_emit_load_i32(c->mb, c->fn, bv, bp, b_lane_align ? b_lane_align : 4)) return false;
+    if (!sir_mb_emit_select(c->mb, c->fn, rv, cond, av, bv)) return false;
+    if (!sir_mb_emit_store_i32(c->mb, c->fn, op, rv, lane_align ? lane_align : 4)) return false;
+  }
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, out_ptr, VK_PTR)) return false;
+  *out_slot = out_ptr;
+  *out_kind = VK_PTR;
+  return true;
+}
+
+static bool eval_vec_shuffle_i32(sirj_ctx_t* c, uint32_t node_id, const node_info_t* n, sir_val_id_t* out_slot, val_kind_t* out_kind) {
+  if (!c || !n || !out_slot || !out_kind) return false;
+  if (!n->fields_obj || n->fields_obj->type != JSON_OBJECT) return false;
+  if (n->type_ref == 0) return false;
+
+  uint32_t out_lane_ty = 0, lanes = 0, lane_size = 0, lane_align = 0;
+  val_kind_t out_lane_k = VK_INVALID;
+  if (!vec_type_info(c, n->type_ref, &out_lane_ty, &lanes, &out_lane_k, &lane_size, &lane_align)) return false;
+  if (out_lane_k != VK_I32) return false;
+
+  const JsonValue* av = json_obj_get(n->fields_obj, "args");
+  if (!json_is_array(av) || av->v.arr.len != 2) return false;
+  uint32_t a_id = 0, b_id = 0;
+  if (!parse_ref_id(c, av->v.arr.items[0], &a_id)) return false;
+  if (!parse_ref_id(c, av->v.arr.items[1], &b_id)) return false;
+  sir_val_id_t a_slot = 0, b_slot = 0;
+  val_kind_t ak = VK_INVALID, bk = VK_INVALID;
+  if (!eval_node(c, a_id, &a_slot, &ak)) return false;
+  if (!eval_node(c, b_id, &b_slot, &bk)) return false;
+  if (ak != VK_PTR || bk != VK_PTR) return false;
+
+  const JsonValue* flags = json_obj_get(n->fields_obj, "flags");
+  if (!json_is_object(flags)) return false;
+  const JsonValue* idxv = json_obj_get((JsonValue*)flags, "idx");
+  if (!json_is_array(idxv)) return false;
+  if (idxv->v.arr.len != lanes) return false;
+
+  uint32_t vec_size = 0, vec_align = 0;
+  if (!type_layout(c, n->type_ref, &vec_size, &vec_align)) return false;
+  const sir_val_id_t out_ptr = alloc_slot(c, VK_PTR);
+  sir_mb_set_src(c->mb, node_id, n->loc_line);
+  if (!sir_mb_emit_alloca(c->mb, c->fn, out_ptr, vec_size, vec_align ? vec_align : 1)) return false;
+
+  for (uint32_t i = 0; i < lanes; i++) {
+    uint32_t pick = 0;
+    if (!json_get_u32(idxv->v.arr.items[i], &pick)) return false;
+    if (pick >= (2u * lanes)) {
+      // Deterministic trap (even if the value is unused).
+      if (!sir_mb_emit_exit(c->mb, c->fn, 255)) return false;
+      sir_mb_clear_src(c->mb);
+      *out_slot = 0;
+      *out_kind = VK_INVALID;
+      return true;
+    }
+    const bool from_b = (pick >= lanes);
+    const uint32_t li = from_b ? (pick - lanes) : pick;
+
+    const sir_val_id_t idx_out = alloc_slot(c, VK_I32);
+    const sir_val_id_t idx_in = alloc_slot(c, VK_I32);
+    if (!sir_mb_emit_const_i32(c->mb, c->fn, idx_out, (int32_t)i)) return false;
+    if (!sir_mb_emit_const_i32(c->mb, c->fn, idx_in, (int32_t)li)) return false;
+
+    sir_val_id_t in_ptr = 0, out_lane_ptr = 0;
+    if (!emit_vec_lane_ptr(c, node_id, n->loc_line, from_b ? b_slot : a_slot, idx_in, lane_size, &in_ptr)) return false;
+    if (!emit_vec_lane_ptr(c, node_id, n->loc_line, out_ptr, idx_out, lane_size, &out_lane_ptr)) return false;
+    const sir_val_id_t v = alloc_slot(c, VK_I32);
+    if (!sir_mb_emit_load_i32(c->mb, c->fn, v, in_ptr, lane_align ? lane_align : 4)) return false;
+    if (!sir_mb_emit_store_i32(c->mb, c->fn, out_lane_ptr, v, lane_align ? lane_align : 4)) return false;
+  }
+  sir_mb_clear_src(c->mb);
+
+  if (!set_node_val(c, node_id, out_ptr, VK_PTR)) return false;
+  *out_slot = out_ptr;
+  *out_kind = VK_PTR;
   return true;
 }
 
@@ -5368,6 +6341,13 @@ static bool eval_node(sirj_ctx_t* c, uint32_t node_id, sir_val_id_t* out_slot, v
   if (strcmp(n->tag, "atomic.load.i16") == 0) return eval_atomic_load_i16(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "atomic.load.i32") == 0) return eval_atomic_load_i32(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "atomic.load.i64") == 0) return eval_atomic_load_i64(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "atomic.cmpxchg.i8") == 0) return eval_atomic_cmpxchg_i8(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "atomic.cmpxchg.i16") == 0) return eval_atomic_cmpxchg_i16(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "atomic.cmpxchg.i32") == 0) return eval_atomic_cmpxchg_i32(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "atomic.cmpxchg.i64") == 0) {
+    sirj_diag_setf(c, "sem.atomic.cmpxchg.type", c->cur_path, n->loc_line, node_id, n->tag, "%s is not supported by sem yet (i64 ops missing in svm)", n->tag);
+    return false;
+  }
   if (strncmp(n->tag, "atomic.rmw.", 11) == 0) {
     const char* p1 = n->tag + 11;
     const char* dot = strchr(p1, '.');
@@ -5423,6 +6403,7 @@ static bool eval_node(sirj_ctx_t* c, uint32_t node_id, sir_val_id_t* out_slot, v
   if (strcmp(n->tag, "f32.cmp.ueq") == 0) return eval_f32_cmp_ueq(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "f64.cmp.olt") == 0) return eval_f64_cmp_olt(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "binop.add") == 0) return eval_binop_add(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "alloca") == 0) return eval_alloca(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "alloca.i8") == 0) return eval_alloca_mnemonic(c, node_id, n, 1, 1, out_slot, out_kind);
   if (strcmp(n->tag, "alloca.i16") == 0) return eval_alloca_mnemonic(c, node_id, n, 2, 2, out_slot, out_kind);
   if (strcmp(n->tag, "alloca.i32") == 0) return eval_alloca_mnemonic(c, node_id, n, 4, 4, out_slot, out_kind);
@@ -5436,6 +6417,15 @@ static bool eval_node(sirj_ctx_t* c, uint32_t node_id, sir_val_id_t* out_slot, v
   if (strcmp(n->tag, "load.ptr") == 0) return eval_load_mnemonic(c, node_id, n, SIR_INST_LOAD_PTR, VK_PTR, out_slot, out_kind);
   if (strcmp(n->tag, "load.f32") == 0) return eval_load_mnemonic(c, node_id, n, SIR_INST_LOAD_F32, VK_F32, out_slot, out_kind);
   if (strcmp(n->tag, "load.f64") == 0) return eval_load_mnemonic(c, node_id, n, SIR_INST_LOAD_F64, VK_F64, out_slot, out_kind);
+  if (strcmp(n->tag, "load.vec") == 0) return eval_load_vec(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "vec.splat") == 0) return eval_vec_splat(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "vec.add") == 0) return eval_vec_add_i32(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "vec.cmp.eq") == 0) return eval_vec_cmp_eq_i32(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "vec.cmp.lt") == 0) return eval_vec_cmp_lt_i32(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "vec.select") == 0) return eval_vec_select_mask_i32(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "vec.extract") == 0) return eval_vec_extract(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "vec.replace") == 0) return eval_vec_replace(c, node_id, n, out_slot, out_kind);
+  if (strcmp(n->tag, "vec.shuffle") == 0) return eval_vec_shuffle_i32(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "closure.sym") == 0) return eval_closure_sym(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "closure.make") == 0) return eval_closure_make(c, node_id, n, out_slot, out_kind);
   if (strcmp(n->tag, "closure.code") == 0) return eval_closure_code(c, node_id, n, out_slot, out_kind);
@@ -5512,6 +6502,7 @@ static bool exec_stmt(sirj_ctx_t* c, uint32_t stmt_id, bool* out_did_return, sir
     return true;
   }
 
+  if (strcmp(n->tag, "store.vec") == 0) return eval_store_vec_stmt(c, stmt_id, n);
   if (strcmp(n->tag, "store.i8") == 0) return eval_store_mnemonic(c, stmt_id, n, SIR_INST_STORE_I8);
   if (strcmp(n->tag, "store.i16") == 0) return eval_store_mnemonic(c, stmt_id, n, SIR_INST_STORE_I16);
   if (strcmp(n->tag, "store.i32") == 0) return eval_store_mnemonic(c, stmt_id, n, SIR_INST_STORE_I32);
@@ -5525,6 +6516,16 @@ static bool exec_stmt(sirj_ctx_t* c, uint32_t stmt_id, bool* out_did_return, sir
   if (strcmp(n->tag, "atomic.store.i64") == 0) return eval_atomic_store_i64_stmt(c, stmt_id, n);
   if (strcmp(n->tag, "mem.copy") == 0) return eval_mem_copy_stmt(c, stmt_id, n);
   if (strcmp(n->tag, "mem.fill") == 0) return eval_mem_fill_stmt(c, stmt_id, n);
+  if (strcmp(n->tag, "load.vec") == 0 || strncmp(n->tag, "vec.", 4) == 0 || strncmp(n->tag, "atomic.load.", 12) == 0 ||
+      strncmp(n->tag, "atomic.rmw.", 11) == 0 || strncmp(n->tag, "atomic.cmpxchg.", 15) == 0) {
+    // Allow selected expression nodes in block.stmts (evaluate + discard), like `call`.
+    sir_val_id_t tmp = 0;
+    val_kind_t tk = VK_INVALID;
+    if (!eval_node(c, stmt_id, &tmp, &tk)) return false;
+    (void)tmp;
+    (void)tk;
+    return true;
+  }
   if (strcmp(n->tag, "call") == 0) {
     // Calls are expression nodes in SIR, but they often appear in block.stmts for side effects.
     sir_val_id_t tmp = 0;
@@ -6475,6 +7476,20 @@ static bool parse_file(sirj_ctx_t* c, const char* path) {
           }
           if (!json_get_u32(json_obj_get(root, "len"), &ti.array_len)) {
             sirj_diag_setf(c, "sem.parse.type.array.len", diag_path, loc_line, 0, NULL, "bad array.len");
+            free(line);
+            fclose(f);
+            return false;
+          }
+        } else if (strcmp(kind, "vec") == 0) {
+          ti.is_vec = true;
+          if (!sirj_intern_id(c, json_obj_get(root, "lane"), &ti.vec_lane) || ti.vec_lane == 0) {
+            sirj_diag_setf(c, "sem.parse.type.vec.lane", diag_path, loc_line, 0, NULL, "bad vec.lane");
+            free(line);
+            fclose(f);
+            return false;
+          }
+          if (!json_get_u32(json_obj_get(root, "lanes"), &ti.vec_lanes) || ti.vec_lanes == 0) {
+            sirj_diag_setf(c, "sem.parse.type.vec.lanes", diag_path, loc_line, 0, NULL, "bad vec.lanes");
             free(line);
             fclose(f);
             return false;

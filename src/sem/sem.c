@@ -314,6 +314,7 @@ static void sem_print_support(FILE* out, bool json) {
       "select",
 
       // memory (MVP)
+      "alloca (core, typed)",
       "alloca.i8",
       "alloca.i16",
       "alloca.i32",
@@ -339,6 +340,17 @@ static void sem_print_support(FILE* out, bool json) {
       "atomic.load.i8/i16/i32/i64 (atomics:v1, single-thread semantics; ordering validated, ignored)",
       "atomic.store.i8/i16/i32/i64 (atomics:v1, single-thread semantics; ordering validated, ignored)",
       "atomic.rmw.*.i32 (atomics:v1, single-thread semantics; ordering validated, ignored)",
+      "atomic.cmpxchg.i8/i16/i32 (atomics:v1, returns old only; ok=(old==expected); ordering validated, ignored)",
+      "load.vec (simd:v1, executed as scalar lanes)",
+      "store.vec (simd:v1, executed as scalar lanes)",
+      "vec.splat (simd:v1, executed as scalar lanes)",
+      "vec.add (simd:v1, i32 lanes only)",
+      "vec.cmp.eq (simd:v1, i32 -> bool lanes)",
+      "vec.cmp.lt (simd:v1, i32 -> bool lanes)",
+      "vec.select (simd:v1, bool mask + i32 lanes)",
+      "vec.extract (simd:v1, i32/bool lanes)",
+      "vec.replace (simd:v1, i32/bool lanes)",
+      "vec.shuffle (simd:v1, i32 lanes only)",
 
       // calls
       "decl.fn (extern import)",

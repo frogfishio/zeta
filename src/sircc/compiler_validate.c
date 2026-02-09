@@ -1624,20 +1624,6 @@ static bool validate_atomics_node(SirProgram* p, NodeRec* n) {
   }
 
   JsonValue* flags = json_obj_get(n->fields, "flags");
-  const char* mode = NULL;
-  if (flags && flags->type == JSON_OBJECT) mode = json_get_string(json_obj_get(flags, "mode"));
-  if (!mode) mode = json_get_string(json_obj_get(n->fields, "mode"));
-  if (!mode) {
-    err_codef(p, "sircc.atomic.mode.missing", "sircc: %s node %lld missing flags.mode", n->tag, (long long)n->id);
-    goto bad;
-  }
-
-  bool mode_ok = (strcmp(mode, "relaxed") == 0 || strcmp(mode, "acquire") == 0 || strcmp(mode, "release") == 0 || strcmp(mode, "acqrel") == 0 ||
-                  strcmp(mode, "seqcst") == 0);
-  if (!mode_ok) {
-    err_codef(p, "sircc.atomic.mode.bad", "sircc: %s node %lld invalid mode '%s'", n->tag, (long long)n->id, mode);
-    goto bad;
-  }
 
   JsonValue* alignv = NULL;
   if (flags && flags->type == JSON_OBJECT) alignv = json_obj_get(flags, "align");
@@ -1664,8 +1650,12 @@ static bool validate_atomics_node(SirProgram* p, NodeRec* n) {
   bool is_load = false;
   bool is_store = false;
   bool is_rmw = false;
+  bool is_cmpxchg = false;
   const char* rmw_op = NULL;
   const char* rmw_dot = NULL;
+  const char* mode = NULL;
+  const char* mode_succ = NULL;
+  const char* mode_fail = NULL;
 
   if (strncmp(n->tag, "atomic.load.", 12) == 0) {
     is_load = true;
@@ -1683,8 +1673,8 @@ static bool validate_atomics_node(SirProgram* p, NodeRec* n) {
     }
     width = rmw_dot + 1;
   } else if (strncmp(n->tag, "atomic.cmpxchg.", 15) == 0) {
-    err_codef(p, "sircc.atomic.cmpxchg.unsupported", "sircc: %s is not supported yet (cmpxchg is multi-result)", n->tag);
-    goto bad;
+    is_cmpxchg = true;
+    width = n->tag + 15;
   } else {
     err_codef(p, "sircc.atomic.tag.unknown", "sircc: unknown atomic mnemonic '%s'", n->tag);
     goto bad;
@@ -1695,6 +1685,62 @@ static bool validate_atomics_node(SirProgram* p, NodeRec* n) {
     err_codef(p, "sircc.atomic.width.unsupported", "sircc: %s node %lld unsupported width '%s' (expected i8/i16/i32/i64)", n->tag, (long long)n->id,
               width ? width : "");
     goto bad;
+  }
+
+  if (is_cmpxchg) {
+    if (args->v.arr.len != 3) {
+      err_codef(p, "sircc.atomic.cmpxchg.args.bad", "sircc: %s node %lld requires args:[addr, expected, desired]", n->tag, (long long)n->id);
+      goto bad;
+    }
+    if (flags && flags->type == JSON_OBJECT) {
+      mode_succ = json_get_string(json_obj_get(flags, "modeSucc"));
+      mode_fail = json_get_string(json_obj_get(flags, "modeFail"));
+    }
+    if (!mode_succ) mode_succ = json_get_string(json_obj_get(n->fields, "modeSucc"));
+    if (!mode_fail) mode_fail = json_get_string(json_obj_get(n->fields, "modeFail"));
+    if (!mode_succ || !mode_fail) {
+      err_codef(p, "sircc.atomic.cmpxchg.mode.missing", "sircc: %s node %lld missing flags.modeSucc/modeFail", n->tag, (long long)n->id);
+      goto bad;
+    }
+
+    bool succ_ok = (strcmp(mode_succ, "relaxed") == 0 || strcmp(mode_succ, "acquire") == 0 || strcmp(mode_succ, "release") == 0 ||
+                    strcmp(mode_succ, "acqrel") == 0 || strcmp(mode_succ, "seqcst") == 0);
+    bool fail_ok = (strcmp(mode_fail, "relaxed") == 0 || strcmp(mode_fail, "acquire") == 0 || strcmp(mode_fail, "seqcst") == 0);
+    if (!succ_ok || !fail_ok) {
+      err_codef(p, "sircc.atomic.cmpxchg.mode.bad", "sircc: %s node %lld invalid modeSucc/modeFail", n->tag, (long long)n->id);
+      goto bad;
+    }
+
+    int succ_rank = 0;
+    if (strcmp(mode_succ, "relaxed") == 0) succ_rank = 0;
+    else if (strcmp(mode_succ, "acquire") == 0) succ_rank = 1;
+    else if (strcmp(mode_succ, "release") == 0) succ_rank = 2;
+    else if (strcmp(mode_succ, "acqrel") == 0) succ_rank = 3;
+    else if (strcmp(mode_succ, "seqcst") == 0) succ_rank = 4;
+
+    int fail_rank = 0;
+    if (strcmp(mode_fail, "relaxed") == 0) fail_rank = 0;
+    else if (strcmp(mode_fail, "acquire") == 0) fail_rank = 1;
+    else if (strcmp(mode_fail, "seqcst") == 0) fail_rank = 4;
+
+    if (fail_rank > succ_rank) {
+      err_codef(p, "sircc.atomic.cmpxchg.mode.order", "sircc: %s node %lld modeFail must not be stronger than modeSucc", n->tag, (long long)n->id);
+      goto bad;
+    }
+  } else {
+    if (flags && flags->type == JSON_OBJECT) mode = json_get_string(json_obj_get(flags, "mode"));
+    if (!mode) mode = json_get_string(json_obj_get(n->fields, "mode"));
+    if (!mode) {
+      err_codef(p, "sircc.atomic.mode.missing", "sircc: %s node %lld missing flags.mode", n->tag, (long long)n->id);
+      goto bad;
+    }
+
+    bool mode_ok = (strcmp(mode, "relaxed") == 0 || strcmp(mode, "acquire") == 0 || strcmp(mode, "release") == 0 || strcmp(mode, "acqrel") == 0 ||
+                    strcmp(mode, "seqcst") == 0);
+    if (!mode_ok) {
+      err_codef(p, "sircc.atomic.mode.bad", "sircc: %s node %lld invalid mode '%s'", n->tag, (long long)n->id, mode);
+      goto bad;
+    }
   }
 
   if (is_load) {
@@ -1745,7 +1791,36 @@ static bool validate_atomics_node(SirProgram* p, NodeRec* n) {
     goto bad;
   }
 
-  if (args->v.arr.len == 2) {
+  if (is_cmpxchg) {
+    // Result: old value (single-result node model); ok is derivable as (old == expected).
+    if (n->type_ref) {
+      TypeRec* nt = get_type(p, n->type_ref);
+      if (!nt || nt->kind != TYPE_PRIM || !nt->prim || strcmp(nt->prim, width) != 0) {
+        err_codef(p, "sircc.atomic.cmpxchg.type.bad", "sircc: %s node %lld result type must be %s (if annotated)", n->tag, (long long)n->id, width);
+        goto bad;
+      }
+    }
+
+    for (size_t idx = 1; idx <= 2; idx++) {
+      int64_t vid = 0;
+      if (!parse_node_ref_id(p, args->v.arr.items[idx], &vid)) {
+        err_codef(p, "sircc.atomic.value.ref_bad", "sircc: %s node %lld value must be a node ref", n->tag, (long long)n->id);
+        goto bad;
+      }
+      NodeRec* v = get_node(p, vid);
+      if (!v) {
+        err_codef(p, "sircc.atomic.value.ref_bad", "sircc: %s node %lld value references unknown node %lld", n->tag, (long long)n->id, (long long)vid);
+        goto bad;
+      }
+      if (v->type_ref) {
+        TypeRec* vt = get_type(p, v->type_ref);
+        if (!vt || vt->kind != TYPE_PRIM || !vt->prim || strcmp(vt->prim, width) != 0) {
+          err_codef(p, "sircc.atomic.value.type.bad", "sircc: %s node %lld value type must be %s (if annotated)", n->tag, (long long)n->id, width);
+          goto bad;
+        }
+      }
+    }
+  } else if (args->v.arr.len == 2) {
     int64_t vid = 0;
     if (!parse_node_ref_id(p, args->v.arr.items[1], &vid)) {
       err_codef(p, "sircc.atomic.value.ref_bad", "sircc: %s node %lld value must be a node ref", n->tag, (long long)n->id);

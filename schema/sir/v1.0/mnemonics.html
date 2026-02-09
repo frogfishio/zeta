@@ -1726,17 +1726,17 @@
               <td data-label="Kind"><code>eff</code></td>
               <td data-label="Shape">
                 <code>args:[addr, expected, desired]</code>,
-                results:[{id,ty},{id,ty}], flags:{modeSucc:STR, modeFail:STR,
-                align?:i32}
+                flags:{modeSucc:STR, modeFail:STR, align?:i32}
               </td>
               <td data-label="Type rule">
-                addr: ptr, expected: iN, desired: iN → results: (old:iN,
-                ok:bool)
+                addr: ptr, expected: iN, desired: iN → result: old:iN (single-result;
+                ok is derivable as <code>(old == expected)</code>)
               </td>
               <td data-label="Semantics">
-                Compare-and-swap. Returns the loaded value and whether the swap
-                occurred. Consumers MUST reject if <code>atomics:v1</code> is not
-                enabled.
+                Compare-and-swap. Returns the loaded value (old). Consumers MAY
+                derive <code>ok</code> as <code>(old == expected)</code> (strong
+                compare-exchange; no spurious failure). Consumers MUST reject if
+                <code>atomics:v1</code> is not enabled.
               </td>
             </tr>
 
