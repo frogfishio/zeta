@@ -93,6 +93,18 @@ add_test(
   COMMAND $<TARGET_FILE:sem> --run ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_write.sir.jsonl
 )
 
+add_test(
+  NAME sem_run_hello_zabi25_caps_list
+  COMMAND $<TARGET_FILE:sem> --run ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_caps_list.sir.jsonl
+)
+
+add_test(
+  NAME sem_run_hello_zabi25_file_cat
+  COMMAND $<TARGET_FILE:sem>
+    --run ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_file_cat.sir.jsonl
+    --fs-root ${CMAKE_SOURCE_DIR}/src/sem/tests/fixtures/file_fs_root
+)
+
 # Regression: ensure sirc-emitted stable IDs for @include-heavy .sir inputs do not collide
 # in a way that prevents sem from loading/verifying the program.
 # Note: top-level CMake adds `src/sem` before `src/sirc`, so `if(TARGET sirc)`

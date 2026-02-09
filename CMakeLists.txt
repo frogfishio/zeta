@@ -81,6 +81,7 @@ add_custom_target(dist_sircc
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/docs/diagnostics.md ${SIR_DIST_DOC}/diagnostics.md
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/docs/hl_core_contract.md ${SIR_DIST_DOC}/hl_core_contract.md
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sem/README.md ${SIR_DIST_DOC}/sem.md
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sem/docs/caps.md ${SIR_DIST_DOC}/sem_caps.md
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/docs/test.md ${SIR_DIST_TEST}/README.md
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/docs/QUICKSTART.md ${SIR_DIST_ROOT}/QUICKSTART.md
   COMMAND ${CMAKE_COMMAND}
@@ -113,6 +114,8 @@ add_custom_target(dist_sircc
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/atomic_cmpxchg_i64.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/atomic_cmpxchg_i64.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/interop_export_global_i32.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/interop_export_global_i32.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_write.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/hello_zabi25_write.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_caps_list.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/hello_zabi25_caps_list.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_file_cat.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/hello_zabi25_file_cat.sir.jsonl
 
   # pack corpus (fun/closure/adt/sem)
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/fun_sym_call.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/fun_sym_call.sir.jsonl
@@ -140,6 +143,8 @@ add_custom_target(dist_sircc
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/atomic_cmpxchg_i64.sir.jsonl ${SIR_DIST_TEST_SEM_EXAMPLES}/atomic_cmpxchg_i64.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/interop_export_global_i32.sir.jsonl ${SIR_DIST_TEST_SEM_EXAMPLES}/interop_export_global_i32.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/misaligned_load_traps.sir.jsonl ${SIR_DIST_TEST_SEM_EXAMPLES}/misaligned_load_traps.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_caps_list.sir.jsonl ${SIR_DIST_TEST_SEM_EXAMPLES}/hello_zabi25_caps_list.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_file_cat.sir.jsonl ${SIR_DIST_TEST_SEM_EXAMPLES}/hello_zabi25_file_cat.sir.jsonl
 
   # SEM runnable examples (subset; safe for `sem --check --check-run`)
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/add.sir.jsonl ${SIR_DIST_TEST_SEM_RUN}/add.sir.jsonl
@@ -153,6 +158,9 @@ add_custom_target(dist_sircc
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/atomic_cmpxchg_i32.sir.jsonl ${SIR_DIST_TEST_SEM_RUN}/atomic_cmpxchg_i32.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/atomic_cmpxchg_i64.sir.jsonl ${SIR_DIST_TEST_SEM_RUN}/atomic_cmpxchg_i64.sir.jsonl
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/interop_export_global_i32.sir.jsonl ${SIR_DIST_TEST_SEM_RUN}/interop_export_global_i32.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_caps_list.sir.jsonl ${SIR_DIST_TEST_SEM_RUN}/hello_zabi25_caps_list.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_file_cat.sir.jsonl ${SIR_DIST_TEST_SEM_RUN}/hello_zabi25_file_cat.sir.jsonl
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sem/tests/fixtures/file_fs_root/hello.txt ${SIR_DIST_TEST_SEM_RUN}/hello.txt
 
   # negative fixtures (verify-only; diagnostics)
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/src/sircc/examples/bad_unknown_field.sir.jsonl ${SIR_DIST_TEST_EXAMPLES}/bad_unknown_field.sir.jsonl

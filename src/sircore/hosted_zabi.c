@@ -38,7 +38,7 @@ static const sem_cap_t* cap_at(const sir_hosted_zabi_t* rt, uint32_t i) {
 
 int32_t sir_zi_cap_count(sir_hosted_zabi_t* rt) {
   (void)rt;
-  return (cap_count(rt) == 0) ? ZI_E_NOSYS : (int32_t)cap_count(rt);
+  return (int32_t)cap_count(rt);
 }
 
 int32_t sir_zi_cap_get_size(sir_hosted_zabi_t* rt, int32_t index) {

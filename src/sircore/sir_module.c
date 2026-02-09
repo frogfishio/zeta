@@ -2119,6 +2119,131 @@ static int32_t exec_call_extern(const sir_module_t* m, sem_guest_mem_t* mem, sir
     return 0;
   }
 
+  if (strcmp(nm, "zi_abi_version") == 0) {
+    if (!host.v.zi_abi_version) return ZI_E_NOSYS;
+    if (n != 0) return ZI_E_INVALID;
+    const uint32_t v = host.v.zi_abi_version(host.user);
+    if (sink && sink->on_hostcall) sink->on_hostcall(sink->user, m, fid, ip, nm, (int32_t)v);
+    if (inst->result_count == 1) {
+      vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = (int32_t)v};
+    }
+    return 0;
+  }
+
+  if (strcmp(nm, "zi_ctl") == 0) {
+    if (!host.v.zi_ctl) return ZI_E_NOSYS;
+    if (n != 4) return ZI_E_INVALID;
+    const sir_val_id_t a0 = args[0], a1 = args[1], a2 = args[2], a3 = args[3];
+    if (a0 >= val_count || a1 >= val_count || a2 >= val_count || a3 >= val_count) return ZI_E_BOUNDS;
+    const sir_value_t rp = vals[a0];
+    const sir_value_t rl = vals[a1];
+    const sir_value_t sp = vals[a2];
+    const sir_value_t sl = vals[a3];
+
+    const zi_ptr_t req_ptr = (rp.kind == SIR_VAL_PTR) ? rp.u.ptr : (rp.kind == SIR_VAL_I64) ? (zi_ptr_t)rp.u.i64 : (zi_ptr_t)0;
+    const zi_ptr_t resp_ptr = (sp.kind == SIR_VAL_PTR) ? sp.u.ptr : (sp.kind == SIR_VAL_I64) ? (zi_ptr_t)sp.u.i64 : (zi_ptr_t)0;
+    if (rp.kind != SIR_VAL_PTR && rp.kind != SIR_VAL_I64) return ZI_E_INVALID;
+    if (sp.kind != SIR_VAL_PTR && sp.kind != SIR_VAL_I64) return ZI_E_INVALID;
+
+    const int64_t req_len64 = (rl.kind == SIR_VAL_I32) ? (int64_t)rl.u.i32 : (rl.kind == SIR_VAL_I64) ? rl.u.i64 : (int64_t)-1;
+    const int64_t resp_cap64 = (sl.kind == SIR_VAL_I32) ? (int64_t)sl.u.i32 : (sl.kind == SIR_VAL_I64) ? sl.u.i64 : (int64_t)-1;
+    if (rl.kind != SIR_VAL_I32 && rl.kind != SIR_VAL_I64) return ZI_E_INVALID;
+    if (sl.kind != SIR_VAL_I32 && sl.kind != SIR_VAL_I64) return ZI_E_INVALID;
+    if (req_len64 < 0 || req_len64 > 0x7FFFFFFFll) return ZI_E_INVALID;
+    if (resp_cap64 < 0 || resp_cap64 > 0x7FFFFFFFll) return ZI_E_INVALID;
+
+    const int32_t rc = host.v.zi_ctl(host.user, req_ptr, (zi_size32_t)req_len64, resp_ptr, (zi_size32_t)resp_cap64);
+    if (sink && sink->on_hostcall) sink->on_hostcall(sink->user, m, fid, ip, nm, rc);
+    if (rc < 0) return rc;
+    if (inst->result_count == 1) {
+      vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = rc};
+    }
+    return 0;
+  }
+
+  if (strcmp(nm, "zi_cap_count") == 0) {
+    if (!host.v.zi_cap_count) return ZI_E_NOSYS;
+    if (n != 0) return ZI_E_INVALID;
+    const int32_t rc = host.v.zi_cap_count(host.user);
+    if (sink && sink->on_hostcall) sink->on_hostcall(sink->user, m, fid, ip, nm, rc);
+    if (rc < 0) return rc;
+    if (inst->result_count == 1) {
+      vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = rc};
+    }
+    return 0;
+  }
+
+  if (strcmp(nm, "zi_cap_get_size") == 0) {
+    if (!host.v.zi_cap_get_size) return ZI_E_NOSYS;
+    if (n != 1) return ZI_E_INVALID;
+    const sir_val_id_t a0 = args[0];
+    if (a0 >= val_count) return ZI_E_BOUNDS;
+    const sir_value_t idx = vals[a0];
+    if (idx.kind != SIR_VAL_I32) return ZI_E_INVALID;
+    const int32_t rc = host.v.zi_cap_get_size(host.user, idx.u.i32);
+    if (sink && sink->on_hostcall) sink->on_hostcall(sink->user, m, fid, ip, nm, rc);
+    if (rc < 0) return rc;
+    if (inst->result_count == 1) {
+      vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = rc};
+    }
+    return 0;
+  }
+
+  if (strcmp(nm, "zi_cap_get") == 0) {
+    if (!host.v.zi_cap_get) return ZI_E_NOSYS;
+    if (n != 3) return ZI_E_INVALID;
+    const sir_val_id_t a0 = args[0], a1 = args[1], a2 = args[2];
+    if (a0 >= val_count || a1 >= val_count || a2 >= val_count) return ZI_E_BOUNDS;
+    const sir_value_t idx = vals[a0];
+    const sir_value_t outp = vals[a1];
+    const sir_value_t capv = vals[a2];
+    if (idx.kind != SIR_VAL_I32) return ZI_E_INVALID;
+    const zi_ptr_t out_ptr = (outp.kind == SIR_VAL_PTR) ? outp.u.ptr : (outp.kind == SIR_VAL_I64) ? (zi_ptr_t)outp.u.i64 : (zi_ptr_t)0;
+    if (outp.kind != SIR_VAL_PTR && outp.kind != SIR_VAL_I64) return ZI_E_INVALID;
+    const int64_t out_cap64 = (capv.kind == SIR_VAL_I32) ? (int64_t)capv.u.i32 : (capv.kind == SIR_VAL_I64) ? capv.u.i64 : (int64_t)-1;
+    if (capv.kind != SIR_VAL_I32 && capv.kind != SIR_VAL_I64) return ZI_E_INVALID;
+    if (out_cap64 < 0 || out_cap64 > 0x7FFFFFFFll) return ZI_E_INVALID;
+    const int32_t rc = host.v.zi_cap_get(host.user, idx.u.i32, out_ptr, (zi_size32_t)out_cap64);
+    if (sink && sink->on_hostcall) sink->on_hostcall(sink->user, m, fid, ip, nm, rc);
+    if (rc < 0) return rc;
+    if (inst->result_count == 1) {
+      vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = rc};
+    }
+    return 0;
+  }
+
+  if (strcmp(nm, "zi_cap_open") == 0) {
+    if (!host.v.zi_cap_open) return ZI_E_NOSYS;
+    if (n != 1) return ZI_E_INVALID;
+    const sir_val_id_t a0 = args[0];
+    if (a0 >= val_count) return ZI_E_BOUNDS;
+    const sir_value_t rp = vals[a0];
+    const zi_ptr_t req_ptr = (rp.kind == SIR_VAL_PTR) ? rp.u.ptr : (rp.kind == SIR_VAL_I64) ? (zi_ptr_t)rp.u.i64 : (zi_ptr_t)0;
+    if (rp.kind != SIR_VAL_PTR && rp.kind != SIR_VAL_I64) return ZI_E_INVALID;
+    const zi_handle_t h = host.v.zi_cap_open(host.user, req_ptr);
+    if (sink && sink->on_hostcall) sink->on_hostcall(sink->user, m, fid, ip, nm, (int32_t)h);
+    if (h < 0) return (int32_t)h;
+    if (inst->result_count == 1) {
+      vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = (int32_t)h};
+    }
+    return 0;
+  }
+
+  if (strcmp(nm, "zi_handle_hflags") == 0) {
+    if (!host.v.zi_handle_hflags) return ZI_E_NOSYS;
+    if (n != 1) return ZI_E_INVALID;
+    const sir_val_id_t a0 = args[0];
+    if (a0 >= val_count) return ZI_E_BOUNDS;
+    const sir_value_t hv = vals[a0];
+    if (hv.kind != SIR_VAL_I32) return ZI_E_INVALID;
+    const uint32_t hf = host.v.zi_handle_hflags(host.user, (zi_handle_t)hv.u.i32);
+    if (sink && sink->on_hostcall) sink->on_hostcall(sink->user, m, fid, ip, nm, (int32_t)hf);
+    if (inst->result_count == 1) {
+      vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = (int32_t)hf};
+    }
+    return 0;
+  }
+
   return ZI_E_NOSYS;
 }
 
