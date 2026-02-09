@@ -1,4 +1,4 @@
-%option noyywrap nodefault yylineno
+%option nodefault yylineno stack
 
 %{
 #include "sirc_emit.h"
@@ -196,6 +196,7 @@ STR_UNTERM1  \"([^\"\\\n]|\\.)*\n
 
 "unit"                      { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_UNIT; }
 "@mod"                      { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_ATMOD; }
+"@include"                  { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_ATINCLUDE; }
 "target"                    { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_TARGET; }
 "features"                  { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_FEATURES; }
 "type"                      { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_TYPE; }

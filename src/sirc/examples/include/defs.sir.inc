@@ -1,0 +1,7 @@
+;; Fragment included by include_basic.sir
+@mod defs
+
+fn add42(x:i32) -> i32
+  return i32.add(x, 42:i32)
+end
+

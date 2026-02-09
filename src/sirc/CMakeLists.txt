@@ -107,6 +107,7 @@ sirc_add_golden_test(sirc_golden_sem_scope_cfg examples/sem_scope_cfg.sir tests/
 
 sirc_add_golden_test(sirc_golden_hello examples/hello.sir tests/golden/hello.sir.jsonl)
 sirc_add_golden_test(sirc_golden_add examples/add.sir tests/golden/add.sir.jsonl)
+sirc_add_golden_test(sirc_golden_include_basic examples/include_basic.sir tests/golden/include_basic.sir.jsonl)
 sirc_add_golden_test(sirc_golden_cfg_if examples/cfg_if.sir tests/golden/cfg_if.sir.jsonl)
 sirc_add_golden_test(sirc_golden_cfg_switch examples/cfg_switch.sir tests/golden/cfg_switch.sir.jsonl)
 sirc_add_golden_test(sirc_golden_cfg_join_phi examples/cfg_join_phi.sir tests/golden/cfg_join_phi.sir.jsonl)
@@ -208,6 +209,7 @@ if(TARGET sircc)
 
   sirc_add_verify_test(sirc_verify_hello examples/hello.sir)
   sirc_add_verify_test(sirc_verify_add examples/add.sir)
+  sirc_add_verify_test(sirc_verify_include_basic examples/include_basic.sir)
 	  sirc_add_verify_test(sirc_verify_mem_stack examples/mem_stack.sir)
 	  sirc_add_verify_test(sirc_verify_mem_copy_fill examples/mem_copy_fill.sir)
 	  sirc_add_verify_test(sirc_verify_eff_fence examples/eff_fence.sir)

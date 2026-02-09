@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "sirc_emit.h"
 #include "version.h"
@@ -17,6 +18,15 @@
 extern FILE* yyin;
 int yyparse(void);
 void yyrestart(FILE* input_file);
+extern int yylineno;
+extern int yycolumn;
+
+// Flex buffer stack (requires %option stack in sir.l).
+typedef void* YY_BUFFER_STATE;
+YY_BUFFER_STATE yy_create_buffer(FILE* file, int size);
+void yy_delete_buffer(YY_BUFFER_STATE b);
+void yypush_buffer_state(YY_BUFFER_STATE b);
+void yypop_buffer_state(void);
 
 typedef struct TypeEntry {
   char* key;      // canonical key, e.g. "prim:i32", "ptr:<id>", "fn:(a,b)->r"
@@ -65,7 +75,7 @@ typedef struct SrcMapEntry {
 } SrcMapEntry;
 
 typedef struct StableHashCount {
-  uint32_t h;
+  uint64_t key;
   uint32_t count;
 } StableHashCount;
 
@@ -100,6 +110,7 @@ typedef struct Emitter {
 
   // Stable ids (@mod scope + per-line hash cache).
   char* id_scope;          // owned
+  char* file_key;          // owned (stable id hashing; never emitted)
   int last_hash_line;
   uint32_t last_line_hash;
   char* last_line_norm;    // owned
@@ -148,6 +159,115 @@ typedef struct Emitter {
 } Emitter;
 
 static Emitter g_emit = {0};
+
+static void* xmalloc(size_t n);
+static void* xrealloc(void* p, size_t n);
+static char* xstrdup(const char* s);
+
+typedef struct SircIncludeFrame {
+  YY_BUFFER_STATE buf;
+  FILE* f;
+  char* path;           // owned (real path used for input_path)
+  char* saved_scope;    // owned (restore @mod scope on return)
+  char* saved_file_key; // owned (restore file_key on return)
+  const char* saved_input_path;
+  int saved_yylineno;
+  int saved_yycolumn;
+} SircIncludeFrame;
+
+static SircIncludeFrame* g_inc = NULL;
+static size_t g_inc_len = 0;
+static size_t g_inc_cap = 0;
+static char* g_root_realpath = NULL;
+
+static bool include_stack_contains(const char* realp) {
+  if (!realp) return false;
+  if (g_root_realpath && strcmp(g_root_realpath, realp) == 0) return true;
+  for (size_t i = 0; i < g_inc_len; i++) {
+    if (g_inc[i].path && strcmp(g_inc[i].path, realp) == 0) return true;
+  }
+  return false;
+}
+
+static char* dirname_dup(const char* p) {
+  if (!p || !p[0]) return xstrdup(".");
+  const char* s = strrchr(p, '/');
+  if (!s) return xstrdup(".");
+  const size_t n = (size_t)(s - p);
+  if (n == 0) return xstrdup("/");
+  char* out = (char*)xmalloc(n + 1);
+  memcpy(out, p, n);
+  out[n] = 0;
+  return out;
+}
+
+static bool path_is_abs(const char* p) {
+  return p && p[0] == '/';
+}
+
+static char* path_join2(const char* a, const char* b) {
+  if (!a || !a[0]) return xstrdup(b ? b : "");
+  if (!b || !b[0]) return xstrdup(a);
+  const size_t na = strlen(a);
+  const size_t nb = strlen(b);
+  const bool need_slash = a[na - 1] != '/';
+  char* out = (char*)xmalloc(na + (need_slash ? 1 : 0) + nb + 1);
+  memcpy(out, a, na);
+  size_t j = na;
+  if (need_slash) out[j++] = '/';
+  memcpy(out + j, b, nb);
+  out[j + nb] = 0;
+  return out;
+}
+
+static bool file_starts_with_unit_header(const char* path) {
+  if (!path || !path[0]) return false;
+  FILE* f = fopen(path, "rb");
+  if (!f) return false;
+  int c = 0;
+
+  // Skip whitespace and line comments (;;) to end-of-line.
+  for (;;) {
+    c = fgetc(f);
+    if (c == EOF) break;
+    if (c == ' ' || c == '\t' || c == '\r' || c == '\n') continue;
+    if (c == ';') {
+      const int c2 = fgetc(f);
+      if (c2 == ';') {
+        while ((c = fgetc(f)) != EOF && c != '\n') {
+        }
+        continue;
+      }
+      ungetc(c2, f);
+      break;
+    }
+    break;
+  }
+
+  if (c == EOF) {
+    fclose(f);
+    return false;
+  }
+
+  // Check for "unit" word boundary.
+  if (c != 'u') {
+    fclose(f);
+    return false;
+  }
+  const char want[] = "unit";
+  for (size_t i = 1; i < sizeof(want) - 1; i++) {
+    const int d = fgetc(f);
+    if (d != (int)want[i]) {
+      fclose(f);
+      return false;
+    }
+  }
+  const int after = fgetc(f);
+  fclose(f);
+  if (after == EOF) return true;
+  if ((after >= 'A' && after <= 'Z') || (after >= 'a' && after <= 'z') || (after >= '0' && after <= '9') || after == '_' || after == '$') return false;
+  return true;
+}
 
 static void record_type_out_id(int64_t id, const char* key);
 static void emit_node_id_value(int64_t id);
@@ -414,6 +534,148 @@ void sirc_set_id_scope(char* scope) {
   g_emit.id_scope = scope;
 }
 
+static void stable_hash_cache_invalidate(void) {
+  free(g_emit.last_line_norm);
+  g_emit.last_line_norm = NULL;
+  g_emit.last_hash_line = 0;
+  g_emit.last_line_hash = 0;
+  g_emit.last_line_occ = 0;
+}
+
+static void include_frame_pop(void) {
+  if (!g_inc_len) return;
+  SircIncludeFrame fr = g_inc[--g_inc_len];
+
+  // Switch lexer back to the previous buffer first.
+  yypop_buffer_state();
+
+  if (fr.f) fclose(fr.f);
+
+  g_emit.input_path = fr.saved_input_path;
+  yylineno = fr.saved_yylineno;
+  yycolumn = fr.saved_yycolumn;
+
+  // Restore @mod scope (restore-by-copy so include cannot leak scope).
+  free(g_emit.id_scope);
+  g_emit.id_scope = fr.saved_scope;
+
+  // Restore file_key (owned).
+  free(g_emit.file_key);
+  g_emit.file_key = fr.saved_file_key;
+
+  free(fr.path);
+
+  stable_hash_cache_invalidate();
+}
+
+int yywrap(void) {
+  if (g_inc_len) {
+    include_frame_pop();
+    return 0; // continue scanning previous buffer
+  }
+  return 1; // end of input
+}
+
+bool sirc_include_file(char* path) {
+  if (!path || !path[0]) {
+    free(path);
+    diag_setf("sirc.include.path", "@include requires a path string");
+    return false;
+  }
+
+  if (g_inc_len >= 64) {
+    free(path);
+    diag_setf("sirc.include.depth", "@include nesting too deep");
+    return false;
+  }
+
+  const char* cur = sirc_input_path();
+  if (!path_is_abs(path) && (!cur || strcmp(cur, "<input>") == 0)) {
+    free(path);
+    diag_setf("sirc.include.path", "@include relative paths require a file input (not stdin)");
+    return false;
+  }
+
+  char* joined = NULL;
+  if (path_is_abs(path)) {
+    joined = xstrdup(path);
+  } else {
+    char* dir = dirname_dup(cur);
+    joined = path_join2(dir, path);
+    free(dir);
+  }
+
+  char* realp = realpath(joined, NULL);
+  if (!realp) {
+    diag_setf("sirc.include.open", "%s: %s", joined, strerror(errno));
+    free(joined);
+    free(path);
+    return false;
+  }
+  free(joined);
+
+  if (include_stack_contains(realp)) {
+    diag_setf("sirc.include.cycle", "@include cycle detected: %s", realp);
+    free(realp);
+    free(path);
+    return false;
+  }
+
+  struct stat st;
+  if (stat(realp, &st) != 0 || !S_ISREG(st.st_mode)) {
+    diag_setf("sirc.include.open", "%s: not a regular file", realp);
+    free(realp);
+    free(path);
+    return false;
+  }
+
+  if (file_starts_with_unit_header(realp)) {
+    diag_setf("sirc.include.unit_forbidden", "@include fragments must not start with 'unit' (no unit header in included files)");
+    free(realp);
+    free(path);
+    return false;
+  }
+
+  FILE* f = fopen(realp, "rb");
+  if (!f) {
+    diag_setf("sirc.include.open", "%s: %s", realp, strerror(errno));
+    free(realp);
+    free(path);
+    return false;
+  }
+
+  // Push new lexer buffer.
+  YY_BUFFER_STATE buf = yy_create_buffer(f, 16384);
+  yypush_buffer_state(buf);
+  yyin = f;
+
+  if (g_inc_len == g_inc_cap) {
+    g_inc_cap = g_inc_cap ? g_inc_cap * 2 : 8;
+    g_inc = (SircIncludeFrame*)xrealloc(g_inc, g_inc_cap * sizeof(*g_inc));
+  }
+
+  // Save current state and switch to the included file.
+  SircIncludeFrame* fr = &g_inc[g_inc_len++];
+  memset(fr, 0, sizeof(*fr));
+  fr->buf = buf;
+  fr->f = f;
+  fr->path = realp; // becomes current input_path
+  fr->saved_input_path = g_emit.input_path;
+  fr->saved_yylineno = yylineno;
+  fr->saved_yycolumn = yycolumn;
+  fr->saved_scope = xstrdup(g_emit.id_scope ? g_emit.id_scope : "");
+  fr->saved_file_key = g_emit.file_key;
+
+  // Switch compilation context to the included file.
+  g_emit.input_path = fr->path;
+  g_emit.file_key = path; // take ownership; used only for stable hashing
+  yylineno = 1;
+  yycolumn = 1;
+
+  stable_hash_cache_invalidate();
+  return true;
+}
+
 static uint32_t fnv1a32(const void* data, size_t n) {
   const unsigned char* p = (const unsigned char*)data;
   uint32_t h = 2166136261u;
@@ -500,9 +762,12 @@ static uint32_t stable_hash_for_current_line(void) {
 
   g_emit.last_line_hash = fnv1a32(g_emit.last_line_norm, strlen(g_emit.last_line_norm));
 
+  const uint32_t fh = fnv1a32(g_emit.file_key ? g_emit.file_key : "", g_emit.file_key ? strlen(g_emit.file_key) : 0);
+  const uint64_t key = (((uint64_t)fh) << 32) | (uint64_t)g_emit.last_line_hash;
+
   // Disambiguate identical lines: assign a per-hash occurrence index.
   for (size_t i = 0; i < g_emit.stable_hash_counts_len; i++) {
-    if (g_emit.stable_hash_counts[i].h == g_emit.last_line_hash) {
+    if (g_emit.stable_hash_counts[i].key == key) {
       g_emit.last_line_occ = g_emit.stable_hash_counts[i].count++;
       return g_emit.last_line_hash;
     }
@@ -511,7 +776,7 @@ static uint32_t stable_hash_for_current_line(void) {
     g_emit.stable_hash_counts_cap = g_emit.stable_hash_counts_cap ? g_emit.stable_hash_counts_cap * 2 : 64;
     g_emit.stable_hash_counts = xrealloc(g_emit.stable_hash_counts, g_emit.stable_hash_counts_cap * sizeof(*g_emit.stable_hash_counts));
   }
-  g_emit.stable_hash_counts[g_emit.stable_hash_counts_len++] = (StableHashCount){.h = g_emit.last_line_hash, .count = 1};
+  g_emit.stable_hash_counts[g_emit.stable_hash_counts_len++] = (StableHashCount){.key = key, .count = 1};
   g_emit.last_line_occ = 0;
   return g_emit.last_line_hash;
 }
@@ -588,6 +853,8 @@ static void sirc_reset_compiler_state(void) {
   // Stable id state.
   free(g_emit.id_scope);
   g_emit.id_scope = NULL;
+  free(g_emit.file_key);
+  g_emit.file_key = NULL;
   free(g_emit.last_line_norm);
   g_emit.last_line_norm = NULL;
   g_emit.last_hash_line = 0;
@@ -597,6 +864,14 @@ static void sirc_reset_compiler_state(void) {
   g_emit.stable_hash_counts = NULL;
   g_emit.stable_hash_counts_len = 0;
   g_emit.stable_hash_counts_cap = 0;
+
+  // Include stack (should be empty after a successful parse).
+  free(g_root_realpath);
+  g_root_realpath = NULL;
+  free(g_inc);
+  g_inc = NULL;
+  g_inc_len = 0;
+  g_inc_cap = 0;
 
   // Src map.
   for (size_t i = 0; i < g_emit.srcs_len; i++) free(g_emit.srcs[i].id_str);
@@ -776,7 +1051,8 @@ static SrcMapEntry* src_get_or_create(int line, int col) {
   } else {
     const char* file = path_basename(g_emit.input_path ? g_emit.input_path : "<input>");
     char buf[2048];
-    snprintf(buf, sizeof(buf), "src:%s:%d:%d", file, line, col);
+    const char* fk = g_emit.file_key ? g_emit.file_key : file;
+    snprintf(buf, sizeof(buf), "src:%s:%d:%d", fk ? fk : "src", line, col);
     e->id_str = xstrdup(buf);
   }
   return e;
@@ -3462,12 +3738,16 @@ static int compile_one(const char* in_path, FILE* out) {
     return 2;
   }
 
-  g_emit.input_path = in_path;
+  free(g_root_realpath);
+  g_root_realpath = realpath(in_path, NULL);
+  g_emit.input_path = g_root_realpath ? g_root_realpath : in_path;
   g_emit.out = out;
   g_emit.next_type_id = 1;
   g_emit.next_node_id = 10;
   g_emit.last_id_line = 0;
   g_emit.line_id_seq = 0;
+  free(g_emit.file_key);
+  g_emit.file_key = xstrdup(path_basename(g_emit.input_path));
   g_emit.next_src_id = 1;
   for (size_t i = 0; i < g_emit.srcs_len; i++) free(g_emit.srcs[i].id_str);
   free(g_emit.srcs);

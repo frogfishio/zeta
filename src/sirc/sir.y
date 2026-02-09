@@ -55,6 +55,7 @@ void yyerror(const char* s);
 %token T_SEM_IF T_SEM_COND T_SEM_AND_SC T_SEM_OR_SC T_SEM_SWITCH T_SEM_MATCH_SUM
 %token T_SEM_WHILE T_SEM_BREAK T_SEM_CONTINUE T_SEM_DEFER T_SEM_SCOPE
 %token T_ATMOD
+%token T_ATINCLUDE
 
 /* declared in lexer (unused for now, but must exist) */
 %token T_FEATURES T_SIG T_DO
@@ -118,6 +119,7 @@ directives
 directive
   : T_ATMOD T_ID          { sirc_set_id_scope($2); }
   | T_ATMOD T_STRING      { sirc_set_id_scope($2); }
+  | T_ATINCLUDE T_STRING  { if (!sirc_include_file($2)) YYERROR; }
   | error nl_plus         { yyerrok; }
   ;
 

@@ -1,0 +1,9 @@
+unit include_basic target host
+@mod main
+
+@include "include/defs.sir.inc"
+
+fn main() -> i32 public
+  return add42(0:i32)
+end
+

@@ -79,6 +79,21 @@ In `--ids stable` mode, node ids are emitted as:
 
 This keeps ids stable under insertions elsewhere in the file while still remaining deterministic.
 
+#### `@include "<path>"`
+
+Include another `.sir` *fragment* at the current position.
+
+Rules (v1):
+- `@include` is only supported at **top level** (between the unit header and declarations).
+- Included files are **fragments**: they must not start with a `unit ... target ...` header.
+- Relative paths are resolved relative to the including file’s directory.
+- Cycles are rejected (`A` includes `B` includes `A`).
+
+Scope:
+- The included file starts with the current `@mod` scope.
+- If the included file changes scope via `@mod`, it affects only that included file.
+- After the include finishes, the previous scope is restored (includes do not “leak” scope).
+
 ---
 
 ## Types

@@ -50,6 +50,7 @@ void sirc_add_feature(char* feature); // takes ownership
 
 // Compile-time directives (no emitted records).
 void sirc_set_id_scope(char* scope); // takes ownership
+bool sirc_include_file(char* path);  // takes ownership; returns false on error (diagnostic set)
 
 // Types (return type ids)
 int64_t sirc_type_from_name(char* name); // takes ownership of name
