@@ -55,6 +55,7 @@ int64_t sirc_type_fn_of(SircTypeList* params, int64_t ret); // takes ownership o
 int64_t sirc_type_fun_of(int64_t sig);
 int64_t sirc_type_closure_of(int64_t call_sig, int64_t env);
 int64_t sirc_type_sum_of(SircSumVariantList* variants); // takes ownership of variants
+int64_t sirc_type_vec_of(int64_t lane, long long lanes);
 void sirc_type_alias(char* name, int64_t ty); // takes ownership of name
 
 // Type lists (used by type constructors).

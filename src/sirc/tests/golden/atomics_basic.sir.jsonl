@@ -1,0 +1,46 @@
+{"ir":"sir-v1.0","k":"meta","producer":"sirc","unit":"atomics_basic","ext":{"features":["atomics:v1"]}}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:3:18","file":"atomics_basic.sir","line":3,"col":18,"text":"fn main() -> i32 public"}
+{"ir":"sir-v1.0","k":"type","id":"prim:i32","kind":"prim","prim":"i32","loc":{"line":3,"col":18,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:3:18"}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:4:14","file":"atomics_basic.sir","line":4,"col":14,"text":"  let p: ptr = alloca.i32() +align=4 +zero=true"}
+{"ir":"sir-v1.0","k":"type","id":"prim:i8","kind":"prim","prim":"i8","loc":{"line":4,"col":14,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:4:14"}
+{"ir":"sir-v1.0","k":"type","id":"ptr(prim:i8)","kind":"ptr","of":"prim:i8","loc":{"line":4,"col":14,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:4:14"}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:5:1","file":"atomics_basic.sir","line":5,"col":1}
+{"ir":"sir-v1.0","k":"node","id":"n:5:0","tag":"alloca.i32","fields":{"flags":{"align":4,"zero":true}},"loc":{"line":5,"col":1,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:5:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:5:1","tag":"let","fields":{"name":"p","value":{"t":"ref","id":"n:5:0"}},"loc":{"line":5,"col":1,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:5:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:6:21","file":"atomics_basic.sir","line":6,"col":21,"text":"  atomic.store.i32(p, 41:i32) +mode=seqcst +align=4"}
+{"ir":"sir-v1.0","k":"node","id":"n:6:0","tag":"name","type_ref":"ptr(prim:i8)","fields":{"name":"p"},"loc":{"line":6,"col":21,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:6:21"}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:6:29","file":"atomics_basic.sir","line":6,"col":29,"text":"  atomic.store.i32(p, 41:i32) +mode=seqcst +align=4"}
+{"ir":"sir-v1.0","k":"node","id":"n:6:1","tag":"const.i32","type_ref":"prim:i32","fields":{"value":41},"loc":{"line":6,"col":29,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:6:29"}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:7:1","file":"atomics_basic.sir","line":7,"col":1,"text":"  let old: i32 = atomic.load.i32(p) +mode=seqcst +align=4"}
+{"ir":"sir-v1.0","k":"node","id":"n:7:0","tag":"atomic.store.i32","fields":{"args":[{"t":"ref","id":"n:6:0"},{"t":"ref","id":"n:6:1"}],"flags":{"mode":"seqcst","align":4}},"loc":{"line":7,"col":1,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:7:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:7:35","file":"atomics_basic.sir","line":7,"col":35,"text":"  let old: i32 = atomic.load.i32(p) +mode=seqcst +align=4"}
+{"ir":"sir-v1.0","k":"node","id":"n:7:1","tag":"name","type_ref":"ptr(prim:i8)","fields":{"name":"p"},"loc":{"line":7,"col":35,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:7:35"}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:8:1","file":"atomics_basic.sir","line":8,"col":1,"text":"  let prev: i32 = atomic.rmw.add.i32(p, 1:i32) +mode=seqcst +align=4"}
+{"ir":"sir-v1.0","k":"node","id":"n:8:0","tag":"atomic.load.i32","fields":{"args":[{"t":"ref","id":"n:7:1"}],"flags":{"mode":"seqcst","align":4}},"loc":{"line":8,"col":1,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:8:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:8:1","tag":"let","fields":{"name":"old","value":{"t":"ref","id":"n:8:0"}},"loc":{"line":8,"col":1,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:8:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:8:39","file":"atomics_basic.sir","line":8,"col":39,"text":"  let prev: i32 = atomic.rmw.add.i32(p, 1:i32) +mode=seqcst +align=4"}
+{"ir":"sir-v1.0","k":"node","id":"n:8:2","tag":"name","type_ref":"ptr(prim:i8)","fields":{"name":"p"},"loc":{"line":8,"col":39,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:8:39"}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:8:46","file":"atomics_basic.sir","line":8,"col":46,"text":"  let prev: i32 = atomic.rmw.add.i32(p, 1:i32) +mode=seqcst +align=4"}
+{"ir":"sir-v1.0","k":"node","id":"n:8:3","tag":"const.i32","type_ref":"prim:i32","fields":{"value":1},"loc":{"line":8,"col":46,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:8:46"}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:9:1","file":"atomics_basic.sir","line":9,"col":1,"text":"  let now: i32 = atomic.load.i32(p) +mode=seqcst +align=4"}
+{"ir":"sir-v1.0","k":"node","id":"n:9:0","tag":"atomic.rmw.add.i32","fields":{"args":[{"t":"ref","id":"n:8:2"},{"t":"ref","id":"n:8:3"}],"flags":{"mode":"seqcst","align":4}},"loc":{"line":9,"col":1,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:9:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:9:1","tag":"let","fields":{"name":"prev","value":{"t":"ref","id":"n:9:0"}},"loc":{"line":9,"col":1,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:9:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:9:35","file":"atomics_basic.sir","line":9,"col":35,"text":"  let now: i32 = atomic.load.i32(p) +mode=seqcst +align=4"}
+{"ir":"sir-v1.0","k":"node","id":"n:9:2","tag":"name","type_ref":"ptr(prim:i8)","fields":{"name":"p"},"loc":{"line":9,"col":35,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:9:35"}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:10:1","file":"atomics_basic.sir","line":10,"col":1}
+{"ir":"sir-v1.0","k":"node","id":"n:10:0","tag":"atomic.load.i32","fields":{"args":[{"t":"ref","id":"n:9:2"}],"flags":{"mode":"seqcst","align":4}},"loc":{"line":10,"col":1,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:10:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:10:1","tag":"let","fields":{"name":"now","value":{"t":"ref","id":"n:10:0"}},"loc":{"line":10,"col":1,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:10:1"}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:11:29","file":"atomics_basic.sir","line":11,"col":29,"text":"  return i32.add(i32.add(old, prev), now)"}
+{"ir":"sir-v1.0","k":"node","id":"n:11:0","tag":"name","type_ref":"prim:i32","fields":{"name":"old"},"loc":{"line":11,"col":29,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:11:29"}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:11:35","file":"atomics_basic.sir","line":11,"col":35,"text":"  return i32.add(i32.add(old, prev), now)"}
+{"ir":"sir-v1.0","k":"node","id":"n:11:1","tag":"name","type_ref":"prim:i32","fields":{"name":"prev"},"loc":{"line":11,"col":35,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:11:35"}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:11:36","file":"atomics_basic.sir","line":11,"col":36,"text":"  return i32.add(i32.add(old, prev), now)"}
+{"ir":"sir-v1.0","k":"node","id":"n:11:2","tag":"i32.add","fields":{"args":[{"t":"ref","id":"n:11:0"},{"t":"ref","id":"n:11:1"}]},"loc":{"line":11,"col":36,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:11:36"}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:11:41","file":"atomics_basic.sir","line":11,"col":41,"text":"  return i32.add(i32.add(old, prev), now)"}
+{"ir":"sir-v1.0","k":"node","id":"n:11:3","tag":"name","type_ref":"prim:i32","fields":{"name":"now"},"loc":{"line":11,"col":41,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:11:41"}
+{"ir":"sir-v1.0","k":"src","id":"src:atomics_basic.sir:12:1","file":"atomics_basic.sir","line":12,"col":1,"text":"end"}
+{"ir":"sir-v1.0","k":"node","id":"n:12:0","tag":"i32.add","fields":{"args":[{"t":"ref","id":"n:11:2"},{"t":"ref","id":"n:11:3"}]},"loc":{"line":12,"col":1,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:12:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:12:1","tag":"term.ret","fields":{"value":{"t":"ref","id":"n:12:0"}},"loc":{"line":12,"col":1,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:12:1"}
+{"ir":"sir-v1.0","k":"type","id":"fn()->prim:i32","kind":"fn","params":[],"ret":"prim:i32","loc":{"line":12,"col":1,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:12:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:12:2","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:5:1"},{"t":"ref","id":"n:7:0"},{"t":"ref","id":"n:8:1"},{"t":"ref","id":"n:9:1"},{"t":"ref","id":"n:10:1"},{"t":"ref","id":"n:12:1"}]},"loc":{"line":12,"col":1,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:12:1"}
+{"ir":"sir-v1.0","k":"node","id":"n:12:3","tag":"fn","type_ref":"fn()->prim:i32","fields":{"name":"main","linkage":"public","params":[],"body":{"t":"ref","id":"n:12:2"}},"loc":{"line":12,"col":1,"unit":"atomics_basic.sir"},"src_ref":"src:atomics_basic.sir:12:1"}

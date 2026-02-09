@@ -517,6 +517,16 @@ type
 type_ctor
   : T_ARRAY '(' nl_star type comma_sep T_INT nl_star ')'
     { $$ = sirc_type_array_of($4, $6); }
+  | T_ID '(' nl_star type comma_sep T_INT nl_star ')'
+    {
+      if (strcmp($1, "vec") != 0) {
+        yyerror("unknown type constructor");
+        free($1);
+        YYERROR;
+      }
+      $$ = sirc_type_vec_of($4, $6);
+      free($1);
+    }
   | T_ID '(' nl_star type nl_star ')'
     {
       if (strcmp($1, "fun") != 0) {

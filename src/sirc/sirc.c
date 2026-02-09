@@ -730,6 +730,33 @@ static int64_t type_array(int64_t of, int64_t len) {
   return id;
 }
 
+static int64_t type_vec(int64_t lane, int64_t lanes) {
+  if (lanes <= 0) die_at_last("sirc: vec(lane, lanes) requires lanes > 0");
+  const char* lk = type_key_for_id(lane);
+  if (!lk) die_at_last("sirc: internal error: vec(lane) references unknown type id %lld", (long long)lane);
+  const size_t cap = strlen(lk) + 64;
+  char* key = (char*)xmalloc(cap);
+  snprintf(key, cap, "vec(%s,%lld)", lk, (long long)lanes);
+
+  int64_t id = type_lookup(key);
+  if (id) {
+    free(key);
+    return id;
+  }
+  id = type_insert(key);
+  free(key);
+
+  emit_record_prepare();
+  emitf("{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":");
+  emit_type_id_value(id);
+  emitf(",\"kind\":\"vec\",\"lane\":");
+  emit_type_id_value(lane);
+  emitf(",\"lanes\":%lld", (long long)lanes);
+  emit_record_src_loc_trailer();
+  emitf("}\n");
+  return id;
+}
+
 static int64_t named_type_lookup(const char* name) {
   for (size_t i = 0; i < g_emit.named_types_len; i++) {
     if (strcmp(g_emit.named_types[i].name, name) == 0) return g_emit.named_types[i].type_id;
@@ -1391,6 +1418,8 @@ int64_t sirc_type_sum_of(SircSumVariantList* variants) {
   }
   return id;
 }
+
+int64_t sirc_type_vec_of(int64_t lane, long long lanes) { return type_vec(lane, (int64_t)lanes); }
 
 void sirc_type_alias(char* name, int64_t ty) { named_type_set(name, ty); }
 

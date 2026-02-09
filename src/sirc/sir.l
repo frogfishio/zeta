@@ -206,6 +206,7 @@ STR_UNTERM1  \"([^\"\\\n]|\\.)*\n
 "global"                    { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_GLOBAL; }
 "public"                    { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_PUBLIC; }
 "extern"                    { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_EXTERN; }
+"vec.select"                { sirc_mark(yytext, yylineno, yycolumn); yylval.s = dup_yytext(); col_advance(); return T_ID; }
 "select"                    { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_SELECT; }
 "do"                        { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_DO; }
 "end"                       { sirc_mark(yytext, yylineno, yycolumn); col_advance(); return T_END; }
