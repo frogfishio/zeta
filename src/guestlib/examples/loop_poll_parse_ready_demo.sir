@@ -1,0 +1,57 @@
+unit loop_poll_parse_ready_demo target host
+@mod main
+
+@include "../loop/loop.sir"
+
+;; Synthetic parser demo: build an OK POLL response with one READY event and
+;; ensure `loop_poll_has_ready` finds it.
+fn main() -> i32 public
+  block entry
+    let rid: i32 = 77:i32
+    let handle: i32 = 42:i32
+    let watch_id: i64 = 0x0000000100000002:i64
+
+    let want: i32 = loop_watch_ev_readable()
+    let not_want: i32 = loop_watch_ev_writable()
+
+    ;; POLL payload: 16-byte header + 1x 32-byte event.
+    let payload_len: i32 = 48:i32
+    let resp_len: i32 = i32.add(24:i32, payload_len)
+    let resp: ptr = zi_alloc(resp_len)
+
+    ;; ZCL1 response header (status=1 OK)
+    let _: i32 = zcl1_write_hdr(resp, loop_op_poll(), rid, 1:i32, payload_len)
+
+    ;; POLL response payload
+    let pl: ptr = ptr.offset(i8, resp, 24:i64)
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 0:i64), 1:i32)      ;; version
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 4:i64), 0:i32)      ;; flags
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 8:i64), 1:i32)      ;; event_count
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 12:i64), 0:i32)     ;; reserved
+
+    let e: ptr = ptr.offset(i8, pl, 16:i64)
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, e, 0:i64), loop_ev_ready())
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, e, 4:i64), want)
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, e, 8:i64), handle)
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, e, 12:i64), 0:i32)
+    let _: i32 = loop_write_u64le(ptr.offset(i8, e, 16:i64), watch_id)
+    let _: i32 = loop_write_u64le(ptr.offset(i8, e, 24:i64), 0:i64)
+
+    let ok1: bool = loop_poll_has_ready(resp, resp_len, rid, handle, watch_id, want)
+    let ok2: bool = bool.not(loop_poll_has_ready(resp, resp_len, rid, handle, watch_id, not_want))
+    let ok: bool = bool.and(ok1, ok2)
+
+    let ignored_free: i32 = zi_free(resp)
+    term.cbr cond:ok,
+      then:pass,
+      else:fail
+  end
+
+  block pass
+    term.ret value:0:i32
+  end
+
+  block fail
+    term.ret value:1:i32
+  end
+end

@@ -22,6 +22,34 @@ fn loop_read_u64le(src:ptr) -> i64
   return load.i64(src) +align=1
 end
 
+fn loop_bytes_eq(a:ptr, b:ptr, n:i32) -> bool
+  block entry
+    term.br to loop args:[0:i32, true]
+  end
+
+  block loop(i:i32, ok:bool)
+    let i_lt: bool = i32.cmp.slt(i, n)
+    let cont: bool = bool.and(ok, i_lt)
+    term.cbr cond:cont,
+      then:body args:[i],
+      else:exit args:[ok]
+  end
+
+  block body(i:i32)
+    let av: i8 = load.i8(ptr.offset(i8, a, i))
+    let bv: i8 = load.i8(ptr.offset(i8, b, i))
+    let av32: i32 = i32.zext.i8(av)
+    let bv32: i32 = i32.zext.i8(bv)
+    let ok2: bool = i32.cmp.eq(av32, bv32)
+    let i2: i32 = i32.add(i, 1:i32)
+    term.br to loop args:[i2, ok2]
+  end
+
+  block exit(ok:bool)
+    term.ret value:ok
+  end
+end
+
 fn loop_zi_e_again() -> i32
   ;; From zi_sysabi25.h
   return -6:i32
@@ -224,6 +252,59 @@ fn loop_resp_hdr_matches(resp_ptr:ptr, resp_len:i32, op:i32, rid:i32) -> bool
   return bool.and(ok_hdr, bool.and(ok_op, bool.and(ok_rid, ok_len)))
 end
 
+fn loop_resp_err_trace_is(resp_ptr:ptr, resp_len:i32, op:i32, rid:i32, want_trace:ptr, want_trace_len:i32) -> bool
+  ;; ZCL1 error payload layout:
+  ;;   u32 trace_len; trace_bytes...
+  ;;   u32 msg_len;   msg_bytes...
+  ;;   u32 detail_len; detail_bytes...
+  ;; We only need the first field for sem's hosted nosys detection.
+  block entry
+    let hdr_ok: bool = loop_resp_hdr_matches(resp_ptr, resp_len, op, rid)
+    term.cbr cond:hdr_ok,
+      then:check_status,
+      else:exit_false
+  end
+
+  block check_status
+    let is_err: bool = i32.cmp.eq(zcl1_read_status(resp_ptr), 0:i32)
+    term.cbr cond:is_err,
+      then:parse_pl,
+      else:exit_false
+  end
+
+  block parse_pl
+    let pl_len: i32 = zcl1_read_payload_len(resp_ptr)
+    let has_u32: bool = i32.cmp.sge(pl_len, 4:i32)
+    term.cbr cond:has_u32,
+      then:read_len,
+      else:exit_false
+  end
+
+  block read_len
+    let pl: ptr = ptr.offset(i8, resp_ptr, 24:i64)
+    let n: i32 = zcl1_read_u32le(pl)
+    let off_end: i32 = i32.add(4:i32, n)
+    let pl_len: i32 = zcl1_read_payload_len(resp_ptr)
+    let in_bounds: bool = i32.cmp.sle(off_end, pl_len)
+    term.cbr cond:in_bounds,
+      then:cmp,
+      else:exit_false
+  end
+
+  block cmp
+    let pl: ptr = ptr.offset(i8, resp_ptr, 24:i64)
+    let n: i32 = zcl1_read_u32le(pl)
+    let same_len: bool = i32.cmp.eq(n, want_trace_len)
+    let trace_ptr2: ptr = ptr.offset(i8, pl, 4:i64)
+    let same: bool = bool.and(same_len, loop_bytes_eq(trace_ptr2, want_trace, n))
+    term.ret value:same
+  end
+
+  block exit_false
+    term.ret value:false
+  end
+end
+
 fn loop_call(h:i32, op:i32, rid:i32, payload:ptr, payload_len:i32, resp_ptr:ptr, resp_cap:i32) -> i32
   block entry
     let fr_len: i32 = i32.add(24:i32, payload_len)
@@ -422,6 +503,197 @@ fn loop_poll_has_timer(resp_ptr:ptr, resp_len:i32, rid:i32, timer_id:i32) -> boo
   block exit_found(found:bool)
     term.ret value:found
   end
+end
+
+fn loop_ev_ready() -> i32
+  ;; ZI_SYS_LOOP_EV_READY
+  return 1:i32
+end
+
+fn loop_ev_timer() -> i32
+  ;; ZI_SYS_LOOP_EV_TIMER
+  return 2:i32
+end
+
+fn loop_poll_has_ready(resp_ptr:ptr, resp_len:i32, rid:i32, handle:i32, watch_id:i64, want_events:i32) -> bool
+  ;; Returns true iff an OK POLL response contains a READY event for (handle, watch_id)
+  ;; with at least one bit from want_events (or any if want_events==0).
+  block entry
+    let ok: bool = loop_resp_ok(resp_ptr, resp_len, loop_op_poll(), rid)
+    term.cbr cond:ok,
+      then:parse_hdr,
+      else:exit_false
+  end
+
+  block parse_hdr
+    let pl_len: i32 = zcl1_read_payload_len(resp_ptr)
+    let has_hdr: bool = i32.cmp.sge(pl_len, 16:i32)
+    term.cbr cond:has_hdr,
+      then:parse_ver,
+      else:exit_false
+  end
+
+  block parse_ver
+    let pl: ptr = ptr.offset(i8, resp_ptr, 24:i64)
+    let ver: i32 = zcl1_read_u32le(ptr.offset(i8, pl, 0:i64))
+    term.cbr cond:i32.cmp.eq(ver, 1:i32),
+      then:loop_init,
+      else:exit_false
+  end
+
+  block loop_init
+    let pl: ptr = ptr.offset(i8, resp_ptr, 24:i64)
+    let ev_count: i32 = zcl1_read_u32le(ptr.offset(i8, pl, 8:i64))
+    term.br to loop args:[0:i32, ev_count, false]
+  end
+
+  block loop(i:i32, ev_count:i32, found:bool)
+    let i_lt: bool = i32.cmp.slt(i, ev_count)
+    let not_found: bool = bool.not(found)
+    let cont: bool = bool.and(i_lt, not_found)
+    term.cbr cond:cont,
+      then:check_one args:[i, ev_count, found],
+      else:exit_found args:[found]
+  end
+
+  block check_one(i:i32, ev_count:i32, found:bool)
+    let pl_len: i32 = zcl1_read_payload_len(resp_ptr)
+    let base: i32 = i32.add(16:i32, i32.mul(i, 32:i32))
+    let off_end: i32 = i32.add(base, 32:i32)
+    let ok: bool = i32.cmp.sle(off_end, pl_len)
+    term.cbr cond:ok,
+      then:read_one args:[i, ev_count, found, base],
+      else:exit_false
+  end
+
+  block read_one(i:i32, ev_count:i32, found:bool, base:i32)
+    let pl: ptr = ptr.offset(i8, resp_ptr, 24:i64)
+    let e: ptr = ptr.offset(i8, pl, base)
+
+    let kind: i32 = zcl1_read_u32le(ptr.offset(i8, e, 0:i64))
+    let ev: i32 = zcl1_read_u32le(ptr.offset(i8, e, 4:i64))
+    let h: i32 = zcl1_read_u32le(ptr.offset(i8, e, 8:i64))
+    let id_lo: i32 = zcl1_read_u32le(ptr.offset(i8, e, 16:i64))
+    let id_hi: i32 = zcl1_read_u32le(ptr.offset(i8, e, 20:i64))
+
+    ;; Split watch_id into low/high u32 via a tiny stack buffer.
+    let tmp: ptr = alloca.i64()
+    store.i64(tmp, watch_id)
+    let want_lo: i32 = zcl1_read_u32le(tmp)
+    let want_hi: i32 = zcl1_read_u32le(ptr.offset(i8, tmp, 4:i64))
+
+    let is_ready: bool = i32.cmp.eq(kind, loop_ev_ready())
+    let h_ok: bool = i32.cmp.eq(h, handle)
+    let id_ok: bool = bool.and(i32.cmp.eq(id_lo, want_lo), i32.cmp.eq(id_hi, want_hi))
+
+    let any_ev: bool = i32.cmp.eq(want_events, 0:i32)
+    let masked: i32 = i32.and(ev, want_events)
+    let ev_ok: bool = bool.or(any_ev, i32.cmp.ne(masked, 0:i32))
+
+    let found2: bool = bool.or(found, bool.and(is_ready, bool.and(h_ok, bool.and(id_ok, ev_ok))))
+
+    let i2: i32 = i32.add(i, 1:i32)
+    term.br to loop args:[i2, ev_count, found2]
+  end
+
+  block exit_false
+    term.ret value:false
+  end
+
+  block exit_found(found:bool)
+    term.ret value:found
+  end
+end
+
+fn loop_wait_rc_ready() -> i32
+  return 0:i32
+end
+
+fn loop_wait_rc_timeout() -> i32
+  return 1:i32
+end
+
+fn loop_wait_rc_nosys() -> i32
+  ;; Hosted `sem` sys/loop returns ZCL1 error trace "sem.sys_loop.nosys".
+  return 2:i32
+end
+
+fn loop_wait_rc_watch_failed() -> i32
+  return 3:i32
+end
+
+fn loop_wait_rc_poll_failed() -> i32
+  return 4:i32
+end
+
+fn loop_wait_rc_open_failed() -> i32
+  return 5:i32
+end
+
+fn loop_wait_events(handle:i32, events:i32, timeout_ms:i32) -> i32
+  ;; Convenience: open sys/loop, WATCH, single POLL, then UNWATCH.
+  ;; Never hangs on hosted `sem`: WATCH nosys returns `loop_wait_rc_nosys()`.
+  block entry
+    let h: i32 = loop_open()
+    let resp: ptr = zi_alloc(1024:i32)
+    let ok_open: bool = i32.cmp.sge(h, 3:i32)
+    term.cbr cond:ok_open,
+      then:watch args:[h, resp],
+      else:fail_open args:[resp]
+  end
+
+  block watch(h:i32, resp:ptr)
+    let watch_id: i64 = 1:i64
+    let n1: i32 = loop_watch(h, 1:i32, handle, events, watch_id, 0:i32, resp, 1024:i32)
+    let ok1: bool = loop_resp_ok(resp, n1, loop_op_watch(), 1:i32)
+    term.cbr cond:ok1,
+      then:poll args:[h, resp, watch_id],
+      else:watch_err args:[h, resp, n1]
+  end
+
+  block watch_err(h:i32, resp:ptr, n1:i32)
+    let nosys_trace: ptr = "sem.sys_loop.nosys"
+    let is_nosys: bool = loop_resp_err_trace_is(resp, n1, loop_op_watch(), 1:i32, nosys_trace, 18:i32)
+    let ignored_end: i32 = zi_end(h)
+    let ignored_free: i32 = zi_free(resp)
+    term.ret value:select(i32, is_nosys, loop_wait_rc_nosys(), loop_wait_rc_watch_failed())
+  end
+
+  block poll(h:i32, resp:ptr, watch_id:i64)
+    let n2: i32 = loop_poll(h, 2:i32, 16:i32, timeout_ms, resp, 1024:i32)
+    let ok2: bool = loop_resp_ok(resp, n2, loop_op_poll(), 2:i32)
+    term.cbr cond:ok2,
+      then:check_ready args:[h, resp, watch_id, n2],
+      else:poll_err args:[h, resp, watch_id]
+  end
+
+  block poll_err(h:i32, resp:ptr, watch_id:i64)
+    let ignored_unwatch: i32 = loop_unwatch(h, 3:i32, watch_id, resp, 1024:i32)
+    let ignored_end: i32 = zi_end(h)
+    let ignored_free: i32 = zi_free(resp)
+    term.ret value:loop_wait_rc_poll_failed()
+  end
+
+  block check_ready(h:i32, resp:ptr, watch_id:i64, n2:i32)
+    let ok_ready: bool = loop_poll_has_ready(resp, n2, 2:i32, handle, watch_id, events)
+    let ignored_unwatch: i32 = loop_unwatch(h, 3:i32, watch_id, resp, 1024:i32)
+    let ignored_end: i32 = zi_end(h)
+    let ignored_free: i32 = zi_free(resp)
+    term.ret value:select(i32, ok_ready, loop_wait_rc_ready(), loop_wait_rc_timeout())
+  end
+
+  block fail_open(resp:ptr)
+    let ignored_free: i32 = zi_free(resp)
+    term.ret value:loop_wait_rc_open_failed()
+  end
+end
+
+fn loop_wait_readable(handle:i32, timeout_ms:i32) -> i32
+  return loop_wait_events(handle, loop_watch_ev_readable(), timeout_ms)
+end
+
+fn loop_wait_writable(handle:i32, timeout_ms:i32) -> i32
+  return loop_wait_events(handle, loop_watch_ev_writable(), timeout_ms)
 end
 
 fn loop_sleep_ms(ms:i32) -> i32
