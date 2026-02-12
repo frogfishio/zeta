@@ -39,12 +39,12 @@ The following capabilities are **production-ready** and **stable** within zABI 2
 
 | Capability | Identity | Sandbox | Status |
 |------------|----------|---------|--------|
-| Filesystem | `file/fs@v1` | `ZI_FS_ROOT` | Golden |
+| Async Filesystem | `file/aio@v1` | `ZI_FS_ROOT` | Golden |
 | Process Args | `proc/argv@v1` | read-only | Golden |
 | Process Env | `proc/env@v1` | read-only | Golden |
 | Hopper Arena | `proc/hopper@v1` | isolated instance | Golden |
 | TCP Client | `net/tcp@v1` | `ZI_NET_ALLOW` | Golden |
-| Async Invocation | `async/default@v1` | selector registry | Golden |
+| Async Invocation | `async/default@v1` | selector registry | Optional (not registered by default) |
 | Event Bus | `event/bus@v1` | in-process | Golden |
 | System Info | `sys/info@v1` | best-effort, may redact | Golden |
 
@@ -57,8 +57,7 @@ Each golden capability:
 ### Capability Versioning
 
 Capability versions are **independent** of zABI version:
-- `file/fs@v1` remains stable even if zABI advances to 2.6+.
-- New capability versions (e.g., `file/fs@v2`) are additive; old versions remain supported.
+- New capability versions (e.g., `file/aio@v2`) are additive; old versions remain supported.
 
 ## Deprecation Policy
 

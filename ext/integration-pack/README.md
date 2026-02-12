@@ -26,6 +26,32 @@ Inside a platform folder:
 - `conformance/` — JSONL-only conformance fixtures (schema/record validation)
 - `examples/` — small C templates (host shim + cap usage)
 
+Zingcore-specific docs shipped in `docs/zingcore25/` include:
+
+- `CAP_READINESS_MATRIX.md` — what to `WATCH` for TCP + file/aio + sys/loop (would-block = `ZI_E_AGAIN`)
+
+Zingcore protocol specifications are shipped in `docs/zingcore25/abi/` (ZCL1 framing, `zi_ctl`, and the golden caps like `sys/loop`, `sys/info`, `net/tcp`, `file/aio`, `event/bus`, `async/default`, `proc/hopper`, plus an overall zABI 2.5 overview).
+
+## Sandboxing and feature knobs (env vars)
+
+Several “golden” capabilities are sandboxed and/or feature-gated via environment variables.
+If you see unexpected `ZI_E_DENIED` failures, check these first:
+
+- `ZI_FS_ROOT` (filesystem sandbox)
+    - If set: guest paths must be absolute and are resolved under this root (escape-resistant; `..` rejected).
+    - Affects: `file/aio@v1`.
+- `ZI_NET_ALLOW` (outbound TCP allowlist)
+    - If unset/empty: only loopback is allowed.
+    - If `any`: any host:port is allowed.
+    - Otherwise: comma-separated tokens (see `docs/zingcore25/abi/TCP_PROTOCOL.md`).
+    - Affects: `net/tcp@v1` outbound connects.
+- `ZI_NET_LISTEN_ALLOW` (inbound TCP listen allowlist)
+    - Same syntax as `ZI_NET_ALLOW`.
+    - Affects: `net/tcp@v1` listener opens (bind+listen).
+- `ZI_ENABLE_HTTP_CAP` (optional HTTP cap registration)
+    - If set to a non-empty value other than `0`: registers `net/http`.
+    - By default HTTP is disabled (intentionally “sugar”, not required for TCP/file/loop-based integrations).
+
 ## Build the pack
 
 From the repo root:

@@ -70,15 +70,11 @@ If a runtime exposes any capabilities, it must provide the caps extension (`zi_c
 `zi_handle_hflags`). Capability discovery is done via `zi_ctl` (CAPS_LIST) which returns a
 deterministic list and per-cap flags/metadata.
 
-## File capability (golden)
+## File capabilities (golden)
 
-zingcore 2.5 includes a production-ready **file system capability**:
+zingcore 2.5 provides an async-first filesystem surface built around `sys/loop`:
 
-- kind: `"file"`
-- name: `"fs"`
-- version: `1`
-
-It is opened via `zi_cap_open()` and returns a stream handle usable with `zi_read`/`zi_write`/`zi_end`.
+- `file/aio@v1` (async, completion-based; pollable via `sys/loop`)
 
 ### zi_cap_open request format
 
@@ -92,14 +88,16 @@ It is opened via `zi_cap_open()` and returns a stream handle usable with `zi_rea
 - `u64 params_ptr`
 - `u32 params_len`
 
-### file/fs open params format
+### file/aio protocol (overview)
 
-When kind/name select file/fs, `params_ptr` points at a packed little-endian params blob (20 bytes):
+`file/aio@v1` is opened via `zi_cap_open()` with **empty params** and returns a pollable stream handle.
 
-- `u64 path_ptr` (UTF-8 bytes, not NUL-terminated)
-- `u32 path_len`
-- `u32 oflags` (`ZI_FILE_O_*` in `zingcore/include/zi_file_fs25.h`)
-- `u32 create_mode` (used when `ZI_FILE_O_CREATE` is set; e.g. 0644)
+- Requests are written as ZCL1 frames (`zi_write`).
+- Immediate acks are read back as ZCL1 frames (`zi_read`).
+- Completions are delivered asynchronously as ZCL1 frames with `op = 100` (`EV_DONE`) and `rid` equal to the request `rid`.
+- Guests block only in `sys/loop.POLL`: WATCH the `file/aio` handle for readability, POLL, then read completions.
+
+Normative spec: `abi/FILE_AIO_PROTOCOL.md`.
 
 ### Sandboxing via ZI_FS_ROOT
 
@@ -225,6 +223,14 @@ Open semantics:
   - `u32 host_len`
   - `u32 port` (1..65535)
   - `u32 flags` (reserved; must be 0)
+
+I/O semantics:
+
+- TCP handles use nonblocking sockets.
+- While the connection is still being established, `zi_read`/`zi_write` MAY return `ZI_E_AGAIN`.
+  Guests SHOULD wait via `sys/loop` watching the TCP handle for `writable` readiness, then retry.
+- For data transfer, `zi_read`/`zi_write` return `ZI_E_AGAIN` on would-block; guests SHOULD wait via
+  `sys/loop` watching `readable`/`writable` readiness, then retry.
 
 Sandboxing via `ZI_NET_ALLOW`:
 

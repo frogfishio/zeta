@@ -15,7 +15,7 @@ zABI 2.x replaces the retired legacy “stream ABI” (`req_read/res_write/_ctl`
 - `main(req: i32, res: i32) -> ()` (WASM runner entrypoint)
   - Required by `zrun`.
   - Must close `res` via `zi_end(res)` before returning.
-  - Note: legacy `lembeh_handle` entrypoints are not supported.
+  - Note: legacy entrypoints are not supported; use `main`.
 - `memory` (WASM linear memory)
   - Required for any ABI calls that read/write guest memory.
 

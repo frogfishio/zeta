@@ -279,6 +279,49 @@ Notes:
 - When `--debug-events-only` is used, `--coverage` requires `--coverage-out` (to keep stderr clean JSONL).
 - When `--debug-events-only` is used, `--coverage-blackholes` is rejected (since it prints a human summary to stderr).
 
+### "Chew" pipeline (zem → strip → lower)
+
+If you want a practical end-to-end prototype of a `zem`-guided pre-pass for native codegen, use:
+
+```sh
+bash scripts/chew_lower.sh --input build/prog.ir.jsonl
+```
+
+What it does:
+
+- Runs `zem --coverage` to produce a coverage JSONL profile
+- Runs `zem --strip uncovered-ret` using that profile to produce a stripped IR JSONL
+- Builds both baseline and stripped artifacts via `lower`, links them with the zABI 2.5 hostlib runner, and (by default) runs both and compares stdout
+
+Common flags:
+
+- `--stdin PATH` to feed guest stdin
+- `--mode uncovered-delete` for aggressive stripping
+- `--no-run` to only produce build artifacts and size deltas
+- `-- --arg1 arg2` to pass guest argv (forwarded to both `zem` and the native runner)
+
+### PGO length profile (experimental)
+
+`zem` can emit a small “value profile” focused on bulk memory ops that are good candidates for specialization.
+
+Currently this records, per executed site, a histogram of observed `BC` lengths for:
+
+- `FILL` (HL=dst, A=byte, BC=len)
+- `LDIR` (DE=dst, HL=src, BC=len)
+
+Write a JSONL profile while running a program:
+
+```sh
+bin/zem --pgo-len-out /tmp/zem.pgo_len.jsonl /tmp/program.jsonl
+```
+
+The JSONL contains:
+
+- a header record (`k == "zem_pgo_len"`) including a module hash
+- one record per hot site (`k == "zem_pgo_len_rec"`) with fields like `m`, `pc`, `hot_len`, `hot_hits`, `total_hits`, `other_hits`
+
+This is intended to be consumed by `lower` for size/perf experiments (e.g. out-of-line helpers or guarded fast paths).
+
 ### Debugging (CLI)
 
 - `--debug` starts the interactive CLI debugger (starts paused).

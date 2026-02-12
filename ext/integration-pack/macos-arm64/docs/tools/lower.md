@@ -16,6 +16,7 @@ lower --version
 - `--input <path>`: Input JSONL IR. Required in non-tool mode (single file).
 - `--o <path>`: Output Mach-O object path (default: `src/lower/arm64/out/out.o`).
 - `--tool`: Filelist mode; allow multiple inputs, requires `-o`.
+- `--pgo-len-profile <path>`: Read a `zem --pgo-len-out` JSONL profile and enable PGO-guided lowering for bulk memory ops (currently: FILL/LDIR helpers).
 - `--version`: Print version (read from `VERSION`).
 - `--help`: Show help.
 

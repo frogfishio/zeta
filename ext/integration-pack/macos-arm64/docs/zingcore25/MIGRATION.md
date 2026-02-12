@@ -63,17 +63,21 @@ int main() {
   }
   
   // 2. Register capabilities explicitly
-  zi_file_fs25_register();
+  // Filesystem is async-first in 2.5: file/aio + sys/loop.
+  zi_file_aio25_register();
+  zi_sys_loop25_register();
   zi_net_tcp25_register();
   zi_proc_argv25_register();
   zi_proc_env25_register();
   zi_proc_hopper25_register();
-  zi_async_default25_register();
+  // Optional: async/default is not registered by default.
+  // zi_async_default25_register();
   
-  // 3. Register selectors (if using async)
-  zi_async_default25_register_selectors();
+  // 3. Register selectors (if using async/default)
+  // zi_async_default25_register_selectors();
   
   // Now zi_cap_open, zi_ctl, etc. work
+  return 0;
 }
 ```
 
@@ -85,7 +89,7 @@ int main() {
 
 **2.5**:
 ```c
-// After registering async/default cap:
+// After registering async/default cap (optional):
 const zi_async_selector my_selector = {
   .cap_kind = "exec",
   .cap_name = "run",
@@ -136,19 +140,55 @@ int32_t n = zi_ctl((zi_ptr_t)(uintptr_t)req, 24,
 
 **2.5**: All open parameters are explicit in the open request blob.
 
-**Example** (`file/fs`):
+**Example** (`file/aio` OPEN job):
 
 ```c
-uint8_t params[20];
-write_u64le(params + 0, (uint64_t)(uintptr_t)"/demo.txt");
-write_u32le(params + 8, 9);  // path_len
-write_u32le(params + 12, ZI_FILE_O_READ);
-write_u32le(params + 16, 0);  // mode
-
+// 1) Open the file/aio queue (open params are empty)
 uint8_t open_req[40];
-build_cap_open_req(open_req, "file", "fs", params, 20);
+build_cap_open_req(open_req, "file", "aio", NULL, 0);
+zi_handle_t aio = zi_cap_open((zi_ptr_t)(uintptr_t)open_req);
 
-zi_handle_t h = zi_cap_open((zi_ptr_t)(uintptr_t)open_req);
+// Also open sys/loop and WATCH the aio handle for readable.
+// (sys/loop requests are ZCL1 frames; see abi/SYS_LOOP_PROTOCOL.md)
+uint8_t loop_open_req[40];
+build_cap_open_req(loop_open_req, "sys", "loop", NULL, 0);
+zi_handle_t loop = zi_cap_open((zi_ptr_t)(uintptr_t)loop_open_req);
+
+uint64_t watch_id = 1;
+sys_loop_watch(loop, /*handle=*/aio, /*events=*/0x1 /* readable */, watch_id);
+
+// Helper notes (pseudocode):
+// - sys_loop_watch(): send a sys/loop WATCH request (op=1) for (aio, readable, watch_id).
+// - read_frame_wait(): read until a full ZCL1 frame is buffered; if zi_read() returns ZI_E_AGAIN,
+//   call sys/loop POLL (op=5) and retry.
+// See abi/FILE_AIO_PROTOCOL.md (“Waiting for completions via sys/loop”) for a concrete helper.
+
+// 2) Submit an OPEN job (payload is the standard 20-byte file open params)
+uint8_t open_pl[20];
+write_u64le(open_pl + 0, (uint64_t)(uintptr_t)"/demo.txt");
+write_u32le(open_pl + 8, 9);  // path_len
+write_u32le(open_pl + 12, ZI_FILE_O_READ | ZI_FILE_O_CREATE);
+write_u32le(open_pl + 16, 0644);
+
+uint8_t fr[24 + 20];
+build_zcl1_req(fr, /*op=*/1 /*OPEN*/, /*rid=*/1, open_pl, 20);
+(void)zi_write(aio, (zi_ptr_t)(uintptr_t)fr, sizeof(fr));
+
+// 3) Read the immediate ACK.
+// For a completion-based queue like file/aio, ACK and EV_DONE are both frames read from the same handle.
+// The correct blocking rule is: if zi_read() returns ZI_E_AGAIN, block in sys/loop.POLL, then retry.
+uint8_t ack[1024];
+int got = read_frame_wait(loop, aio, watch_id, ack, sizeof(ack));
+
+// 4) Read the EV_DONE completion frame.
+uint8_t done[65536];
+got = read_frame_wait(loop, aio, watch_id, done, sizeof(done));
+
+// Backpressure note:
+// - file/aio has a bounded submission queue.
+// - If you receive an immediate ERROR with msg "queue full", stop submitting new jobs,
+//   drain completions/events, and retry after observing progress.
+// See abi/FILE_AIO_PROTOCOL.md for normative framing, parsing recipes, and the backpressure contract.
 ```
 
 Sandboxing is still via env vars (`ZI_FS_ROOT`, `ZI_NET_ALLOW`), but the path is in params.
@@ -183,11 +223,15 @@ zi_handle_t h_err = zi_handle25_alloc(&fd_ops, &s_err, ZI_H_WRITABLE);
 
 All golden caps are production-ready with tests, docs, and sandboxing:
 
-- **file/fs**: Filesystem with `ZI_FS_ROOT` sandbox.
+- **file/aio**: Async filesystem jobs + completions (await via `sys/loop`).
 - **proc/argv, proc/env**: Read-only access to args/env.
 - **proc/hopper**: Safe arena allocator with catalog + optional direct-call ABI.
 - **net/tcp**: TCP client with DNS resolution, gated by `ZI_NET_ALLOW`.
 - **async/default**: Async invocation with futures, cancellation, event streams.
+
+Notes:
+- zingcore 2.5 exposes an async-first filesystem surface via `file/aio@v1`.
+- `sys/loop@v1` is the unified blocking primitive (WATCH + POLL + retry on `ZI_E_AGAIN`).
 
 ### 2. Hopper Direct-Call ABI (`zi_hopabi25`)
 
@@ -301,7 +345,8 @@ zi_async_register(&sel);
 
 ```c
 #include "zingcore25.h"
-#include "zi_file_fs25.h"
+#include "zi_file_aio25.h"
+#include "zi_sys_loop25.h"
 #include "zi_proc_argv25.h"
 #include "zi_runtime25.h"
 #include "zi_sysabi25.h"
@@ -321,7 +366,8 @@ int main(int argc, char **argv) {
   zi_runtime25_set_mem(&mem);
   
   // 3. Register caps
-  zi_file_fs25_register();
+  zi_file_aio25_register();
+  zi_sys_loop25_register();
   zi_proc_argv25_register();
   
   // 4. Wire argv
@@ -330,15 +376,13 @@ int main(int argc, char **argv) {
   // 5. Use the ABI
   printf("zABI version: 0x%08x\n", zi_abi_version());
   
-  // 6. Example: open file/fs
-  uint8_t params[20];
-  // ... build params ...
+  // 6. Example: open file/aio queue
   uint8_t req[40];
-  // ... build open request ...
-  zi_handle_t h = zi_cap_open((zi_ptr_t)(uintptr_t)req);
-  if (h >= 3) {
-    // ... use handle ...
-    zi_end(h);
+  // ... build open request for kind="file", name="aio", params empty ...
+  zi_handle_t aio = zi_cap_open((zi_ptr_t)(uintptr_t)req);
+  if (aio >= 3) {
+    // ... write ZCL1 OPEN/READ/WRITE/CLOSE jobs and await completions via sys/loop ...
+    zi_end(aio);
   }
   
   return 0;
@@ -379,9 +423,10 @@ int main(int argc, char **argv) {
 
 **Error**: `zi_async_register` fails.
 
-**Fix**: Register the cap first, then its selectors:
+**Fix**: If using async/default, register the cap first, then its selectors:
 
 ```c
+// Optional: async/default is not registered by default.
 zi_async_default25_register();  // Register cap
 zi_async_default25_register_selectors();  // Then selectors
 ```

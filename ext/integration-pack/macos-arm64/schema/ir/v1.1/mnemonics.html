@@ -135,7 +135,7 @@
         <td data-label="Operand shape (suggested)">CALL target</td>
         <td data-label="WASM equivalent">call target / host stub</td>
         <td data-label="RV64I equivalent">jal/jalr</td>
-        <td data-label="What it does">Invoke a user function or Lembeh primitive.</td>
+        <td data-label="What it does">Invoke a user function or Zingcore primitive.</td>
         <td data-label="JSONL"><pre>{&quot;ir&quot;:&quot;zasm-v1.0&quot;,&quot;k&quot;:&quot;instr&quot;,&quot;m&quot;:&quot;CALL&quot;,&quot;ops&quot;:[{&quot;t&quot;:&quot;sym&quot;,&quot;v&quot;:&quot;_out&quot;}],&quot;loc&quot;:{&quot;line&quot;:12}}</pre></td>
       </tr>
       <tr>
@@ -297,7 +297,7 @@
         <td data-label="Operand shape (suggested)">FILL (HL dst, A byte, BC len)</td>
         <td data-label="WASM equivalent">memory.fill</td>
         <td data-label="RV64I equivalent">memset loop (pseudo)</td>
-        <td data-label="What it does">Bulk fill memory via Lembeh ABI registers.</td>
+        <td data-label="What it does">Bulk fill memory via zABI registers.</td>
         <td data-label="JSONL"><pre>{&quot;ir&quot;:&quot;zasm-v1.0&quot;,&quot;k&quot;:&quot;instr&quot;,&quot;m&quot;:&quot;FILL&quot;,&quot;ops&quot;:[],&quot;loc&quot;:{&quot;line&quot;:51}}</pre></td>
       </tr>
       <tr>
@@ -513,7 +513,7 @@
         <td data-label="Operand shape (suggested)">LDIR (DE dst, HL src, BC len)</td>
         <td data-label="WASM equivalent">memory.copy</td>
         <td data-label="RV64I equivalent">memcpy loop (pseudo)</td>
-        <td data-label="What it does">Bulk copy memory via Lembeh ABI registers.</td>
+        <td data-label="What it does">Bulk copy memory via zABI registers.</td>
         <td data-label="JSONL"><pre>{&quot;ir&quot;:&quot;zasm-v1.0&quot;,&quot;k&quot;:&quot;instr&quot;,&quot;m&quot;:&quot;LDIR&quot;,&quot;ops&quot;:[],&quot;loc&quot;:{&quot;line&quot;:56}}</pre></td>
       </tr>
       <tr>

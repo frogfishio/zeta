@@ -52,6 +52,20 @@ enum {
   ZI_CTL_OP_CAPS_LIST     = 1,
   ZI_CTL_OP_CAPS_DESCRIBE = 2,
   ZI_CTL_OP_CAPS_OPEN     = 3,
+  // Generic per-handle control operations (ZCL1 payload-defined).
+  ZI_CTL_OP_HANDLE_OP     = 4,
+};
+
+// ZI_CTL_OP_HANDLE_OP payload (little-endian):
+//   u32 version (currently 1)
+//   u32 handle
+//   u32 op
+//   u32 reserved (0)
+//
+// Handle ops (v1):
+//   1 = shutdown write (half-close)
+enum {
+  ZI_HANDLE_OP_SHUT_WR = 1,
 };
 
 enum {
