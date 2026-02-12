@@ -1,0 +1,184 @@
+@mod vector
+
+@include "../include/zabi_externs.sir"
+
+;; A tiny, sem-subset-friendly growable vector.
+;;
+;; Representation: an owned header with an owned data buffer.
+;; Header layout (24 bytes):
+;;  0: i32 len
+;;  4: i32 cap
+;;  8: i32 elem_size
+;; 12: i32 reserved
+;; 16: i64 data_ptr
+
+fn vector_store_ptr(dst:ptr, v:ptr) -> i32
+  store.i64(dst, ptr.to_i64(v)) +align=1
+  return 0:i32
+end
+
+fn vector_load_ptr(src:ptr) -> ptr
+  let v: i64 = load.i64(src) +align=1
+  return ptr.from_i64(v)
+end
+
+fn vector_hdr_size() -> i32
+  return 24:i32
+end
+
+fn vector_len(v:ptr) -> i32
+  return load.i32(ptr.offset(i8, v, 0:i64))
+end
+
+fn vector_cap(v:ptr) -> i32
+  return load.i32(ptr.offset(i8, v, 4:i64))
+end
+
+fn vector_elem_size(v:ptr) -> i32
+  return load.i32(ptr.offset(i8, v, 8:i64))
+end
+
+fn vector_data(v:ptr) -> ptr
+  return ptr.from_i64(load.i64(ptr.offset(i8, v, 16:i64)) +align=1)
+end
+
+fn vector_set_len(v:ptr, len:i32) -> i32
+  store.i32(ptr.offset(i8, v, 0:i64), len)
+  return 0:i32
+end
+
+fn vector_set_cap(v:ptr, cap:i32) -> i32
+  store.i32(ptr.offset(i8, v, 4:i64), cap)
+  return 0:i32
+end
+
+fn vector_set_data(v:ptr, data:ptr) -> i32
+  store.i64(ptr.offset(i8, v, 16:i64), ptr.to_i64(data)) +align=1
+  return 0:i32
+end
+
+fn vector_new(elem_size:i32, initial_cap:i32) -> ptr
+  ;; Returns a pointer to the vector header.
+  let cap0: i32 = select(i32, i32.cmp.sgt(initial_cap, 0:i32), initial_cap, 1:i32)
+  let hdr: ptr = zi_alloc(vector_hdr_size())
+  let data: ptr = zi_alloc(i32.mul(cap0, elem_size))
+  mem.fill(data, 0:i8, i32.mul(cap0, elem_size)) +align=1
+
+  store.i32(ptr.offset(i8, hdr, 0:i64), 0:i32)
+  store.i32(ptr.offset(i8, hdr, 4:i64), cap0)
+  store.i32(ptr.offset(i8, hdr, 8:i64), elem_size)
+  store.i32(ptr.offset(i8, hdr, 12:i64), 0:i32)
+  let _: i32 = vector_set_data(hdr, data)
+  return hdr
+end
+
+fn vector_free(v:ptr) -> i32
+  let data: ptr = vector_data(v)
+  let _: i32 = zi_free(data)
+  let _: i32 = zi_free(v)
+  return 0:i32
+end
+
+fn vector_get_ptr(v:ptr, idx:i32) -> ptr
+  let data: ptr = vector_data(v)
+  let esz: i32 = vector_elem_size(v)
+  let off: i32 = i32.mul(idx, esz)
+  return ptr.offset(i8, data, off)
+end
+
+fn vector_reserve(v:ptr, min_cap:i32) -> i32
+  block entry
+    let cap: i32 = vector_cap(v)
+    let ok: bool = i32.cmp.sge(cap, min_cap)
+    term.cbr cond:ok,
+      then:done,
+      else:grow args:[cap]
+  end
+
+  block grow(cap:i32)
+    let cap2: i32 = select(i32, i32.cmp.sgt(cap, 0:i32), cap, 1:i32)
+    term.br to loop args:[cap2]
+  end
+
+  block loop(new_cap:i32)
+    let ok: bool = i32.cmp.sge(new_cap, min_cap)
+    term.cbr cond:ok,
+      then:rehash args:[new_cap],
+      else:cont args:[new_cap]
+  end
+
+  block cont(new_cap:i32)
+    term.br to loop args:[i32.mul(new_cap, 2:i32)]
+  end
+
+  block rehash(new_cap:i32)
+    let esz: i32 = vector_elem_size(v)
+    let old_data: ptr = vector_data(v)
+    let old_len: i32 = vector_len(v)
+    let new_data: ptr = zi_alloc(i32.mul(new_cap, esz))
+
+    ;; zero-init then copy live bytes
+    mem.fill(new_data, 0:i8, i32.mul(new_cap, esz)) +align=1
+    mem.copy(new_data, old_data, i32.mul(old_len, esz)) +alignDst=1 +alignSrc=1 +overlap=disallow
+
+    let _: i32 = zi_free(old_data)
+    let _: i32 = vector_set_data(v, new_data)
+    let _: i32 = vector_set_cap(v, new_cap)
+    term.ret value:0:i32
+  end
+
+  block done
+    term.ret value:0:i32
+  end
+end
+
+fn vector_push_copy(v:ptr, elem_ptr:ptr) -> i32
+  block entry
+    let len: i32 = vector_len(v)
+    let cap: i32 = vector_cap(v)
+    let need: bool = i32.cmp.eq(len, cap)
+    term.cbr cond:need,
+      then:grow args:[len, cap],
+      else:write args:[len]
+  end
+
+  block grow(len:i32, cap:i32)
+    let cap2: i32 = select(i32, i32.cmp.sgt(cap, 0:i32), cap, 1:i32)
+    let _: i32 = vector_reserve(v, i32.mul(cap2, 2:i32))
+    term.br to write args:[len]
+  end
+
+  block write(len:i32)
+    let dst: ptr = vector_get_ptr(v, len)
+    let esz: i32 = vector_elem_size(v)
+    mem.copy(dst, elem_ptr, esz) +alignDst=1 +alignSrc=1 +overlap=disallow
+    let _: i32 = vector_set_len(v, i32.add(len, 1:i32))
+    term.ret value:0:i32
+  end
+end
+
+fn vector_push_zeroed(v:ptr, out_elem_ptr:ptr) -> i32
+  block entry
+    let len: i32 = vector_len(v)
+    let cap: i32 = vector_cap(v)
+    let need: bool = i32.cmp.eq(len, cap)
+    term.cbr cond:need,
+      then:grow args:[len, cap],
+      else:write args:[len]
+  end
+
+  block grow(len:i32, cap:i32)
+    let cap2: i32 = select(i32, i32.cmp.sgt(cap, 0:i32), cap, 1:i32)
+    let _: i32 = vector_reserve(v, i32.mul(cap2, 2:i32))
+    term.br to write args:[len]
+  end
+
+  block write(len:i32)
+    let dst: ptr = vector_get_ptr(v, len)
+    let esz: i32 = vector_elem_size(v)
+    mem.fill(dst, 0:i8, esz) +align=1
+    let _: i32 = vector_set_len(v, i32.add(len, 1:i32))
+    let _: i32 = vector_store_ptr(out_elem_ptr, dst)
+    term.ret value:0:i32
+  end
+end
