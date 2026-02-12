@@ -6,6 +6,9 @@
 #include <string.h>
 #include <time.h>
 
+#include <poll.h>
+#include <unistd.h>
+
 #ifdef SIR_HAVE_ZINGCORE25
 #include "zingcore25.h"
 #include "zi_file_aio25.h"
@@ -135,6 +138,12 @@ typedef struct sir_stdio_stream {
   FILE* f;
 } sir_stdio_stream_t;
 
+static int stdio_poll_fd(void* ctx) {
+  sir_stdio_stream_t* s = (sir_stdio_stream_t*)ctx;
+  if (!s || !s->f) return -1;
+  return fileno(s->f);
+}
+
 static int32_t stdio_read(void* ctx, sem_guest_mem_t* mem, zi_ptr_t dst_ptr, zi_size32_t cap) {
   sir_stdio_stream_t* s = (sir_stdio_stream_t*)ctx;
   if (!s || !s->f) return ZI_E_INTERNAL;
@@ -173,9 +182,18 @@ static const sem_handle_ops_t stdio_ops = {
     .read = stdio_read,
     .write = stdio_write,
     .end = stdio_end,
+    .poll_fd = stdio_poll_fd,
+    .poll_ready = NULL,
 };
 
 #ifndef SIR_HAVE_ZINGCORE25
+
+enum {
+  SIR_SYS_LOOP_E_READABLE = 0x1u,
+  SIR_SYS_LOOP_E_WRITABLE = 0x2u,
+  SIR_SYS_LOOP_E_HUP = 0x4u,
+  SIR_SYS_LOOP_E_ERROR = 0x8u,
+};
 static uint64_t mono_ns_now(void) {
 #if defined(CLOCK_MONOTONIC)
   struct timespec ts;
@@ -199,6 +217,13 @@ typedef struct sir_blob_stream {
   uint32_t len;
   uint32_t off;
 } sir_blob_stream_t;
+
+static uint32_t blob_poll_ready(void* ctx, uint32_t want_events) {
+  sir_blob_stream_t* s = (sir_blob_stream_t*)ctx;
+  if (!s) return 0;
+  if ((want_events & SIR_SYS_LOOP_E_READABLE) && s->off < s->len) return SIR_SYS_LOOP_E_READABLE;
+  return 0;
+}
 
 static int32_t blob_read(void* ctx, sem_guest_mem_t* mem, zi_ptr_t dst_ptr, zi_size32_t cap) {
   sir_blob_stream_t* s = (sir_blob_stream_t*)ctx;
@@ -229,6 +254,8 @@ static const sem_handle_ops_t blob_ops = {
     .read = blob_read,
     .write = NULL,
     .end = blob_end,
+  .poll_fd = NULL,
+  .poll_ready = blob_poll_ready,
 };
 
 typedef struct sir_stub_stream {
@@ -261,9 +288,13 @@ static const sem_handle_ops_t stub_ops = {
     .read = stub_read,
     .write = stub_write,
     .end = stub_end,
+  .poll_fd = NULL,
+  .poll_ready = NULL,
 };
 
 typedef struct sir_zcl1_stream {
+  sem_handles_t* handles;
+
   uint8_t* out;
   uint32_t out_len;
   uint32_t out_off;
@@ -275,7 +306,74 @@ typedef struct sir_zcl1_stream {
     uint64_t due_ns;
     uint64_t interval_ns;
   } timers[64];
+
+  // sys/loop watches (very small/simple implementation)
+  struct {
+    bool used;
+    zi_handle_t handle;
+    uint32_t events;
+    uint64_t watch_id;
+    uint32_t flags;
+  } watches[64];
 } sir_zcl1_stream_t;
+
+static bool watch_find(const sir_zcl1_stream_t* s, uint64_t watch_id, uint32_t* out_i) {
+  if (!s || watch_id == 0) return false;
+  for (uint32_t i = 0; i < (uint32_t)(sizeof(s->watches) / sizeof(s->watches[0])); i++) {
+    if (!s->watches[i].used) continue;
+    if (s->watches[i].watch_id != watch_id) continue;
+    if (out_i) *out_i = i;
+    return true;
+  }
+  return false;
+}
+
+static bool watch_upsert(sir_zcl1_stream_t* s, zi_handle_t handle, uint32_t events, uint64_t watch_id, uint32_t flags) {
+  if (!s || watch_id == 0) return false;
+  uint32_t i = 0;
+  if (watch_find(s, watch_id, &i)) {
+    s->watches[i].handle = handle;
+    s->watches[i].events = events;
+    s->watches[i].flags = flags;
+    return true;
+  }
+  for (i = 0; i < (uint32_t)(sizeof(s->watches) / sizeof(s->watches[0])); i++) {
+    if (s->watches[i].used) continue;
+    s->watches[i].used = true;
+    s->watches[i].handle = handle;
+    s->watches[i].events = events;
+    s->watches[i].watch_id = watch_id;
+    s->watches[i].flags = flags;
+    return true;
+  }
+  return false;
+}
+
+static bool watch_remove(sir_zcl1_stream_t* s, uint64_t watch_id) {
+  uint32_t i = 0;
+  if (!watch_find(s, watch_id, &i)) return false;
+  memset(&s->watches[i], 0, sizeof(s->watches[i]));
+  return true;
+}
+
+static bool handle_poll_support(const sir_zcl1_stream_t* s, zi_handle_t h, sem_handle_entry_t* out_e) {
+  if (!s || !s->handles) return false;
+  sem_handle_entry_t e;
+  if (!sem_handle_lookup(s->handles, h, &e)) return false;
+  if (!e.ops) return false;
+  if (out_e) *out_e = e;
+  return (e.ops->poll_fd != NULL) || (e.ops->poll_ready != NULL);
+}
+
+static uint32_t poll_revents_to_watch_bits(short revents) {
+  uint32_t ev = 0;
+  if (revents & POLLIN) ev |= SIR_SYS_LOOP_E_READABLE;
+  if (revents & POLLOUT) ev |= SIR_SYS_LOOP_E_WRITABLE;
+  if (revents & POLLHUP) ev |= SIR_SYS_LOOP_E_HUP;
+  if (revents & POLLERR) ev |= SIR_SYS_LOOP_E_ERROR;
+  if (revents & POLLNVAL) ev |= SIR_SYS_LOOP_E_ERROR;
+  return ev;
+}
 
 static bool stream_enqueue(sir_zcl1_stream_t* s, const uint8_t* bytes, uint32_t n) {
   if (!s) return false;
@@ -417,10 +515,40 @@ static int32_t sys_loop_write(void* ctx, sem_guest_mem_t* mem, zi_ptr_t src_ptr,
 
   switch (h.op) {
     case 1: { // WATCH
-      (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.nosys", "WATCH not implemented", &frame_len);
+      // Payload: u32 handle, u32 events, u64 watch_id, u32 watch_flags
+      if (h.payload_len != 20) {
+        (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.invalid", "WATCH bad payload", &frame_len);
+        break;
+      }
+      const zi_handle_t watched_h = (zi_handle_t)zcl1_read_u32le(payload + 0);
+      const uint32_t events = zcl1_read_u32le(payload + 4);
+      const uint64_t watch_id = r_u64le(payload + 8);
+      const uint32_t watch_flags = zcl1_read_u32le(payload + 16);
+      if (watch_id == 0) {
+        (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.invalid", "watch_id must be nonzero", &frame_len);
+        break;
+      }
+      if (!handle_poll_support(s, watched_h, NULL)) {
+        (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.invalid", "handle not pollable", &frame_len);
+        break;
+      }
+      if (!watch_upsert(s, watched_h, events, watch_id, watch_flags)) {
+        (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.internal", "too many watches", &frame_len);
+        break;
+      }
+      (void)zcl1_write(frame, (uint32_t)sizeof(frame), h.op, h.rid, 1, NULL, 0, &frame_len);
     } break;
     case 2: { // UNWATCH
-      (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.nosys", "UNWATCH not implemented", &frame_len);
+      if (h.payload_len != 8) {
+        (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.invalid", "UNWATCH bad payload", &frame_len);
+        break;
+      }
+      const uint64_t watch_id = r_u64le(payload + 0);
+      if (!watch_remove(s, watch_id)) {
+        (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.noent", "watch_id not found", &frame_len);
+        break;
+      }
+      (void)zcl1_write(frame, (uint32_t)sizeof(frame), h.op, h.rid, 1, NULL, 0, &frame_len);
     } break;
     case 3: { // TIMER_ARM
       if (h.payload_len != 28) {
@@ -468,7 +596,7 @@ static int32_t sys_loop_write(void* ctx, sem_guest_mem_t* mem, zi_ptr_t src_ptr,
         break;
       }
 
-      // Wait (blocking inside sys/loop) until a timer fires or timeout.
+      // Wait (blocking inside sys/loop) until a watch becomes ready, a timer fires, or timeout.
       const uint64_t start = mono_ns_now();
       uint64_t deadline = 0;
       if (timeout_ms != 0xFFFFFFFFu) deadline = start + (uint64_t)timeout_ms * 1000000ull;
@@ -489,6 +617,75 @@ static int32_t sys_loop_write(void* ctx, sem_guest_mem_t* mem, zi_ptr_t src_ptr,
         off += 4;
 
         uint32_t event_count = 0;
+
+        // --- READY events from watches ---
+        // Build pollfd list for fd-backed watches.
+        struct {
+          struct pollfd pfd;
+          uint64_t watch_id;
+          zi_handle_t handle;
+          uint32_t want;
+        } pfds[64];
+        nfds_t nfds = 0;
+
+        for (uint32_t i = 0; i < (uint32_t)(sizeof(s->watches) / sizeof(s->watches[0])); i++) {
+          if (!s->watches[i].used) continue;
+          if (event_count >= max_events) break;
+          sem_handle_entry_t e;
+          if (!handle_poll_support(s, s->watches[i].handle, &e)) continue;
+
+          uint32_t ready_bits = 0;
+          if (e.ops->poll_ready) {
+            ready_bits = e.ops->poll_ready(e.ctx, s->watches[i].events);
+          }
+          ready_bits &= s->watches[i].events;
+          if (ready_bits) {
+            if (off + 32 <= (uint32_t)sizeof(payload_out)) {
+              zcl1_write_u32le(payload_out + off + 0, 1);                 // kind=READY
+              zcl1_write_u32le(payload_out + off + 4, ready_bits);         // events
+              zcl1_write_u32le(payload_out + off + 8, (uint32_t)s->watches[i].handle);
+              zcl1_write_u32le(payload_out + off + 12, 0);
+              w_u64le(payload_out + off + 16, s->watches[i].watch_id);
+              w_u64le(payload_out + off + 24, now);
+              off += 32;
+              event_count++;
+            }
+            continue;
+          }
+
+          if (e.ops->poll_fd && nfds < (nfds_t)(sizeof(pfds) / sizeof(pfds[0]))) {
+            const int fd = e.ops->poll_fd(e.ctx);
+            if (fd >= 0) {
+              short pe = 0;
+              if (s->watches[i].events & SIR_SYS_LOOP_E_READABLE) pe |= POLLIN;
+              if (s->watches[i].events & SIR_SYS_LOOP_E_WRITABLE) pe |= POLLOUT;
+              pfds[nfds].pfd.fd = fd;
+              pfds[nfds].pfd.events = pe;
+              pfds[nfds].pfd.revents = 0;
+              pfds[nfds].watch_id = s->watches[i].watch_id;
+              pfds[nfds].handle = s->watches[i].handle;
+              pfds[nfds].want = s->watches[i].events;
+              nfds++;
+            }
+          }
+        }
+
+        if (nfds) {
+          (void)poll(&pfds[0].pfd, nfds, 0);
+          for (nfds_t i = 0; i < nfds && event_count < max_events; i++) {
+            const uint32_t got = poll_revents_to_watch_bits(pfds[i].pfd.revents) & pfds[i].want;
+            if (!got) continue;
+            if (off + 32 > (uint32_t)sizeof(payload_out)) break;
+            zcl1_write_u32le(payload_out + off + 0, 1);  // kind=READY
+            zcl1_write_u32le(payload_out + off + 4, got);
+            zcl1_write_u32le(payload_out + off + 8, (uint32_t)pfds[i].handle);
+            zcl1_write_u32le(payload_out + off + 12, 0);
+            w_u64le(payload_out + off + 16, pfds[i].watch_id);
+            w_u64le(payload_out + off + 24, now);
+            off += 32;
+            event_count++;
+          }
+        }
         for (uint32_t i = 0; i < (uint32_t)(sizeof(s->timers) / sizeof(s->timers[0])); i++) {
           if (!s->timers[i].used) continue;
           if (s->timers[i].due_ns > now) continue;
@@ -528,17 +725,30 @@ static int32_t sys_loop_write(void* ctx, sem_guest_mem_t* mem, zi_ptr_t src_ptr,
           break;
         }
 
-        uint64_t next_due = 0;
-        if (timer_next_due(s, &next_due) && next_due > now) {
-          uint64_t wait_ns = next_due - now;
-          if (timeout_ms != 0xFFFFFFFFu) {
-            const uint64_t remain_ns = (deadline > now) ? (deadline - now) : 0;
-            if (wait_ns > remain_ns) wait_ns = remain_ns;
-          }
-          sleep_ns(wait_ns);
+        // Block until either: a watched fd becomes ready, next timer due, or deadline.
+        int wait_ms = 1;
+        if (timeout_ms == 0xFFFFFFFFu) {
+          wait_ms = -1;
         } else {
-          // No timers; don't spin too hard.
-          sleep_ns(1000000ull);
+          const uint64_t remain_ns = (deadline > now) ? (deadline - now) : 0;
+          uint64_t wait_ns = remain_ns;
+          uint64_t next_due = 0;
+          if (timer_next_due(s, &next_due) && next_due > now) {
+            const uint64_t until_timer = next_due - now;
+            if (until_timer < wait_ns) wait_ns = until_timer;
+          }
+          wait_ms = (int)(wait_ns / 1000000ull);
+          if (wait_ms < 1) wait_ms = 1;
+        }
+
+        if (nfds) {
+          (void)poll(&pfds[0].pfd, nfds, wait_ms);
+        } else {
+          if (wait_ms < 0) {
+            sleep_ns(1000000ull);
+          } else {
+            sleep_ns((uint64_t)wait_ms * 1000000ull);
+          }
         }
       }
     } break;
@@ -804,6 +1014,7 @@ zi_handle_t sir_zi_cap_open(sir_hosted_zabi_t* rt, zi_ptr_t req_ptr) {
     if (params_len != 0) return (zi_handle_t)ZI_E_INVALID;
     sir_zcl1_stream_t* s = (sir_zcl1_stream_t*)calloc(1, sizeof(*s));
     if (!s) return (zi_handle_t)ZI_E_OOM;
+    s->handles = &rt->handles;
     const zi_handle_t h = sem_handle_alloc(&rt->handles,
                                            (sem_handle_entry_t){.ops = &sys_loop_ops, .ctx = s, .hflags = ZI_H_READABLE | ZI_H_WRITABLE | ZI_H_ENDABLE});
     if (h < 3) {
@@ -817,6 +1028,7 @@ zi_handle_t sir_zi_cap_open(sir_hosted_zabi_t* rt, zi_ptr_t req_ptr) {
     if (params_len != 0) return (zi_handle_t)ZI_E_INVALID;
     sir_zcl1_stream_t* s = (sir_zcl1_stream_t*)calloc(1, sizeof(*s));
     if (!s) return (zi_handle_t)ZI_E_OOM;
+    s->handles = &rt->handles;
     const zi_handle_t h = sem_handle_alloc(&rt->handles,
                                            (sem_handle_entry_t){.ops = &file_aio_ops, .ctx = s, .hflags = ZI_H_READABLE | ZI_H_WRITABLE | ZI_H_ENDABLE});
     if (h < 3) {

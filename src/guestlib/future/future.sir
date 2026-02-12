@@ -1,0 +1,288 @@
+@mod future
+
+@include "../include/zabi_externs.sir"
+@include "../loop/loop.sir"
+
+;; Minimal futures + single-threaded executor for guest-side SIR.
+;;
+;; Poll convention:
+;; - return 0 => pending
+;; - return 1 => ready (value written to out_ptr)
+;; - return <0 => error
+
+fn future_poll_pending() -> i32
+  return 0:i32
+end
+
+fn future_poll_ready() -> i32
+  return 1:i32
+end
+
+fn future_e_open_loop() -> i32
+  return -10:i32
+end
+
+fn future_e_deadlock() -> i32
+  ;; Future returned pending without registering any interests.
+  return -11:i32
+end
+
+fn future_e_poll_failed() -> i32
+  return -12:i32
+end
+
+fn future_e_timer_arm_failed() -> i32
+  return -13:i32
+end
+
+fn future_e_unexpected() -> i32
+  return -16:i32
+end
+
+;; --- waker / executor context ---
+;; Layout (24 bytes):
+;;   +0  i32 loop_h
+;;   +4  i32 next_rid
+;;   +8  i32 last_poll_rid
+;;   +12 i32 last_poll_len
+;;   +16 i32 interest_count
+;;   +20 i32 next_timer_id
+
+fn future_waker_size() -> i32
+  return 24:i32
+end
+
+fn future_waker_loop_h(w:ptr) -> i32
+  return load.i32(ptr.offset(i8, w, 0:i64))
+end
+
+fn future_waker_alloc_rid(w:ptr) -> i32
+  let rid: i32 = load.i32(ptr.offset(i8, w, 4:i64))
+  store.i32(ptr.offset(i8, w, 4:i64), i32.add(rid, 1:i32))
+  return rid
+end
+
+fn future_waker_set_last_poll(w:ptr, rid:i32, poll_len:i32) -> i32
+  store.i32(ptr.offset(i8, w, 8:i64), rid)
+  store.i32(ptr.offset(i8, w, 12:i64), poll_len)
+  return 0:i32
+end
+
+fn future_waker_last_poll_rid(w:ptr) -> i32
+  return load.i32(ptr.offset(i8, w, 8:i64))
+end
+
+fn future_waker_last_poll_len(w:ptr) -> i32
+  return load.i32(ptr.offset(i8, w, 12:i64))
+end
+
+fn future_waker_interest_count(w:ptr) -> i32
+  return load.i32(ptr.offset(i8, w, 16:i64))
+end
+
+fn future_waker_interest_inc(w:ptr) -> i32
+  let c: i32 = load.i32(ptr.offset(i8, w, 16:i64))
+  let c2: i32 = i32.add(c, 1:i32)
+  store.i32(ptr.offset(i8, w, 16:i64), c2)
+  return c2
+end
+
+fn future_waker_alloc_timer_id(w:ptr) -> i32
+  let id: i32 = load.i32(ptr.offset(i8, w, 20:i64))
+  store.i32(ptr.offset(i8, w, 20:i64), i32.add(id, 1:i32))
+  return id
+end
+
+fn future_waker_init(w:ptr, loop_h:i32) -> i32
+  store.i32(ptr.offset(i8, w, 0:i64), loop_h)
+  store.i32(ptr.offset(i8, w, 4:i64), 1:i32)
+  store.i32(ptr.offset(i8, w, 8:i64), 0:i32)
+  store.i32(ptr.offset(i8, w, 12:i64), 0:i32)
+  store.i32(ptr.offset(i8, w, 16:i64), 0:i32)
+  store.i32(ptr.offset(i8, w, 20:i64), 1:i32)
+  return 0:i32
+end
+
+fn future_waker_timer_arm_relative(w:ptr, timer_id:i32, ms:i32, resp:ptr, resp_cap:i32) -> i32
+  let h: i32 = future_waker_loop_h(w)
+  let rid: i32 = future_waker_alloc_rid(w)
+  let due_ns: i32 = i32.mul(ms, 1000000:i32)
+  let n: i32 = loop_timer_arm(h, rid, timer_id, due_ns, 0:i32, 1:i32, resp, resp_cap)
+  let ok: bool = loop_resp_ok(resp, n, loop_op_timer_arm(), rid)
+  let _: i32 = future_waker_interest_inc(w)
+  return select(i32, ok, 0:i32, future_e_timer_arm_failed())
+end
+
+;; --- futures ---
+
+fn future_kind_sleep() -> i32
+  return 1:i32
+end
+
+;; future_i32 layout (16 bytes):
+;;   +0  i32 kind
+;;   +4  i32 a
+;;   +8  i32 b
+;;   +12 i32 c
+;;
+;; For kind=sleep:
+;;   a = ms
+;;   b = timer_id
+;;   c = armed (0/1)
+
+fn future_sleep_ms(ms:i32) -> ptr
+  let fut: ptr = zi_alloc(16:i32)
+  store.i32(ptr.offset(i8, fut, 0:i64), future_kind_sleep())
+  store.i32(ptr.offset(i8, fut, 4:i64), ms)
+  store.i32(ptr.offset(i8, fut, 8:i64), 0:i32)
+  store.i32(ptr.offset(i8, fut, 12:i64), 0:i32)
+  return fut
+end
+
+fn future_free(fut:ptr) -> i32
+  return zi_free(fut)
+end
+
+fn future_poll_sleep(fut:ptr, waker:ptr, poll_buf:ptr, ctl_buf:ptr, ctl_cap:i32, out_ptr:ptr) -> i32
+  block entry
+    let armed: i32 = load.i32(ptr.offset(i8, fut, 12:i64))
+    let is_armed: bool = i32.cmp.ne(armed, 0:i32)
+    term.cbr cond:is_armed,
+      then:check,
+      else:arm
+  end
+
+  block arm
+    let ms: i32 = load.i32(ptr.offset(i8, fut, 4:i64))
+    let tid: i32 = future_waker_alloc_timer_id(waker)
+    store.i32(ptr.offset(i8, fut, 8:i64), tid)
+    let rc: i32 = future_waker_timer_arm_relative(waker, tid, ms, ctl_buf, ctl_cap)
+    let ok: bool = i32.cmp.eq(rc, 0:i32)
+    term.cbr cond:ok,
+      then:mark,
+      else:fail args:[rc]
+  end
+
+  block mark
+    store.i32(ptr.offset(i8, fut, 12:i64), 1:i32)
+    term.br to check
+  end
+
+  block check
+    let last_len: i32 = future_waker_last_poll_len(waker)
+    let have: bool = i32.cmp.sgt(last_len, 0:i32)
+    term.cbr cond:have,
+      then:scan,
+      else:pending
+  end
+
+  block scan
+    let poll_len: i32 = future_waker_last_poll_len(waker)
+    let poll_rid: i32 = future_waker_last_poll_rid(waker)
+    let tid: i32 = load.i32(ptr.offset(i8, fut, 8:i64))
+    let fired: bool = loop_poll_has_timer(poll_buf, poll_len, poll_rid, tid)
+    term.cbr cond:fired,
+      then:ready,
+      else:pending
+  end
+
+  block ready
+    store.i32(out_ptr, 0:i32)
+    term.ret value:future_poll_ready()
+  end
+
+  block pending
+    term.ret value:future_poll_pending()
+  end
+
+  block fail(rc:i32)
+    term.ret value:rc
+  end
+end
+
+fn future_poll_i32(fut:ptr, waker:ptr, poll_buf:ptr, ctl_buf:ptr, ctl_cap:i32, out_ptr:ptr) -> i32
+  let kind: i32 = load.i32(ptr.offset(i8, fut, 0:i64))
+  let is_sleep: bool = i32.cmp.eq(kind, future_kind_sleep())
+  return select(i32, is_sleep, future_poll_sleep(fut, waker, poll_buf, ctl_buf, ctl_cap, out_ptr), future_e_unexpected())
+end
+
+;; --- executor ---
+
+fn future_block_on_i32(fut:ptr, out_ptr:ptr) -> i32
+  block entry
+    let loop_h: i32 = loop_open()
+    let ok_open: bool = i32.cmp.sge(loop_h, 3:i32)
+    term.cbr cond:ok_open,
+      then:alloc args:[loop_h],
+      else:fail_open
+  end
+
+  block fail_open
+    term.ret value:future_e_open_loop()
+  end
+
+  block alloc(loop_h:i32)
+    let poll_buf: ptr = zi_alloc(4096:i32)
+    let ctl_buf: ptr = zi_alloc(1024:i32)
+    let w: ptr = zi_alloc(future_waker_size())
+    let _: i32 = future_waker_init(w, loop_h)
+    term.br to loop args:[w, poll_buf, ctl_buf]
+  end
+
+  block loop(w:ptr, poll_buf:ptr, ctl_buf:ptr)
+    let r: i32 = future_poll_i32(fut, w, poll_buf, ctl_buf, 1024:i32, out_ptr)
+    let is_ready: bool = i32.cmp.eq(r, future_poll_ready())
+    let is_pending: bool = i32.cmp.eq(r, future_poll_pending())
+    term.cbr cond:is_ready,
+      then:done_ok args:[w, poll_buf, ctl_buf],
+      else:pending_or_err args:[w, poll_buf, ctl_buf, r, is_pending]
+  end
+
+  block pending_or_err(w:ptr, poll_buf:ptr, ctl_buf:ptr, r:i32, is_pending:bool)
+    term.cbr cond:is_pending,
+      then:wait args:[w, poll_buf, ctl_buf],
+      else:done_err args:[w, poll_buf, ctl_buf, r]
+  end
+
+  block wait(w:ptr, poll_buf:ptr, ctl_buf:ptr)
+    let interests: i32 = future_waker_interest_count(w)
+    let have: bool = i32.cmp.sgt(interests, 0:i32)
+    term.cbr cond:have,
+      then:do_poll args:[w, poll_buf, ctl_buf],
+      else:done_err args:[w, poll_buf, ctl_buf, future_e_deadlock()]
+  end
+
+  block do_poll(w:ptr, poll_buf:ptr, ctl_buf:ptr)
+    let loop_h: i32 = future_waker_loop_h(w)
+    let rid: i32 = future_waker_alloc_rid(w)
+    ;; Use -1 to encode sys/loop infinite timeout (u32 0xFFFFFFFF).
+    let n: i32 = loop_poll(loop_h, rid, 32:i32, -1:i32, poll_buf, 4096:i32)
+    let ok: bool = loop_resp_ok(poll_buf, n, loop_op_poll(), rid)
+    term.cbr cond:ok,
+      then:set_and_loop args:[w, poll_buf, ctl_buf, rid, n],
+      else:done_err args:[w, poll_buf, ctl_buf, future_e_poll_failed()]
+  end
+
+  block set_and_loop(w:ptr, poll_buf:ptr, ctl_buf:ptr, rid:i32, n:i32)
+    let _: i32 = future_waker_set_last_poll(w, rid, n)
+    term.br to loop args:[w, poll_buf, ctl_buf]
+  end
+
+  block done_ok(w:ptr, poll_buf:ptr, ctl_buf:ptr)
+    let loop_h: i32 = future_waker_loop_h(w)
+    let _: i32 = zi_end(loop_h)
+    let _: i32 = zi_free(poll_buf)
+    let _: i32 = zi_free(ctl_buf)
+    let _: i32 = zi_free(w)
+    term.ret value:0:i32
+  end
+
+  block done_err(w:ptr, poll_buf:ptr, ctl_buf:ptr, err:i32)
+    let loop_h: i32 = future_waker_loop_h(w)
+    let _: i32 = zi_end(loop_h)
+    let _: i32 = zi_free(poll_buf)
+    let _: i32 = zi_free(ctl_buf)
+    let _: i32 = zi_free(w)
+    term.ret value:err
+  end
+end

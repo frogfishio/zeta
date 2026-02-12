@@ -5,14 +5,12 @@ unit loop_wait_writable_demo target host
 
 ;; Demo: attempt to WATCH+POLL for writability.
 ;;
-;; Hosted `sem` does not implement WATCH/UNWATCH and should return NOSYS.
-;; zingcore may return WATCH_FAILED for non-watchable handles.
-;;
-;; We accept either of those outcomes to prove the helper fails fast and does not hang.
+;; Stdout (handle 1) may be watchable+immediately writable, or it may be non-watchable.
+;; Either way, the helper should return quickly (READY or WATCH_FAILED).
 fn main() -> i32 public
   block entry
     let rc: i32 = loop_wait_writable(1:i32, 0:i32)
-    let ok: bool = bool.or(i32.cmp.eq(rc, loop_wait_rc_nosys()), i32.cmp.eq(rc, loop_wait_rc_watch_failed()))
+    let ok: bool = bool.or(i32.cmp.eq(rc, loop_wait_rc_ready()), i32.cmp.eq(rc, loop_wait_rc_watch_failed()))
     term.cbr cond:ok,
       then:pass,
       else:fail

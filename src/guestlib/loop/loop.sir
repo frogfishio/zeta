@@ -252,59 +252,6 @@ fn loop_resp_hdr_matches(resp_ptr:ptr, resp_len:i32, op:i32, rid:i32) -> bool
   return bool.and(ok_hdr, bool.and(ok_op, bool.and(ok_rid, ok_len)))
 end
 
-fn loop_resp_err_trace_is(resp_ptr:ptr, resp_len:i32, op:i32, rid:i32, want_trace:ptr, want_trace_len:i32) -> bool
-  ;; ZCL1 error payload layout:
-  ;;   u32 trace_len; trace_bytes...
-  ;;   u32 msg_len;   msg_bytes...
-  ;;   u32 detail_len; detail_bytes...
-  ;; We only need the first field for sem's hosted nosys detection.
-  block entry
-    let hdr_ok: bool = loop_resp_hdr_matches(resp_ptr, resp_len, op, rid)
-    term.cbr cond:hdr_ok,
-      then:check_status,
-      else:exit_false
-  end
-
-  block check_status
-    let is_err: bool = i32.cmp.eq(zcl1_read_status(resp_ptr), 0:i32)
-    term.cbr cond:is_err,
-      then:parse_pl,
-      else:exit_false
-  end
-
-  block parse_pl
-    let pl_len: i32 = zcl1_read_payload_len(resp_ptr)
-    let has_u32: bool = i32.cmp.sge(pl_len, 4:i32)
-    term.cbr cond:has_u32,
-      then:read_len,
-      else:exit_false
-  end
-
-  block read_len
-    let pl: ptr = ptr.offset(i8, resp_ptr, 24:i64)
-    let n: i32 = zcl1_read_u32le(pl)
-    let off_end: i32 = i32.add(4:i32, n)
-    let pl_len: i32 = zcl1_read_payload_len(resp_ptr)
-    let in_bounds: bool = i32.cmp.sle(off_end, pl_len)
-    term.cbr cond:in_bounds,
-      then:cmp,
-      else:exit_false
-  end
-
-  block cmp
-    let pl: ptr = ptr.offset(i8, resp_ptr, 24:i64)
-    let n: i32 = zcl1_read_u32le(pl)
-    let same_len: bool = i32.cmp.eq(n, want_trace_len)
-    let trace_ptr2: ptr = ptr.offset(i8, pl, 4:i64)
-    let same: bool = bool.and(same_len, loop_bytes_eq(trace_ptr2, want_trace, n))
-    term.ret value:same
-  end
-
-  block exit_false
-    term.ret value:false
-  end
-end
-
 fn loop_call(h:i32, op:i32, rid:i32, payload:ptr, payload_len:i32, resp_ptr:ptr, resp_cap:i32) -> i32
   block entry
     let fr_len: i32 = i32.add(24:i32, payload_len)
@@ -613,11 +560,6 @@ fn loop_wait_rc_timeout() -> i32
   return 1:i32
 end
 
-fn loop_wait_rc_nosys() -> i32
-  ;; Hosted `sem` sys/loop returns ZCL1 error trace "sem.sys_loop.nosys".
-  return 2:i32
-end
-
 fn loop_wait_rc_watch_failed() -> i32
   return 3:i32
 end
@@ -632,7 +574,6 @@ end
 
 fn loop_wait_events(handle:i32, events:i32, timeout_ms:i32) -> i32
   ;; Convenience: open sys/loop, WATCH, single POLL, then UNWATCH.
-  ;; Never hangs on hosted `sem`: WATCH nosys returns `loop_wait_rc_nosys()`.
   block entry
     let h: i32 = loop_open()
     let resp: ptr = zi_alloc(1024:i32)
@@ -652,11 +593,9 @@ fn loop_wait_events(handle:i32, events:i32, timeout_ms:i32) -> i32
   end
 
   block watch_err(h:i32, resp:ptr, n1:i32)
-    let nosys_trace: ptr = "sem.sys_loop.nosys"
-    let is_nosys: bool = loop_resp_err_trace_is(resp, n1, loop_op_watch(), 1:i32, nosys_trace, 18:i32)
     let ignored_end: i32 = zi_end(h)
     let ignored_free: i32 = zi_free(resp)
-    term.ret value:select(i32, is_nosys, loop_wait_rc_nosys(), loop_wait_rc_watch_failed())
+    term.ret value:loop_wait_rc_watch_failed()
   end
 
   block poll(h:i32, resp:ptr, watch_id:i64)
@@ -726,11 +665,9 @@ fn loop_wait_events_until(handle:i32, events:i32, timeout_ms:i32, poll_step_ms:i
   end
 
   block watch_err(h:i32, resp:ptr, n1:i32)
-    let nosys_trace: ptr = "sem.sys_loop.nosys"
-    let is_nosys: bool = loop_resp_err_trace_is(resp, n1, loop_op_watch(), 1:i32, nosys_trace, 18:i32)
     let ignored_end: i32 = zi_end(h)
     let ignored_free: i32 = zi_free(resp)
-    term.ret value:select(i32, is_nosys, loop_wait_rc_nosys(), loop_wait_rc_watch_failed())
+    term.ret value:loop_wait_rc_watch_failed()
   end
 
   block loop_init(h:i32, resp:ptr, watch_id:i64)

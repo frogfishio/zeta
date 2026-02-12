@@ -216,6 +216,17 @@ if(SIR_ENABLE_SIRC)
   )
 
   add_test(
+    NAME sem_run_guestlib_future_sleep_demo
+    COMMAND ${CMAKE_COMMAND}
+      -DSIRC=$<TARGET_FILE:sirc>
+      -DSEM=$<TARGET_FILE:sem>
+      -DINPUT=${CMAKE_SOURCE_DIR}/src/guestlib/examples/future_sleep_demo.sir
+      -DOUT=${CMAKE_CURRENT_BINARY_DIR}/sem_run_guestlib_future_sleep_demo.sir.jsonl
+      -DSEM_ARGS=--enable\;sys:loop
+      -P ${CMAKE_CURRENT_LIST_DIR}/tests/run_sirc_then_sem_run.cmake
+  )
+
+  add_test(
     NAME sem_run_guestlib_loop_poll_nonblocking_demo
     COMMAND ${CMAKE_COMMAND}
       -DSIRC=$<TARGET_FILE:sirc>

@@ -1,0 +1,36 @@
+unit future_sleep_demo target host
+@mod main
+
+@include "../future/future.sir"
+
+fn main() -> i32 public
+  block entry
+    let out_ptr: ptr = zi_alloc(4:i32)
+    store.i32(out_ptr, -1:i32)
+    let fut: ptr = future_sleep_ms(10:i32)
+    let rc: i32 = future_block_on_i32(fut, out_ptr)
+    let _: i32 = future_free(fut)
+    let ok_rc: bool = i32.cmp.eq(rc, 0:i32)
+    term.cbr cond:ok_rc,
+      then:check_val args:[out_ptr],
+      else:fail args:[out_ptr]
+  end
+
+  block check_val(out_ptr:ptr)
+    let v: i32 = load.i32(out_ptr)
+    let ok_v: bool = i32.cmp.eq(v, 0:i32)
+    term.cbr cond:ok_v,
+      then:pass args:[out_ptr],
+      else:fail args:[out_ptr]
+  end
+
+  block pass(out_ptr:ptr)
+    let _: i32 = zi_free(out_ptr)
+    term.ret value:0:i32
+  end
+
+  block fail(out_ptr:ptr)
+    let _: i32 = zi_free(out_ptr)
+    term.ret value:1:i32
+  end
+end

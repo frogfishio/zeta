@@ -24,6 +24,13 @@ typedef struct sem_handle_ops {
   int32_t (*read)(void* ctx, sem_guest_mem_t* mem, zi_ptr_t dst_ptr, zi_size32_t cap);
   int32_t (*write)(void* ctx, sem_guest_mem_t* mem, zi_ptr_t src_ptr, zi_size32_t len);
   int32_t (*end)(void* ctx, sem_guest_mem_t* mem);
+
+  // Optional polling helpers for hosted sys:loop integration.
+  // These are best-effort and may be NULL for non-pollable handles.
+  // - poll_fd: return an OS fd usable with poll(2), or -1 if none.
+  // - poll_ready: return a readiness bitmask (using sys:loop watch bits) without blocking.
+  int (*poll_fd)(void* ctx);
+  uint32_t (*poll_ready)(void* ctx, uint32_t want_events);
 } sem_handle_ops_t;
 
 typedef struct sem_handle_entry {

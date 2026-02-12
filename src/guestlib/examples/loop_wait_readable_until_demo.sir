@@ -4,13 +4,12 @@ unit loop_wait_readable_until_demo target host
 @include "../loop/loop.sir"
 
 ;; Demo: looping wait convenience API.
-;;
-;; Hosted `sem` does not implement WATCH/UNWATCH and should return NOSYS.
-;; We accept that (or watch_failed) to prove the helper fails fast and doesn't hang.
+;; Stdout (handle 1) should not be readable; with a 0ms timeout this should TIMEOUT.
+;; Some backends may treat stdio as non-watchable; accept WATCH_FAILED in that case.
 fn main() -> i32 public
   block entry
-    let rc: i32 = loop_wait_readable_until(1:i32, 100:i32)
-    let ok: bool = bool.or(i32.cmp.eq(rc, loop_wait_rc_nosys()), i32.cmp.eq(rc, loop_wait_rc_watch_failed()))
+    let rc: i32 = loop_wait_readable_until(1:i32, 0:i32)
+    let ok: bool = bool.or(i32.cmp.eq(rc, loop_wait_rc_timeout()), i32.cmp.eq(rc, loop_wait_rc_watch_failed()))
     term.cbr cond:ok,
       then:pass,
       else:fail
