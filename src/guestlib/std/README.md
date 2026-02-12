@@ -8,4 +8,7 @@
 - `ctl.sir`: higher-level `zi_ctl` helpers and error parsing
 
 Next additions (planned):
-- loop/file/tcp: guest-side helpers for golden caps (`sys/loop`, `file/aio`, `net/tcp`)
+- file/tcp: guest-side helpers for golden caps (`file/aio`, `net/tcp`)
+
+Implemented outside `std/`:
+- `../loop/loop.sir`: guest-side helpers for the golden cap `sys:loop`

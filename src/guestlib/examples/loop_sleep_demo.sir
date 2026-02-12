@@ -1,0 +1,10 @@
+unit loop_sleep_demo target host
+@mod main
+
+@include "../loop/loop.sir"
+
+;; Minimal demo: sleep ~10ms via sys/loop timer.
+;; Returns 0 on success.
+fn main() -> i32 public
+  return loop_sleep_ms(10:i32)
+end
