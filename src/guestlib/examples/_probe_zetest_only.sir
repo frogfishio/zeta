@@ -1,0 +1,8 @@
+unit probe_zetest_only target host
+@mod main
+
+@include "../ztest/zetest.sir"
+
+fn main() -> i32 public
+  return 0:i32
+end

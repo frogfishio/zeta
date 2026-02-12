@@ -1,0 +1,295 @@
+@mod zetest
+
+@include "../include/zabi_externs.sir"
+
+;; Convert i32 to decimal string (handles full i32 range, buffer must be at least 12 bytes)
+fn i32_to_dec(v:i32, buffer:ptr) -> i32
+  ;; Handle zero specially
+  let is_zero: bool = i32.cmp.eq(v, 0)
+  let zero_char: i8 = 48  ;; '0'
+  store.i8(ptr.offset(i8, buffer, 0), zero_char)
+  store.i8(ptr.offset(i8, buffer, 1), 0)  ;; null terminate
+  let zero_len: i32 = 1
+
+  ;; Early return for zero
+  sem.if is_zero
+    return zero_len
+  end
+
+  ;; Handle negative numbers (special case for INT_MIN to avoid overflow)
+  let is_negative: bool = i32.cmp.slt(v, 0)
+  let minus_char: i8 = 45  ;; '-'
+  let int_min: i32 = -2147483648:i32  ;; INT_MIN in two's complement
+  let is_int_min: bool = i32.cmp.eq(v, int_min)
+
+  ;; For INT_MIN, write the literal string "-2147483648"
+  sem.if is_int_min
+    let int_min_str: ptr = "-2147483648"
+    ;; Copy the string (11 chars + null)
+    let i: i32 = 0
+    sem.while i32.cmp.slt(i, 11)
+      let c: i8 = load.i8(ptr.offset(i8, int_min_str, i))
+      store.i8(ptr.offset(i8, buffer, i), c)
+      i = i32.add(i, 1)
+    end
+    store.i8(ptr.offset(i8, buffer, 11), 0)  ;; null terminate
+    return 11
+  end
+
+  ;; For other values, compute absolute value safely
+  let abs_value: i32 = select(i32, is_negative, i32.neg(v), v)
+
+  ;; Extract digits from right to left into temp array
+  let temp: i32 = abs_value
+  let digits: [10]i8  ;; Space for up to 10 digits (2^31 - 1 = 2147483647)
+  let digit_count: i32 = 0
+
+  ;; Extract digits least-significant first (units, then tens, etc.)
+  let remaining: i32 = temp
+  sem.while i32.cmp.sgt(remaining, 0)
+    let digit: i32 = i32.rem.s.sat(remaining, 10)
+    let digit_char: i8 = i8.add(digit as i8, 48)
+    store.i8(ptr.offset(i8, ptr(&digits), digit_count), digit_char)
+    digit_count = i32.add(digit_count, 1)
+    remaining = i32.div.s.sat(remaining, 10)
+  end
+
+  ;; Write digits to final buffer in reverse order (most significant first)
+  let pos: i32 = 0
+
+  ;; Write minus sign if negative
+  let write_minus: bool = is_negative
+  store.i8(ptr.offset(i8, buffer, pos), minus_char)
+  pos = select(i32, write_minus, i32.add(pos, 1), pos)
+
+  ;; Write digits from most significant to least significant
+  let digit_idx: i32 = i32.sub(digit_count, 1)  ;; Start with highest digit
+  sem.while i32.cmp.sge(digit_idx, 0)
+    let digit_char: i8 = load.i8(ptr.offset(i8, ptr(&digits), digit_idx))
+    store.i8(ptr.offset(i8, buffer, pos), digit_char)
+    pos = i32.add(pos, 1)
+    digit_idx = i32.sub(digit_idx, 1)
+  end
+
+  ;; Null terminate
+  store.i8(ptr.offset(i8, buffer, pos), 0)
+
+  return pos
+end
+
+fn zetest_init(state:ptr) -> i32
+  store.i32(state, 0)           ;; passed = 0
+  store.i32(ptr.offset(i8, state, 4:i64), 0)  ;; failed = 0
+  return 0
+end
+
+
+fn zetest_fail(state:ptr, msg:ptr, msg_len:i32) -> i32
+  ;; Output failure message to stderr (assume h=2 is stderr)
+  let written: i32 = zi_write(2, zi_ptr(msg), msg_len)
+  ;; Always ensure output ends with newline for safety
+  let has_length: bool = i32.cmp.sgt(msg_len, 0)
+  let last_char: i8 = select(i8, has_length, load.i8(ptr.offset(i8, msg, i32.sub(msg_len, 1))), 0)
+  let is_newline: bool = i8.cmp.eq(last_char, 10)  ;; '\n' = 10
+  let needs_newline: bool = bool.or(bool.not(has_length), bool.not(is_newline))
+  let newline: ptr = "\n"
+  let add_newline: i32 = select(i32, needs_newline, zi_write(2, zi_ptr(newline), 1), 0)
+  return 1  ;; failure code
+end
+fn zetest_expect_eq_i32(state:ptr, actual:i32, expected:i32, msg:ptr, msg_len:i32) -> i32
+  let eq: bool = i32.cmp.eq(actual, expected)
+
+  ;; If failed, print user message first, then expected/actual details
+  let failed: bool = bool.not(eq)
+  let detail_buffer: [12]i8  ;; Buffer for numbers
+
+  ;; Print user message first (with newline handling)
+  let user_msg_written: i32 = select(i32, failed, zi_write(2, zi_ptr(msg), msg_len), 0)
+  ;; Ensure newline after user message (same logic as zetest_fail)
+  let has_length: bool = i32.cmp.sgt(msg_len, 0)
+  let last_char: i8 = select(i8, has_length, load.i8(ptr.offset(i8, msg, i32.sub(msg_len, 1))), 0)
+  let is_newline: bool = i8.cmp.eq(last_char, 10)  ;; '\n' = 10
+  let needs_newline: bool = bool.or(bool.not(has_length), bool.not(is_newline))
+  let newline: ptr = "\n"
+  let newline_written: i32 = select(i32, bool.and(failed, needs_newline), zi_write(2, zi_ptr(newline), 1), 0)
+
+  ;; Then print expected/actual details
+  let expected_msg: ptr = "expected="
+  let w1: i32 = select(i32, failed, zi_write(2, zi_ptr(expected_msg), 9), 0)
+  let expected_len: i32 = select(i32, failed, i32_to_dec(expected, ptr(&detail_buffer)), 0)
+  let w2: i32 = select(i32, failed, zi_write(2, zi_ptr(ptr(&detail_buffer)), expected_len), 0)
+
+  let actual_msg: ptr = " actual="
+  let w3: i32 = select(i32, failed, zi_write(2, zi_ptr(actual_msg), 8), 0)
+  let actual_len: i32 = select(i32, failed, i32_to_dec(actual, ptr(&detail_buffer)), 0)
+  let w4: i32 = select(i32, failed, zi_write(2, zi_ptr(ptr(&detail_buffer)), actual_len), 0)
+
+  let final_newline: ptr = "\n"
+  let w5: i32 = select(i32, failed, zi_write(2, zi_ptr(final_newline), 1), 0)
+
+  return select(i32, eq, 0, 1)
+end
+fn zetest_expect_true(state:ptr, condition:bool, msg:ptr, msg_len:i32) -> i32
+  return select(i32, condition, 0, zetest_fail(state, msg, msg_len))
+end
+fn zetest_expect_false(state:ptr, condition:bool, msg:ptr, msg_len:i32) -> i32
+  let not_condition: bool = bool.not(condition)
+  return select(i32, not_condition, 0, zetest_fail(state, msg, msg_len))
+end
+fn zetest_expect_ne_i32(state:ptr, actual:i32, expected:i32, msg:ptr, msg_len:i32) -> i32
+  let ne: bool = bool.not(i32.cmp.eq(actual, expected))
+  return select(i32, ne, 0, zetest_fail(state, msg, msg_len))
+end
+fn zetest_expect_lt_i32(state:ptr, actual:i32, expected:i32, msg:ptr, msg_len:i32) -> i32
+  let lt: bool = i32.cmp.slt(actual, expected)
+  return select(i32, lt, 0, zetest_fail(state, msg, msg_len))
+end
+fn zetest_expect_le_i32(state:ptr, actual:i32, expected:i32, msg:ptr, msg_len:i32) -> i32
+  let le: bool = i32.cmp.sle(actual, expected)
+  return select(i32, le, 0, zetest_fail(state, msg, msg_len))
+end
+fn zetest_expect_gt_i32(state:ptr, actual:i32, expected:i32, msg:ptr, msg_len:i32) -> i32
+  let gt: bool = i32.cmp.sgt(actual, expected)
+  return select(i32, gt, 0, zetest_fail(state, msg, msg_len))
+end
+fn zetest_expect_ge_i32(state:ptr, actual:i32, expected:i32, msg:ptr, msg_len:i32) -> i32
+  let ge: bool = i32.cmp.sge(actual, expected)
+  return select(i32, ge, 0, zetest_fail(state, msg, msg_len))
+end
+fn zetest_expect_eq_str(state:ptr, actual:ptr, expected:ptr, msg:ptr, msg_len:i32) -> i32
+  ;; Compare null-terminated strings character by character using a loop
+  let eq: bool = true
+  let i: i32 = 0
+  let max_len: i32 = 1024  ;; Reasonable safety limit to prevent infinite loops
+
+  sem.while bool.and(eq, i32.cmp.slt(i, max_len))
+    let a: i8 = load.i8(ptr.offset(i8, actual, i))
+    let e: i8 = load.i8(ptr.offset(i8, expected, i))
+
+    ;; If characters differ, strings are not equal
+    let chars_equal: bool = i8.cmp.eq(a, e)
+    eq = bool.and(eq, chars_equal)
+
+    ;; Break if characters differ or we hit null terminator
+    let should_break: bool = bool.or(bool.not(chars_equal), i8.cmp.eq(a, 0))
+    sem.if should_break
+      sem.break
+    end
+
+    i = i32.add(i, 1)
+  end
+
+  ;; If we hit max_len without finding null terminator, strings are not equal
+  ;; (safety: very long strings without null terminators are suspicious)
+  let hit_max: bool = i32.cmp.sge(i, max_len)
+  eq = bool.and(eq, bool.not(hit_max))
+
+  let strings_equal: bool = eq
+  return select(i32, strings_equal, 0, zetest_fail(state, msg, msg_len))
+end
+fn zetest_expect_eq_bytes(state:ptr, actual:ptr, expected:ptr, len:i32, msg:ptr, msg_len:i32) -> i32
+  ;; Compare byte buffers up to specified length using a loop
+  ;; Treat negative lengths as invalid (failure)
+  let valid_len: bool = i32.cmp.sge(len, 0)
+
+  let eq: bool = true
+  let i: i32 = 0
+
+  sem.while bool.and(bool.and(eq, valid_len), i32.cmp.slt(i, len))
+    let a: i8 = load.i8(ptr.offset(i8, actual, i))
+    let e: i8 = load.i8(ptr.offset(i8, expected, i))
+    eq = bool.and(eq, i8.cmp.eq(a, e))
+    i = i32.add(i, 1)
+  end
+
+  let buffers_equal: bool = bool.and(valid_len, eq)
+  return select(i32, buffers_equal, 0, zetest_fail(state, msg, msg_len))
+end
+fn zetest_record_result(state:ptr, result:i32) -> i32
+  let passed: i32 = load.i32(state)
+  let failed: i32 = load.i32(ptr.offset(i8, state, 4:i64))
+  ;; Update counts based on result
+  let is_pass: bool = i32.cmp.eq(result, 0)
+  let new_passed: i32 = i32.add(passed, select(i32, is_pass, 1, 0))
+  let new_failed: i32 = i32.add(failed, select(i32, is_pass, 0, 1))
+  store.i32(state, new_passed)
+  store.i32(ptr.offset(i8, state, 4:i64), new_failed)
+  return result
+end
+fn zetest_print_result(test_name:ptr, test_name_len:i32, passed:bool) -> i32
+  let status: ptr = select(ptr, passed, "PASS", "FAIL")
+  let status_len: i32 = 4  ;; Both "PASS" and "FAIL" are 4 chars
+  ;; Print status
+  let w1: i32 = zi_write(1, zi_ptr(status), status_len)
+  let space: ptr = " "
+  let w2: i32 = zi_write(1, zi_ptr(space), 1)
+  ;; Print test name
+  let w3: i32 = zi_write(1, zi_ptr(test_name), test_name_len)
+  let newline: ptr = "\n"
+  let w4: i32 = zi_write(1, zi_ptr(newline), 1)
+  return 0
+end
+fn zetest_run_test(state:ptr, test_name:ptr, test_name_len:i32, test_result:i32) -> i32
+  let passed: bool = i32.cmp.eq(test_result, 0)
+  let print_result: i32 = zetest_print_result(test_name, test_name_len, passed)
+  let record_result: i32 = zetest_record_result(state, test_result)
+  return test_result
+end
+fn zetest_print_summary(state:ptr) -> i32
+  let failed: i32 = load.i32(ptr.offset(i8, state, 4:i64))
+  let passed: i32 = load.i32(state)
+  let total: i32 = i32.add(passed, failed)
+  ;; Allocate buffer for number strings (12 bytes each)
+  let num_buffer: [12]i8
+  ;; Print summary header
+  let header: ptr = "\nTest Summary:\n"
+  let w1: i32 = zi_write(1, zi_ptr(header), 14)
+  ;; Print passed count
+  let passed_msg: ptr = "Passed: "
+  let w2: i32 = zi_write(1, zi_ptr(passed_msg), 8)
+  let passed_len: i32 = i32_to_dec(passed, ptr(&num_buffer))
+  let w2b: i32 = zi_write(1, zi_ptr(ptr(&num_buffer)), passed_len)
+  ;; Print failed count
+  let failed_msg: ptr = "\nFailed: "
+  let w3: i32 = zi_write(1, zi_ptr(failed_msg), 9)
+  let failed_len: i32 = i32_to_dec(failed, ptr(&num_buffer))
+  let w3b: i32 = zi_write(1, zi_ptr(ptr(&num_buffer)), failed_len)
+  ;; Print total
+  let total_msg: ptr = "\nTotal: "
+  let w4: i32 = zi_write(1, zi_ptr(total_msg), 8)
+  let total_len: i32 = i32_to_dec(total, ptr(&num_buffer))
+  let w4b: i32 = zi_write(1, zi_ptr(ptr(&num_buffer)), total_len)
+  let newline: ptr = "\n\n"
+  let w5: i32 = zi_write(1, zi_ptr(newline), 2)
+  return failed
+end
+fn zetest_suite_begin(suite_name:ptr, suite_name_len:i32) -> i32
+  let header: ptr = "\n=== Test Suite: "
+  let w1: i32 = zi_write(1, zi_ptr(header), 16)
+  let w2: i32 = zi_write(1, zi_ptr(suite_name), suite_name_len)
+  let newline: ptr = " ===\n"
+  let w3: i32 = zi_write(1, zi_ptr(newline), 5)
+  return 0
+end
+fn zetest_suite_end(state:ptr) -> i32
+  let failed: i32 = load.i32(ptr.offset(i8, state, 4:i64))
+  let passed: i32 = load.i32(state)
+  ;; Print suite summary
+  let summary: ptr = "Suite Results - Passed: "
+  let w1: i32 = zi_write(1, zi_ptr(summary), 22)
+  let num_buffer: [12]i8
+  let passed_len: i32 = i32_to_dec(passed, ptr(&num_buffer))
+  let w2: i32 = zi_write(1, zi_ptr(ptr(&num_buffer)), passed_len)
+  let failed_msg: ptr = ", Failed: "
+  let w3: i32 = zi_write(1, zi_ptr(failed_msg), 10)
+  let failed_len: i32 = i32_to_dec(failed, ptr(&num_buffer))
+  let w4: i32 = zi_write(1, zi_ptr(ptr(&num_buffer)), failed_len)
+  let nl: ptr = "\n"
+  let w5: i32 = zi_write(1, zi_ptr(nl), 1)
+  return failed
+end
+fn zetest_finalize(state:ptr) -> i32
+  let result: i32 = zetest_print_summary(state)
+  ;; State is stack allocated, no free needed
+  return result
+end

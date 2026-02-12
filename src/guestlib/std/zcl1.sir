@@ -1,0 +1,88 @@
+@mod zcl1
+
+@include "../include/zabi_externs.sir"
+
+;; ZCL1 framing helpers (zABI 2.5).
+;; Header layout (24 bytes):
+;;  0: u32 magic      ("ZCL1")
+;;  4: u16 version
+;;  6: u16 op
+;;  8: u32 rid
+;; 12: u32 status     (requests:0, responses:1 ok / 0 err)
+;; 16: u32 reserved   (0)
+;; 20: u32 payload_len
+
+fn zcl1_hdr_size() -> i32
+  return 24:i32
+end
+
+fn zcl1_magic_u32le() -> i32
+  ;; Bytes: 5A 43 4C 31 ("ZCL1"); numeric value when stored little-endian.
+  return 0x314C435A:i32
+end
+
+fn zcl1_pack_u16_u16(lo_u16:i32, hi_u16:i32) -> i32
+  ;; pack into a little-endian u32 word: low 16 bits + high 16 bits
+  ;; (avoid shifts; op and version are small)
+  return i32.add(lo_u16, i32.mul(hi_u16, 65536:i32))
+end
+
+fn zcl1_read_u32le(p:ptr) -> i32
+  ;; ZCL1 is little-endian; `host` target is expected to be LE.
+  return load.i32(p) +align=1
+end
+
+fn zcl1_write_u32le(p:ptr, v:i32) -> i32
+  store.i32(p, v) +align=1
+  return 4:i32
+end
+
+fn zcl1_write_hdr(dst:ptr, op_u16:i32, rid_u32:i32, status_u32:i32, payload_len_u32:i32) -> i32
+  let _: i32 = zcl1_write_u32le(dst, zcl1_magic_u32le())
+
+  ;; version/op packed into one u32 at offset 4
+  let ver_op: i32 = zcl1_pack_u16_u16(1:i32, op_u16)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, dst, 4:i64), ver_op)
+
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, dst, 8:i64), rid_u32)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, dst, 12:i64), status_u32)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, dst, 16:i64), 0:i32)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, dst, 20:i64), payload_len_u32)
+
+  return 24:i32
+end
+
+fn zcl1_read_op_u16(src:ptr) -> i32
+  ;; u32 at offset 4 is version/op packed; op is high 16 bits.
+  ;; Since we avoid shifts, do integer division by 65536.
+  let ver_op: i32 = zcl1_read_u32le(ptr.offset(i8, src, 4:i64))
+  return i32.div.s.sat(ver_op, 65536:i32)
+end
+
+fn zcl1_read_version(src:ptr) -> i32
+  let ver_op: i32 = zcl1_read_u32le(ptr.offset(i8, src, 4:i64))
+  return i32.rem.s.sat(ver_op, 65536:i32)
+end
+
+fn zcl1_read_magic(src:ptr) -> i32
+  return zcl1_read_u32le(src)
+end
+
+fn zcl1_read_rid(src:ptr) -> i32
+  return zcl1_read_u32le(ptr.offset(i8, src, 8:i64))
+end
+
+fn zcl1_read_status(src:ptr) -> i32
+  return zcl1_read_u32le(ptr.offset(i8, src, 12:i64))
+end
+
+fn zcl1_read_payload_len(src:ptr) -> i32
+  return zcl1_read_u32le(ptr.offset(i8, src, 20:i64))
+end
+
+fn zcl1_is_hdr(resp_ptr:ptr, resp_len:i32) -> bool
+  let has_len: bool = i32.cmp.sge(resp_len, 24:i32)
+  let magic_ok: bool = i32.cmp.eq(zcl1_read_magic(resp_ptr), zcl1_magic_u32le())
+  let ver_ok: bool = i32.cmp.eq(zcl1_read_version(resp_ptr), 1:i32)
+  return bool.and(has_len, bool.and(magic_ok, ver_ok))
+end

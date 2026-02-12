@@ -6992,6 +6992,10 @@ typedef struct term_info {
   sir_val_id_t cond_slot;  // for cbr
   uint32_t then_block;     // for cbr
   uint32_t else_block;     // for cbr
+  uint32_t* then_arg_nodes; // arena-owned; len=then_arg_count
+  uint32_t then_arg_count;
+  uint32_t* else_arg_nodes; // arena-owned; len=else_arg_count
+  uint32_t else_arg_count;
   uint32_t switch_scrut;   // node id for scrut
   uint32_t* switch_lits;   // arena-owned; node ids; len=switch_case_count
   uint32_t* switch_tos;    // arena-owned; block ids; len=switch_case_count
@@ -6999,6 +7003,34 @@ typedef struct term_info {
   uint32_t switch_default_to;
   uint32_t trap_code; // optional stable tag (ignored by MVP)
 } term_info_t;
+
+static bool parse_term_edge_args(sirj_ctx_t* c, const JsonValue* edge_obj, uint32_t** out_arg_nodes, uint32_t* out_arg_count) {
+  if (!c || !out_arg_nodes || !out_arg_count) return false;
+  *out_arg_nodes = NULL;
+  *out_arg_count = 0;
+  if (!edge_obj) return true;
+  if (!json_is_object(edge_obj)) return false;
+
+  const JsonValue* av = json_obj_get(edge_obj, "args");
+  if (!av) return true;
+  if (!json_is_array(av)) return false;
+
+  const JsonArray* a = &av->v.arr;
+  if (a->len == 0) return true;
+  if (a->len > UINT32_MAX) return false;
+
+  uint32_t* arg_nodes = (uint32_t*)arena_alloc(&c->arena, (size_t)a->len * sizeof(uint32_t));
+  if (!arg_nodes) return false;
+  for (size_t i = 0; i < a->len; i++) {
+    uint32_t rid = 0;
+    if (!parse_ref_id(c, a->items[i], &rid)) return false;
+    arg_nodes[i] = rid;
+  }
+
+  *out_arg_nodes = arg_nodes;
+  *out_arg_count = (uint32_t)a->len;
+  return true;
+}
 
 static bool lower_term_node(sirj_ctx_t* c, uint32_t term_id, term_info_t* out) {
   if (!c || !out) return false;
@@ -7073,10 +7105,21 @@ static bool lower_term_node(sirj_ctx_t* c, uint32_t term_id, term_info_t* out) {
     if (!parse_ref_id(c, thto, &then_bid)) return false;
     if (!parse_ref_id(c, elto, &else_bid)) return false;
 
+    uint32_t* then_args = NULL;
+    uint32_t then_arg_count = 0;
+    if (!parse_term_edge_args(c, thenv, &then_args, &then_arg_count)) return false;
+    uint32_t* else_args = NULL;
+    uint32_t else_arg_count = 0;
+    if (!parse_term_edge_args(c, elsev, &else_args, &else_arg_count)) return false;
+
     out->k = TERM_CBR;
     out->cond_slot = cond_slot;
     out->then_block = then_bid;
     out->else_block = else_bid;
+    out->then_arg_nodes = then_args;
+    out->then_arg_count = then_arg_count;
+    out->else_arg_nodes = else_args;
+    out->else_arg_count = else_arg_count;
     return true;
   }
 
@@ -7206,7 +7249,7 @@ static bool lower_fn_body(sirj_ctx_t* c, uint32_t fn_node_id, bool is_entry) {
     if (!block_ip) return false;
     for (uint32_t i = 0; i < c->node_cap; i++) block_ip[i] = 0xFFFFFFFFu;
 
-    patch_rec_t patches[128];
+    patch_rec_t patches[512];
     uint32_t patch_n = 0;
 
     // Ensure control enters entry block.
@@ -7230,6 +7273,9 @@ static bool lower_fn_body(sirj_ctx_t* c, uint32_t fn_node_id, bool is_entry) {
 
       block_ip[bid] = sir_mb_func_ip(c->mb, c->fn);
 
+      // Let bindings are block-scoped in CFG form.
+      c->let_count = 0;
+
       const JsonValue* sv = json_obj_get(bn->fields_obj, "stmts");
       if (!json_is_array(sv)) return false;
       const JsonArray* a = &sv->v.arr;
@@ -7239,8 +7285,16 @@ static bool lower_fn_body(sirj_ctx_t* c, uint32_t fn_node_id, bool is_entry) {
         uint32_t sid = 0;
         if (!parse_ref_id(c, a->items[si], &sid)) return false;
 
-        term_info_t term = {0};
-        if (lower_term_node(c, sid, &term)) {
+        // Only treat explicit terminator tags as terminators.
+        // NOTE: lower_term_node() emits diagnostics on unsupported tags, so
+        // it must not be used as a general probe.
+        const node_info_t* sn = (sid < c->node_cap && c->nodes[sid].present) ? &c->nodes[sid] : NULL;
+        const char* stag = sn ? sn->tag : NULL;
+        const bool is_term = stag && (strncmp(stag, "term.", 5) == 0 || strcmp(stag, "return") == 0);
+
+        if (is_term) {
+          term_info_t term = {0};
+          if (!lower_term_node(c, sid, &term)) return false;
           saw_term = true;
           if (si + 1 != a->len) return false; // no stmts after terminator (MVP)
 
@@ -7320,10 +7374,131 @@ static bool lower_fn_body(sirj_ctx_t* c, uint32_t fn_node_id, bool is_entry) {
             if (patch_n >= (uint32_t)(sizeof(patches) / sizeof(patches[0]))) return false;
             patches[patch_n++] = (patch_rec_t){.k = 1, .ip = ip, .a = term.to_block, .b = 0};
           } else if (term.k == TERM_CBR) {
-            uint32_t ip = 0;
-            if (!sir_mb_emit_cbr(c->mb, c->fn, term.cond_slot, 0, 0, &ip)) return false;
+            // Resolve block params (bparams) and wire branch args.
+            // The runtime IR has `cbr` without arg-copying, so we lower:
+            //   cbr cond -> then_stub / else_stub
+            //   then_stub: br_args -> then_block
+            //   else_stub: br_args -> else_block
+
+            const node_info_t* thbn =
+                (term.then_block < c->node_cap && c->nodes[term.then_block].present) ? &c->nodes[term.then_block] : NULL;
+            const node_info_t* elbn =
+                (term.else_block < c->node_cap && c->nodes[term.else_block].present) ? &c->nodes[term.else_block] : NULL;
+            if (!thbn || !elbn) return false;
+            if (!thbn->tag || strcmp(thbn->tag, "block") != 0) return false;
+            if (!elbn->tag || strcmp(elbn->tag, "block") != 0) return false;
+            if (!thbn->fields_obj || thbn->fields_obj->type != JSON_OBJECT) return false;
+            if (!elbn->fields_obj || elbn->fields_obj->type != JSON_OBJECT) return false;
+
+            // THEN dst slots.
+            uint32_t th_dst_count = 0;
+            sir_val_id_t* th_dst_slots = NULL;
+            const JsonValue* thpv = json_obj_get(thbn->fields_obj, "params");
+            if (thpv) {
+              if (!json_is_array(thpv)) return false;
+              const JsonArray* pa = &thpv->v.arr;
+              th_dst_count = (uint32_t)pa->len;
+              if (th_dst_count) {
+                th_dst_slots = (sir_val_id_t*)arena_alloc(&c->arena, (size_t)th_dst_count * sizeof(sir_val_id_t));
+                if (!th_dst_slots) return false;
+                for (uint32_t pi = 0; pi < th_dst_count; pi++) {
+                  uint32_t bpid = 0;
+                  if (!parse_ref_id(c, pa->items[pi], &bpid)) return false;
+                  if (bpid >= c->node_cap || !c->nodes[bpid].present) return false;
+                  if (!c->nodes[bpid].tag || strcmp(c->nodes[bpid].tag, "bparam") != 0) return false;
+                  sir_val_id_t s = 0;
+                  val_kind_t k = VK_INVALID;
+                  if (!eval_bparam(c, bpid, &c->nodes[bpid], &s, &k)) return false;
+                  (void)k;
+                  th_dst_slots[pi] = s;
+                }
+              }
+            }
+
+            // ELSE dst slots.
+            uint32_t el_dst_count = 0;
+            sir_val_id_t* el_dst_slots = NULL;
+            const JsonValue* elpv = json_obj_get(elbn->fields_obj, "params");
+            if (elpv) {
+              if (!json_is_array(elpv)) return false;
+              const JsonArray* pa = &elpv->v.arr;
+              el_dst_count = (uint32_t)pa->len;
+              if (el_dst_count) {
+                el_dst_slots = (sir_val_id_t*)arena_alloc(&c->arena, (size_t)el_dst_count * sizeof(sir_val_id_t));
+                if (!el_dst_slots) return false;
+                for (uint32_t pi = 0; pi < el_dst_count; pi++) {
+                  uint32_t bpid = 0;
+                  if (!parse_ref_id(c, pa->items[pi], &bpid)) return false;
+                  if (bpid >= c->node_cap || !c->nodes[bpid].present) return false;
+                  if (!c->nodes[bpid].tag || strcmp(c->nodes[bpid].tag, "bparam") != 0) return false;
+                  sir_val_id_t s = 0;
+                  val_kind_t k = VK_INVALID;
+                  if (!eval_bparam(c, bpid, &c->nodes[bpid], &s, &k)) return false;
+                  (void)k;
+                  el_dst_slots[pi] = s;
+                }
+              }
+            }
+
+            if (th_dst_count != term.then_arg_count) {
+              sirj_diag_setf(c, "sem.cfg.cbr.then_args_mismatch", c->cur_path, bn->loc_line, sid, "term.cbr",
+                             "term.cbr then args count mismatch: expected %u (target block params) got %u", (unsigned)th_dst_count,
+                             (unsigned)term.then_arg_count);
+              return false;
+            }
+            if (el_dst_count != term.else_arg_count) {
+              sirj_diag_setf(c, "sem.cfg.cbr.else_args_mismatch", c->cur_path, bn->loc_line, sid, "term.cbr",
+                             "term.cbr else args count mismatch: expected %u (target block params) got %u", (unsigned)el_dst_count,
+                             (unsigned)term.else_arg_count);
+              return false;
+            }
+
+            // THEN src slots.
+            sir_val_id_t* th_src_slots = NULL;
+            if (th_dst_count) {
+              if (!term.then_arg_nodes) return false;
+              th_src_slots = (sir_val_id_t*)arena_alloc(&c->arena, (size_t)th_dst_count * sizeof(sir_val_id_t));
+              if (!th_src_slots) return false;
+              for (uint32_t ai = 0; ai < th_dst_count; ai++) {
+                sir_val_id_t s = 0;
+                val_kind_t k = VK_INVALID;
+                if (!eval_node(c, term.then_arg_nodes[ai], &s, &k)) return false;
+                (void)k;
+                th_src_slots[ai] = s;
+              }
+            }
+
+            // ELSE src slots.
+            sir_val_id_t* el_src_slots = NULL;
+            if (el_dst_count) {
+              if (!term.else_arg_nodes) return false;
+              el_src_slots = (sir_val_id_t*)arena_alloc(&c->arena, (size_t)el_dst_count * sizeof(sir_val_id_t));
+              if (!el_src_slots) return false;
+              for (uint32_t ai = 0; ai < el_dst_count; ai++) {
+                sir_val_id_t s = 0;
+                val_kind_t k = VK_INVALID;
+                if (!eval_node(c, term.else_arg_nodes[ai], &s, &k)) return false;
+                (void)k;
+                el_src_slots[ai] = s;
+              }
+            }
+
+            uint32_t ip_cbr = 0;
+            if (!sir_mb_emit_cbr(c->mb, c->fn, term.cond_slot, 0, 0, &ip_cbr)) return false;
+
+            const uint32_t then_stub_ip = sir_mb_func_ip(c->mb, c->fn);
+            uint32_t ip_br_then = 0;
+            if (!sir_mb_emit_br_args(c->mb, c->fn, 0, th_src_slots, th_dst_slots, th_dst_count, &ip_br_then)) return false;
             if (patch_n >= (uint32_t)(sizeof(patches) / sizeof(patches[0]))) return false;
-            patches[patch_n++] = (patch_rec_t){.k = 2, .ip = ip, .a = term.then_block, .b = term.else_block};
+            patches[patch_n++] = (patch_rec_t){.k = 1, .ip = ip_br_then, .a = term.then_block, .b = 0};
+
+            const uint32_t else_stub_ip = sir_mb_func_ip(c->mb, c->fn);
+            uint32_t ip_br_else = 0;
+            if (!sir_mb_emit_br_args(c->mb, c->fn, 0, el_src_slots, el_dst_slots, el_dst_count, &ip_br_else)) return false;
+            if (patch_n >= (uint32_t)(sizeof(patches) / sizeof(patches[0]))) return false;
+            patches[patch_n++] = (patch_rec_t){.k = 1, .ip = ip_br_else, .a = term.else_block, .b = 0};
+
+            if (!sir_mb_patch_cbr(c->mb, c->fn, ip_cbr, then_stub_ip, else_stub_ip)) return false;
           } else if (term.k == TERM_SWITCH) {
             sir_val_id_t scrut_slot = 0;
             val_kind_t sk = VK_INVALID;

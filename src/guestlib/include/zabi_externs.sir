@@ -1,0 +1,22 @@
+;; zABI extern surface for guest-side SIR code.
+@mod zabi_externs
+
+;;
+;; This file intentionally keeps signatures minimal and stable:
+;; - pointers are passed as i64 addresses (use zi_ptr())
+;; - errors are negative i32 values (ZI_E_*)
+
+;; Core I/O
+extern fn zi_read(h:i32, dst:ptr, cap:i32) -> i32
+extern fn zi_write(h:i32, src:ptr, len:i32) -> i32
+extern fn zi_end(h:i32) -> i32
+
+;; Control plane
+extern fn zi_ctl(req_ptr:ptr, req_len:i32, res_ptr:ptr, res_cap:i32) -> i32
+
+;; Capability open
+extern fn zi_cap_open(req_ptr:ptr) -> i32
+
+;; Optional heap
+extern fn zi_alloc(size:i32) -> ptr
+extern fn zi_free(ptr:ptr) -> i32

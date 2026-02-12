@@ -1,0 +1,10 @@
+unit probe_value_param target host
+@mod main
+
+fn foo(value:i32) -> i32
+  return value
+end
+
+fn main() -> i32 public
+  return foo(1:i32)
+end

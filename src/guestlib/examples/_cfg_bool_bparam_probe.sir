@@ -1,0 +1,24 @@
+unit cfg_bool_bparam_probe target host
+
+fn f(n:i32) -> bool public
+  block entry
+    term.br to loop args:[0:i32, true]
+  end
+
+  block loop(i:i32, ok:bool)
+    term.cbr cond:bool.and(ok, i32.cmp.slt(i, n)), then:body args:[i], else:done args:[ok]
+  end
+
+  block body(i:i32)
+    term.br to loop args:[i32.add(i, 1:i32), true]
+  end
+
+  block done(ok:bool)
+    term.ret value:ok
+  end
+end
+
+fn main() -> i32 public
+  let ok: bool = f(3:i32)
+  return select(i32, ok, 0:i32, 1:i32)
+end

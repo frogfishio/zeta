@@ -1,0 +1,12 @@
+unit cfg_local_probe target host
+
+fn helper(x:i32) -> i32
+  block entry
+    let y: i32 = i32.add(x, 1:i32)
+    term.ret value:y
+  end
+end
+
+fn main() -> i32 public
+  return helper(41:i32)
+end

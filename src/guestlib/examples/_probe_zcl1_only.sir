@@ -1,0 +1,8 @@
+unit probe_zcl1_only target host
+@mod main
+
+@include "../std/zcl1.sir"
+
+fn main() -> i32 public
+  return 0:i32
+end
