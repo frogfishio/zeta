@@ -47,6 +47,22 @@ fn loop_op_poll() -> i32
   return 5:i32
 end
 
+fn loop_watch_ev_readable() -> i32
+  return 1:i32
+end
+
+fn loop_watch_ev_writable() -> i32
+  return 2:i32
+end
+
+fn loop_watch_ev_hup() -> i32
+  return 4:i32
+end
+
+fn loop_watch_ev_error() -> i32
+  return 8:i32
+end
+
 fn loop_open() -> i32
   ;; Open request layout (40 bytes), little-endian:
   ;;   u64 kind_ptr; u32 kind_len;
@@ -199,6 +215,15 @@ fn loop_resp_ok(resp_ptr:ptr, resp_len:i32, op:i32, rid:i32) -> bool
   return bool.and(ok_hdr, bool.and(ok_op, bool.and(ok_rid, bool.and(ok_status, ok_len))))
 end
 
+fn loop_resp_hdr_matches(resp_ptr:ptr, resp_len:i32, op:i32, rid:i32) -> bool
+  let ok_hdr: bool = zcl1_is_hdr(resp_ptr, resp_len)
+  let ok_op: bool = i32.cmp.eq(zcl1_read_op_u16(resp_ptr), op)
+  let ok_rid: bool = i32.cmp.eq(zcl1_read_rid(resp_ptr), rid)
+  let pl: i32 = zcl1_read_payload_len(resp_ptr)
+  let ok_len: bool = i32.cmp.sge(resp_len, i32.add(24:i32, pl))
+  return bool.and(ok_hdr, bool.and(ok_op, bool.and(ok_rid, ok_len)))
+end
+
 fn loop_call(h:i32, op:i32, rid:i32, payload:ptr, payload_len:i32, resp_ptr:ptr, resp_cap:i32) -> i32
   block entry
     let fr_len: i32 = i32.add(24:i32, payload_len)
@@ -259,6 +284,65 @@ fn loop_poll(h:i32, rid:i32, max_events:i32, timeout_ms:i32, resp_ptr:ptr, resp_
   let n: i32 = loop_call(h, loop_op_poll(), rid, pl, 8:i32, resp_ptr, resp_cap)
   let ignored_free: i32 = zi_free(pl)
   return n
+end
+
+fn loop_watch(h:i32, rid:i32, handle:i32, events:i32, watch_id:i64, watch_flags:i32, resp_ptr:ptr, resp_cap:i32) -> i32
+  ;; WATCH payload (20 bytes): u32 handle, u32 events, u64 watch_id, u32 flags
+  let pl: ptr = zi_alloc(20:i32)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 0:i64), handle)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 4:i64), events)
+  let _: i32 = loop_write_u64le(ptr.offset(i8, pl, 8:i64), watch_id)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 16:i64), watch_flags)
+
+  let n: i32 = loop_call(h, loop_op_watch(), rid, pl, 20:i32, resp_ptr, resp_cap)
+  let ignored_free: i32 = zi_free(pl)
+  return n
+end
+
+fn loop_unwatch(h:i32, rid:i32, watch_id:i64, resp_ptr:ptr, resp_cap:i32) -> i32
+  ;; UNWATCH payload (8 bytes): u64 watch_id
+  let pl: ptr = zi_alloc(8:i32)
+  let _: i32 = loop_write_u64le(pl, watch_id)
+  let n: i32 = loop_call(h, loop_op_unwatch(), rid, pl, 8:i32, resp_ptr, resp_cap)
+  let ignored_free: i32 = zi_free(pl)
+  return n
+end
+
+fn loop_poll_event_count(resp_ptr:ptr, resp_len:i32, rid:i32) -> i32
+  ;; Returns event_count for an OK POLL response, else -1.
+  block entry
+    let ok: bool = loop_resp_ok(resp_ptr, resp_len, loop_op_poll(), rid)
+    term.cbr cond:ok,
+      then:parse,
+      else:bad
+  end
+
+  block parse
+    let pl_len: i32 = zcl1_read_payload_len(resp_ptr)
+    let has_hdr: bool = i32.cmp.sge(pl_len, 16:i32)
+    term.cbr cond:has_hdr,
+      then:read,
+      else:bad
+  end
+
+  block read
+    let pl: ptr = ptr.offset(i8, resp_ptr, 24:i64)
+    let ver: i32 = zcl1_read_u32le(ptr.offset(i8, pl, 0:i64))
+    let ver_ok: bool = i32.cmp.eq(ver, 1:i32)
+    term.cbr cond:ver_ok,
+      then:got_count,
+      else:bad
+  end
+
+  block got_count
+    let pl: ptr = ptr.offset(i8, resp_ptr, 24:i64)
+    let c: i32 = zcl1_read_u32le(ptr.offset(i8, pl, 8:i64))
+    term.ret value:c
+  end
+
+  block bad
+    term.ret value:-1:i32
+  end
 end
 
 fn loop_poll_has_timer(resp_ptr:ptr, resp_len:i32, rid:i32, timer_id:i32) -> bool

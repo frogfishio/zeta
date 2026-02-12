@@ -1,0 +1,61 @@
+unit loop_poll_nonblocking_demo target host
+@mod main
+
+@include "../loop/loop.sir"
+
+;; Demonstrate a non-blocking POLL (timeout_ms=0) returning event_count=0
+;; when a timer is due in the future.
+;; Returns 0 on success.
+fn main() -> i32 public
+  block entry
+    let h: i32 = loop_open()
+    let resp: ptr = zi_alloc(512:i32)
+    let ok_open: bool = i32.cmp.sge(h, 3:i32)
+    term.cbr cond:ok_open,
+      then:arm args:[h, resp],
+      else:fail_open args:[resp]
+  end
+
+  block arm(h:i32, resp:ptr)
+    ;; Arm a relative timer far enough out that a non-blocking poll should see 0 events.
+    let timer_id: i32 = 123:i32
+    let due_ns: i32 = i32.mul(250:i32, 1000000:i32) ;; 250ms
+    let n1: i32 = loop_timer_arm(h, 10:i32, timer_id, due_ns, 0:i32, 1:i32, resp, 512:i32)
+    let ok_arm: bool = loop_resp_ok(resp, n1, loop_op_timer_arm(), 10:i32)
+    term.cbr cond:ok_arm,
+      then:poll_nb args:[h, resp],
+      else:fail_arm args:[h, resp]
+  end
+
+  block poll_nb(h:i32, resp:ptr)
+    let n2: i32 = loop_poll(h, 11:i32, 4:i32, 0:i32, resp, 512:i32)
+    let cnt: i32 = loop_poll_event_count(resp, n2, 11:i32)
+    let ok0: bool = i32.cmp.eq(cnt, 0:i32)
+    term.cbr cond:ok0,
+      then:ok args:[h, resp],
+      else:fail_cnt args:[h, resp]
+  end
+
+  block ok(h:i32, resp:ptr)
+    let ignored_end: i32 = zi_end(h)
+    let ignored_free: i32 = zi_free(resp)
+    term.ret value:0:i32
+  end
+
+  block fail_open(resp:ptr)
+    let ignored_free: i32 = zi_free(resp)
+    term.ret value:1:i32
+  end
+
+  block fail_arm(h:i32, resp:ptr)
+    let ignored_end: i32 = zi_end(h)
+    let ignored_free: i32 = zi_free(resp)
+    term.ret value:2:i32
+  end
+
+  block fail_cnt(h:i32, resp:ptr)
+    let ignored_end: i32 = zi_end(h)
+    let ignored_free: i32 = zi_free(resp)
+    term.ret value:3:i32
+  end
+end

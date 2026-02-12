@@ -1,0 +1,69 @@
+unit loop_watch_demo target host
+@mod main
+
+@include "../loop/loop.sir"
+
+;; Demonstrate WATCH/UNWATCH framing.
+;;
+;; Hosted-only sem currently returns a ZCL1 error for WATCH/UNWATCH; zingcore25
+;; supports them. This demo accepts either outcome as long as the response is a
+;; well-formed ZCL1 frame with matching op/rid.
+fn main() -> i32 public
+  block entry
+    let h: i32 = loop_open()
+    let resp: ptr = zi_alloc(1024:i32)
+    let ok_open: bool = i32.cmp.sge(h, 3:i32)
+    term.cbr cond:ok_open,
+      then:watch args:[h, resp],
+      else:fail_open args:[resp]
+  end
+
+  block watch(h:i32, resp:ptr)
+    ;; Watch stdout (handle=1) for writable.
+    let wid: i64 = 1:i64
+    let n: i32 = loop_watch(h, 20:i32, 1:i32, loop_watch_ev_writable(), wid, 0:i32, resp, 1024:i32)
+    let ok_hdr: bool = loop_resp_hdr_matches(resp, n, loop_op_watch(), 20:i32)
+    term.cbr cond:ok_hdr,
+      then:maybe_unwatch args:[h, resp, wid],
+      else:fail_watch args:[h, resp]
+  end
+
+  block maybe_unwatch(h:i32, resp:ptr, wid:i64)
+    let st: i32 = zcl1_read_status(resp)
+    let ok: bool = i32.cmp.eq(st, 1:i32)
+    term.cbr cond:ok,
+      then:unwatch args:[h, resp, wid],
+      else:ok args:[h, resp]
+  end
+
+  block unwatch(h:i32, resp:ptr, wid:i64)
+    let n2: i32 = loop_unwatch(h, 21:i32, wid, resp, 1024:i32)
+    let ok2: bool = loop_resp_ok(resp, n2, loop_op_unwatch(), 21:i32)
+    term.cbr cond:ok2,
+      then:ok args:[h, resp],
+      else:fail_unwatch args:[h, resp]
+  end
+
+  block ok(h:i32, resp:ptr)
+    let ignored_end: i32 = zi_end(h)
+    let ignored_free: i32 = zi_free(resp)
+    term.ret value:0:i32
+  end
+
+  block fail_open(resp:ptr)
+    let ignored_free: i32 = zi_free(resp)
+    term.ret value:1:i32
+  end
+
+  block fail_watch(h:i32, resp:ptr)
+    let ignored_end: i32 = zi_end(h)
+    let ignored_free: i32 = zi_free(resp)
+    term.ret value:2:i32
+  end
+
+  block fail_unwatch(h:i32, resp:ptr)
+    let ignored_end: i32 = zi_end(h)
+    let ignored_free: i32 = zi_free(resp)
+    term.ret value:3:i32
+  end
+end
