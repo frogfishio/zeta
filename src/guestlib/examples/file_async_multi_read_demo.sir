@@ -1,0 +1,237 @@
+unit file_async_multi_read_demo target host
+@mod main
+
+@include "../file/file.sir"
+
+fn bytes_eq(a:ptr, b:ptr, n:i32) -> bool
+  block entry
+    term.br to loop args:[0:i32, true]
+  end
+
+  block loop(i:i32, ok:bool)
+    let i_lt: bool = i32.cmp.slt(i, n)
+    let cont: bool = bool.and(ok, i_lt)
+    term.cbr cond:cont,
+      then:body args:[i],
+      else:done args:[ok]
+  end
+
+  block body(i:i32)
+    let av: i8 = load.i8(ptr.offset(i8, a, i))
+    let bv: i8 = load.i8(ptr.offset(i8, b, i))
+    let ok2: bool = i32.cmp.eq(i32.zext.i8(av), i32.zext.i8(bv))
+    term.br to loop args:[i32.add(i, 1:i32), ok2]
+  end
+
+  block done(ok:bool)
+    term.ret value:ok
+  end
+end
+
+fn main() -> i32 public
+  ;; Open file/aio and issue two concurrent READs (range-like).
+  block entry
+    let aio_h: i32 = file_aio_open()
+    let ok_open: bool = i32.cmp.sge(aio_h, 3:i32)
+    term.cbr cond:ok_open,
+      then:init_ctx args:[aio_h],
+      else:fail
+  end
+
+  block fail
+    term.ret value:10:i32
+  end
+
+  block init_ctx(aio_h:i32)
+    let ctx: ptr = file_aio_async_new(16:i32)
+
+    ;; submit OPEN
+    let rid_open: i32 = file_aio_async_rid_next(ctx)
+    let rc_open: i32 = file_aio_submit_open(aio_h, rid_open, "/hello.txt", 10:i32, file_o_read(), 0:i32)
+    let ok_sub: bool = i32.cmp.eq(rc_open, 0:i32)
+    term.cbr cond:ok_sub,
+      then:wait_open args:[aio_h, ctx, rid_open],
+      else:cleanup_err args:[aio_h, ctx]
+  end
+
+  block cleanup_err(aio_h:i32, ctx:ptr)
+    let _: i32 = file_aio_async_free(ctx)
+    let _: i32 = zi_end(aio_h)
+    term.ret value:11:i32
+  end
+
+  block wait_open(aio_h:i32, ctx:ptr, rid_open:i32)
+    let frp: ptr = zi_alloc(8:i32)
+    let frn: ptr = zi_alloc(4:i32)
+    term.br to open_loop args:[aio_h, ctx, rid_open, frp, frn]
+  end
+
+  block open_loop(aio_h:i32, ctx:ptr, rid_open:i32, frp:ptr, frn:ptr)
+    let got: i32 = file_aio_async_take(ctx, rid_open, frp, frn)
+    let has: bool = i32.cmp.eq(got, 0:i32)
+    term.cbr cond:has,
+      then:open_have args:[aio_h, ctx, rid_open, frp, frn],
+      else:open_pump args:[aio_h, ctx, rid_open, frp, frn]
+  end
+
+  block open_pump(aio_h:i32, ctx:ptr, rid_open:i32, frp:ptr, frn:ptr)
+    let prc: i32 = file_aio_async_pump(ctx, aio_h, 1000:i32)
+    let ok: bool = i32.cmp.sge(prc, 0:i32)
+    term.cbr cond:ok,
+      then:open_loop args:[aio_h, ctx, rid_open, frp, frn],
+      else:open_timeout args:[aio_h, ctx, frp, frn]
+  end
+
+  block open_timeout(aio_h:i32, ctx:ptr, frp:ptr, frn:ptr)
+    let _: i32 = zi_free(frp)
+    let _: i32 = zi_free(frn)
+    let _: i32 = file_aio_async_free(ctx)
+    let _: i32 = zi_end(aio_h)
+    term.ret value:12:i32
+  end
+
+  block open_have(aio_h:i32, ctx:ptr, rid_open:i32, frp:ptr, frn:ptr)
+    let fr: ptr = file_load_ptr(frp)
+    let n: i32 = zcl1_read_u32le(frn)
+    let _: i32 = zi_free(frp)
+    let _: i32 = zi_free(frn)
+
+    let ok_done: bool = file_aio_done_ok(fr, n, rid_open, file_aio_op_open())
+    term.cbr cond:ok_done,
+      then:after_open args:[aio_h, ctx, fr],
+      else:open_bad args:[aio_h, ctx, fr]
+  end
+
+  block open_bad(aio_h:i32, ctx:ptr, fr:ptr)
+    let _: i32 = zi_free(fr)
+    let _: i32 = file_aio_async_free(ctx)
+    let _: i32 = zi_end(aio_h)
+    term.ret value:13:i32
+  end
+
+  block after_open(aio_h:i32, ctx:ptr, fr:ptr)
+    let file_id: i64 = file_read_u64le(file_aio_done_extra_ptr(fr))
+    let _: i32 = zi_free(fr)
+
+    ;; submit two reads concurrently
+    let rid_a: i32 = file_aio_async_rid_next(ctx)
+    let rid_b: i32 = file_aio_async_rid_next(ctx)
+
+    let rc_a: i32 = file_aio_submit_read(aio_h, rid_a, file_id, 0:i32, 10:i32)
+    let rc_b: i32 = file_aio_submit_read(aio_h, rid_b, file_id, 10:i32, 17:i32)
+    let ok_sub: bool = bool.and(i32.cmp.eq(rc_a, 0:i32), i32.cmp.eq(rc_b, 0:i32))
+    term.cbr cond:ok_sub,
+      then:wait_reads args:[aio_h, ctx, file_id, rid_a, rid_b],
+      else:cleanup_err args:[aio_h, ctx]
+  end
+
+  block wait_reads(aio_h:i32, ctx:ptr, file_id:i64, rid_a:i32, rid_b:i32)
+    let out: ptr = zi_alloc(27:i32)
+    term.br to reads_loop args:[aio_h, ctx, file_id, rid_a, rid_b, false, false, out]
+  end
+
+  block reads_loop(aio_h:i32, ctx:ptr, file_id:i64, rid_a:i32, rid_b:i32, got_a:bool, got_b:bool, out:ptr)
+    let done: bool = bool.and(got_a, got_b)
+    term.cbr cond:done,
+      then:close args:[aio_h, ctx, file_id, out],
+      else:try_take args:[aio_h, ctx, file_id, rid_a, rid_b, got_a, got_b, out]
+  end
+
+  block try_take(aio_h:i32, ctx:ptr, file_id:i64, rid_a:i32, rid_b:i32, got_a:bool, got_b:bool, out:ptr)
+    let frp: ptr = zi_alloc(8:i32)
+    let frn: ptr = zi_alloc(4:i32)
+
+    let ga: i32 = file_aio_async_take(ctx, rid_a, frp, frn)
+    let has_a: bool = i32.cmp.eq(ga, 0:i32)
+    term.cbr cond:has_a,
+      then:handle_a args:[aio_h, ctx, file_id, rid_a, rid_b, got_a, got_b, out, frp, frn],
+      else:try_b args:[aio_h, ctx, file_id, rid_a, rid_b, got_a, got_b, out, frp, frn]
+  end
+
+  block try_b(aio_h:i32, ctx:ptr, file_id:i64, rid_a:i32, rid_b:i32, got_a:bool, got_b:bool, out:ptr, frp:ptr, frn:ptr)
+    let gb: i32 = file_aio_async_take(ctx, rid_b, frp, frn)
+    let has_b: bool = i32.cmp.eq(gb, 0:i32)
+    term.cbr cond:has_b,
+      then:handle_b args:[aio_h, ctx, file_id, rid_a, rid_b, got_a, got_b, out, frp, frn],
+      else:pump_more args:[aio_h, ctx, file_id, rid_a, rid_b, got_a, got_b, out, frp, frn]
+  end
+
+  block pump_more(aio_h:i32, ctx:ptr, file_id:i64, rid_a:i32, rid_b:i32, got_a:bool, got_b:bool, out:ptr, frp:ptr, frn:ptr)
+    let _: i32 = zi_free(frp)
+    let _: i32 = zi_free(frn)
+    let prc: i32 = file_aio_async_pump(ctx, aio_h, 1000:i32)
+    let ok: bool = i32.cmp.sge(prc, 0:i32)
+    term.cbr cond:ok,
+      then:reads_loop args:[aio_h, ctx, file_id, rid_a, rid_b, got_a, got_b, out],
+      else:reads_timeout args:[aio_h, ctx, out]
+  end
+
+  block reads_timeout(aio_h:i32, ctx:ptr, out:ptr)
+    let _: i32 = zi_free(out)
+    let _: i32 = file_aio_async_free(ctx)
+    let _: i32 = zi_end(aio_h)
+    term.ret value:14:i32
+  end
+
+  block handle_a(aio_h:i32, ctx:ptr, file_id:i64, rid_a:i32, rid_b:i32, got_a:bool, got_b:bool, out:ptr, frp:ptr, frn:ptr)
+    let fr: ptr = file_load_ptr(frp)
+    let _: i32 = zi_free(frp)
+    let _: i32 = zi_free(frn)
+
+    let ok_done: bool = bool.and(i32.cmp.eq(zcl1_read_status(fr), 1:i32), i32.cmp.eq(file_read_u16le(ptr.offset(i8, fr, 24:i64)), file_aio_op_read()))
+    term.cbr cond:ok_done,
+      then:copy_a args:[aio_h, ctx, file_id, rid_a, rid_b, got_b, out, fr],
+      else:bad_read args:[aio_h, ctx, out, fr]
+  end
+
+  block copy_a(aio_h:i32, ctx:ptr, file_id:i64, rid_a:i32, rid_b:i32, got_b:bool, out:ptr, fr:ptr)
+    let n: i32 = file_aio_done_result_u32(fr)
+    let src: ptr = file_aio_done_extra_ptr(fr)
+    mem.copy(out, src, n) +alignDst=1 +alignSrc=1 +overlap=disallow
+    let _: i32 = zi_free(fr)
+    term.br to reads_loop args:[aio_h, ctx, file_id, rid_a, rid_b, true, got_b, out]
+  end
+
+  block handle_b(aio_h:i32, ctx:ptr, file_id:i64, rid_a:i32, rid_b:i32, got_a:bool, got_b:bool, out:ptr, frp:ptr, frn:ptr)
+    let fr: ptr = file_load_ptr(frp)
+    let _: i32 = zi_free(frp)
+    let _: i32 = zi_free(frn)
+
+    let ok_done: bool = bool.and(i32.cmp.eq(zcl1_read_status(fr), 1:i32), i32.cmp.eq(file_read_u16le(ptr.offset(i8, fr, 24:i64)), file_aio_op_read()))
+    term.cbr cond:ok_done,
+      then:copy_b args:[aio_h, ctx, file_id, rid_a, rid_b, got_a, out, fr],
+      else:bad_read args:[aio_h, ctx, out, fr]
+  end
+
+  block copy_b(aio_h:i32, ctx:ptr, file_id:i64, rid_a:i32, rid_b:i32, got_a:bool, out:ptr, fr:ptr)
+    let n: i32 = file_aio_done_result_u32(fr)
+    let src: ptr = file_aio_done_extra_ptr(fr)
+    mem.copy(ptr.offset(i8, out, 10:i64), src, n) +alignDst=1 +alignSrc=1 +overlap=disallow
+    let _: i32 = zi_free(fr)
+    term.br to reads_loop args:[aio_h, ctx, file_id, rid_a, rid_b, got_a, true, out]
+  end
+
+  block bad_read(aio_h:i32, ctx:ptr, out:ptr, fr:ptr)
+    let _: i32 = zi_free(fr)
+    let _: i32 = zi_free(out)
+    let _: i32 = file_aio_async_free(ctx)
+    let _: i32 = zi_end(aio_h)
+    term.ret value:15:i32
+  end
+
+  block close(aio_h:i32, ctx:ptr, file_id:i64, out:ptr)
+    ;; validate bytes
+    let exp: ptr = "hello from file/aio via sem"
+    let ok: bool = bytes_eq(out, exp, 27:i32)
+
+    ;; best-effort close
+    let rid_c: i32 = file_aio_async_rid_next(ctx)
+    let _: i32 = file_aio_submit_close(aio_h, rid_c, file_id)
+
+    let _: i32 = zi_free(out)
+    let _: i32 = file_aio_async_free(ctx)
+    let _: i32 = zi_end(aio_h)
+
+    term.ret value:select(i32, ok, 0:i32, 16:i32)
+  end
+end
