@@ -49,23 +49,28 @@ It is a **thin CLI frontend** over `sircore`:
 
 `sem` is growing a **hosted zABI runtime** so you can trial a program under the emulator before lowering to a native binary.
 
-### Guest syscalls: `zi_ctl` + `file/fs`
+### Guest syscalls: `zi_ctl` + `sys/loop` + `file/aio`
 
 When running a SIR program under `sem --run`, the guest can call zABI primitives via `decl.fn` externs like:
 
 - `zi_ctl` (ZCL1 message ABI)
-- `zi_cap_open` (open a capability like `file:fs`)
+- `zi_cap_open` (open a capability like `file:aio`)
 - `zi_read`, `zi_write`, `zi_end`
 
 These are **capability-gated**. Common gotchas:
 
-- `file/fs` needs a sandbox root: pass `--fs-root PATH` to `sem`. This also ensures `file:fs` is present in the capability list.
+- In zingcore25 builds, file I/O uses `file/aio` with readiness via `sys/loop`.
+	- Pass `--fs-root PATH` to sandbox access under `PATH` (implemented via `ZI_FS_ROOT`).
+	- This also ensures `sys:loop` and `file:aio` are present in the capability list.
 - `env`/`argv` require explicit enablement via `--enable env` / `--enable argv` (or `--inherit-env`, `--params`, etc.).
 
 Runnable samples ship in the dist bundle:
 
 - `dist/test/sem/run/hello_zabi25_caps_list.sir.jsonl` (guest issues `zi_ctl CAPS_LIST` and prints the raw response)
-- `dist/test/sem/run/hello_zabi25_file_cat.sir.jsonl` (guest opens `/hello.txt` via `file/fs` and prints it)
+
+To read a file from the sandbox, prefer the built-in tool mode:
+
+- `sem --cat /hello.txt --fs-root <sandbox_dir>`
 
 Example commands (macOS bundle):
 
@@ -75,14 +80,14 @@ SEM=./dist/bin/macos/sem
 $SEM --run ./dist/test/sem/run/hello_zabi25_caps_list.sir.jsonl
 
 # Provide a sandbox directory that contains hello.txt.
-$SEM --run ./dist/test/sem/run/hello_zabi25_file_cat.sir.jsonl --fs-root ./dist/test/sem/run
+$SEM --cat /hello.txt --fs-root ./dist/test/sem/run
 ```
 
 The hosted runtime includes:
 
 - guest memory mapping (`zi_ptr_t` is a guest pointer; never a host pointer)
 - a handle table (`zi_read` / `zi_write` / `zi_end`)
-- a minimal caps model with `file/fs` sandboxing (`--fs-root`)
+- a minimal caps model with sandboxing (`--fs-root`)
 
 Quick smoke test (read a file under a sandbox root):
 

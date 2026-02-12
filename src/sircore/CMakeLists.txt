@@ -12,12 +12,18 @@ target_compile_options(sircore_runtime PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_library(sircore_hosted_zabi
   hosted_zabi.c
   sem_host.c
-  hosted_file_fs.c
 )
 
 target_include_directories(sircore_hosted_zabi PUBLIC ${CMAKE_CURRENT_LIST_DIR})
 target_link_libraries(sircore_hosted_zabi PUBLIC sircore_runtime)
 target_compile_options(sircore_hosted_zabi PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
+# Optional: integrate zingcore25 (golden caps like sys/loop, file/aio, net/tcp).
+if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/lib/libzingcore25.a" AND EXISTS "${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/include/zi_sysabi25.h")
+  target_compile_definitions(sircore_hosted_zabi PUBLIC SIR_HAVE_ZINGCORE25=1)
+  target_include_directories(sircore_hosted_zabi PUBLIC ${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/include)
+  target_link_libraries(sircore_hosted_zabi PUBLIC ${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/lib/libzingcore25.a)
+endif()
 
 add_library(sircore_vm
   sircore_vm.c

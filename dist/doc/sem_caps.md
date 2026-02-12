@@ -35,12 +35,15 @@ The returned `caps[].flags` is a bitset:
 
 ### 1) Automatic cap: `--fs-root`
 
-If you pass a sandbox root, `sem` ensures `file:fs` is present in CAPS_LIST:
+If you pass a sandbox root, `sem` configures `file/aio` sandboxing and ensures the golden caps needed for `sem --cat` are present in CAPS_LIST:
 
 - `sem --caps --fs-root PATH`
 - `sem --run prog.sir.jsonl --fs-root PATH`
 
-In this build, `--fs-root` adds the cap entry `file:fs:open,block` if it wasn’t already provided.
+In this build, `--fs-root` sets `ZI_FS_ROOT` and adds (if missing):
+
+- `sys:loop:open,block`
+- `file:aio:open,block`
 
 ### 2) Convenience enablement: `--enable`
 
@@ -48,10 +51,11 @@ In this build, `--fs-root` adds the cap entry `file:fs:open,block` if it wasn’
 
 Recognized values in this build:
 
-- `--enable file:fs`  (adds `file:fs:open,block`)
+- `--enable sys:loop` (adds `sys:loop:open,block`)
+- `--enable file:aio` (adds `file:aio:open,block`)
+- `--enable net:tcp`  (adds `net:tcp:open,block`)
 - `--enable proc:env` (enables an openable `proc:env` stream cap)
 - `--enable proc:argv` (enables an openable `proc:argv` stream cap)
-- `--enable async:default` (adds `async:default:open,block`) *(legacy/experimental)*
 - `--enable sys:info` (adds `sys:info:pure`) *(legacy/experimental)*
 - `--enable env` (alias for `--enable proc:env`)
 - `--enable argv` (alias for `--enable proc:argv`)
@@ -64,8 +68,8 @@ Add one cap entry directly:
 
 Examples:
 
-- `sem --cap file:fs:open,block`
 - `sem --cap sys:info:pure`
+- `sem --cap file:aio:open,block`
 
 You can specify multiple `--cap` arguments.
 
@@ -73,27 +77,31 @@ You can specify multiple `--cap` arguments.
 
 These are equivalent to adding the matching `--cap` entry:
 
-- `--cap-file-fs`       → `--cap file:fs:open,block`
-- `--cap-async-default` → `--cap async:default:open,block`
 - `--cap-sys-info`      → `--cap sys:info:pure`
 
 ## Caps recognized by this build
 
 This section lists the cap *names* the `sem` CLI knows about (can be added to CAPS_LIST), and whether `zi_cap_open` can currently open them.
 
-### `file:fs`
+### `sys:loop`
 
-- Enable with:
-  - `--fs-root PATH` (recommended; also configures the sandbox)
-  - or `--enable file:fs` / `--cap-file-fs` / `--cap file:fs:open,block`
-- `zi_cap_open` support: **yes**
-  - Open currently supports only `kind="file"` + `name="fs"`
-  - Open is sandboxed under `--fs-root`
+- Enable with `--enable sys:loop` / `--cap sys:loop:open,block`
+- `zi_cap_open` support:
+  - **hosted-only**: yes (minimal; timers + `POLL` timer events)
+  - **zingcore25 builds**: yes (supports `WATCH`/`UNWATCH` and readiness)
 
-### `async:default`
+### `file:aio`
 
-- Enable with `--enable async:default` / `--cap-async-default` / `--cap async:default:open,block`
-- `zi_cap_open` support: **not yet** (will be listed but open will be denied)
+- Enable with `--enable file:aio` / `--cap file:aio:open,block`
+- `zi_cap_open` support:
+  - **hosted-only**: stub (open succeeds, requests return ZCL1 error)
+  - **zingcore25 builds**: yes (requests are ZCL1-framed; completions delivered as `op=100` DONE events)
+
+### `net:tcp`
+
+- Enable with `--enable net:tcp` / `--cap net:tcp:open,block`
+- `zi_cap_open` support: **stub only**
+  - Open succeeds, but `zi_read`/`zi_write` return `ZI_E_NOSYS`.
 
 ### `sys:info`
 
@@ -129,4 +137,4 @@ Enable them via either:
 
 - Run the shipped examples from `dist/`:
   - `./dist/bin/<os>/sem --run ./dist/test/sem/run/hello_zabi25_caps_list.sir.jsonl`
-  - `./dist/bin/<os>/sem --run ./dist/test/sem/run/hello_zabi25_file_cat.sir.jsonl --fs-root ./dist/test/sem/run`
+  - `./dist/bin/<os>/sem --cat /hello.txt --fs-root ./dist/test/sem/run`

@@ -47,7 +47,7 @@ static void sem_print_help(FILE* out) {
           "  sem --caps [--json]\n"
           "      [--cap KIND:NAME[:FLAGS]]...\n"
           "      [--enable WHAT]...\n"
-          "      [--cap-file-fs] [--cap-async-default] [--cap-sys-info]\n"
+          "      [--cap-sys-info]\n"
           "      [--fs-root PATH]\n"
           "      [--tape-out PATH] [--tape-in PATH] [--tape-lax]\n"
           "  sem --list <input.sir.jsonl|dir>... [--format text|json]\n"
@@ -67,7 +67,7 @@ static void sem_print_help(FILE* out) {
           "  --check       Batch-verify one or more inputs (files or dirs)\n"
           "  --check-run   For --check, run cases (not just verify)\n"
           "  --format      For --check, emit results as: text (default) or json (JSON is written to stderr)\n"
-          "  --cat PATH    Read PATH via file/fs and write to stdout\n"
+          "  --cat PATH    Read PATH via file/aio and write to stdout\n"
           "  --sir-hello   Run a tiny built-in sircore VM smoke program\n"
           "  --sir-module-hello  Run a tiny built-in sircore module smoke program\n"
           "  --run FILE    Run a small supported SIR subset (MVP)\n"
@@ -86,17 +86,15 @@ static void sem_print_help(FILE* out) {
           "\n"
           "  --enable WHAT\n"
           "      Convenience enablement. Supported WHAT values:\n"
-          "        file:fs | proc:env | proc:argv | async:default | sys:info | env | argv\n"
+          "        sys:loop | file:aio | net:tcp | proc:env | proc:argv | sys:info | env | argv\n"
           "\n"
           "  --inherit-env    Snapshot host env into zi_ctl env ops (enables env)\n"
           "  --clear-env      Clear env snapshot (enables env, empty)\n"
           "  --env KEY=VAL    Set/override one env var in snapshot (enables env)\n"
           "  --params ARG     Append one guest argv param (enables argv)\n"
           "\n"
-          "  --cap-file-fs       Sugar for --cap file:fs:open,block\n"
-          "  --cap-async-default Sugar for --cap async:default:open,block\n"
           "  --cap-sys-info      Sugar for --cap sys:info:pure\n"
-          "  --fs-root PATH      Sandbox root for file/fs (enables open)\n"
+          "  --fs-root PATH      Sandbox root for file/aio (sets ZI_FS_ROOT)\n"
           "\n"
           "  --tape-out PATH  Record all zi_ctl requests/responses to a tape file\n"
           "  --tape-in PATH   Replay zi_ctl from a tape file (no real host)\n"
@@ -535,6 +533,9 @@ static bool sem_add_cap(dyn_cap_t* caps, uint32_t* inout_n, uint32_t cap_max, co
   memcpy(name_buf, c1 + 1, name_len);
   name_buf[name_len] = '\0';
 
+  // file/fs is intentionally not supported.
+  if (strcmp(kind_buf, "file") == 0 && strcmp(name_buf, "fs") == 0) return false;
+
   uint32_t flags = 0;
   if (!sem_parse_flags(flags_s, &flags)) return false;
 
@@ -691,6 +692,83 @@ static bool sem_has_cap(const dyn_cap_t* caps, uint32_t n, const char* kind, con
   return false;
 }
 
+static bool sem_read_zcl1_frame_wait(sir_hosted_zabi_t* rt, zi_handle_t loop_h, zi_handle_t target, zi_ptr_t io_ptr,
+                                     zi_size32_t io_cap, uint8_t* out_fr, uint32_t out_cap, uint32_t* out_len) {
+  if (!rt || !out_fr || !out_len) return false;
+  *out_len = 0;
+
+  uint8_t acc[65536];
+  uint32_t acc_len = 0;
+  uint8_t* w = NULL;
+
+  if (io_cap > (zi_size32_t)sizeof(acc)) return false;
+
+  for (;;) {
+    if (acc_len >= ZCL1_HDR_SIZE) {
+      const uint32_t payload_len = zcl1_read_u32le(acc + 20);
+      const uint32_t need = ZCL1_HDR_SIZE + payload_len;
+      if (need > out_cap) return false;
+      if (acc_len >= need) {
+        memcpy(out_fr, acc, need);
+        *out_len = need;
+        return true;
+      }
+    }
+
+    const int32_t n = sir_zi_read(rt, target, io_ptr, io_cap);
+    if (n == ZI_E_AGAIN) {
+      // Block in sys/loop.POLL.
+      uint8_t poll_pl[8];
+      zcl1_write_u32le(poll_pl + 0, 8);
+      zcl1_write_u32le(poll_pl + 4, 0xFFFFFFFFu);
+      uint8_t poll_fr[ZCL1_HDR_SIZE + sizeof(poll_pl)];
+      uint32_t poll_fr_len = 0;
+      if (!zcl1_write(poll_fr, (uint32_t)sizeof(poll_fr), 5 /*POLL*/, 2 /*rid*/, 0, poll_pl,
+                      (uint32_t)sizeof(poll_pl), &poll_fr_len))
+        return false;
+      const zi_ptr_t poll_ptr = sir_zi_alloc(rt, poll_fr_len);
+      if (!poll_ptr || !sem_guest_mem_map_rw(rt->mem, poll_ptr, poll_fr_len, &w) || !w) return false;
+      memcpy(w, poll_fr, poll_fr_len);
+      if (sir_zi_write(rt, loop_h, poll_ptr, poll_fr_len) < 0) return false;
+
+      // Drain the POLL response frame.
+      uint8_t poll_acc[4096];
+      uint32_t poll_acc_len = 0;
+      for (;;) {
+        if (poll_acc_len >= ZCL1_HDR_SIZE) {
+          const uint32_t pln = zcl1_read_u32le(poll_acc + 20);
+          const uint32_t need = ZCL1_HDR_SIZE + pln;
+          if (poll_acc_len >= need) break;
+        }
+        const int32_t rn = sir_zi_read(rt, loop_h, io_ptr, 4096);
+        if (rn < 0) return false;
+        if (rn == 0) return false;
+        const uint8_t* rr = NULL;
+        if (!sem_guest_mem_map_ro(rt->mem, io_ptr, (zi_size32_t)rn, &rr) || !rr) return false;
+        if (poll_acc_len + (uint32_t)rn > (uint32_t)sizeof(poll_acc)) return false;
+        memcpy(poll_acc + poll_acc_len, rr, (size_t)rn);
+        poll_acc_len += (uint32_t)rn;
+      }
+
+      zcl1_hdr_t ph = {0};
+      const uint8_t* ppl = NULL;
+      if (!zcl1_parse(poll_acc, poll_acc_len, &ph, &ppl) || ph.op != 5 || ph.status == 0 || ph.payload_len < 16) return false;
+      const uint32_t event_count = zcl1_read_u32le(ppl + 8);
+      const uint32_t base = 16;
+      if (ph.payload_len < base + event_count * 32u) return false;
+      continue;
+    }
+
+    if (n < 0) return false;
+    if (n == 0) return false;
+    const uint8_t* r = NULL;
+    if (!sem_guest_mem_map_ro(rt->mem, io_ptr, (zi_size32_t)n, &r) || !r) return false;
+    if (acc_len + (uint32_t)n > (uint32_t)sizeof(acc)) return false;
+    memcpy(acc + acc_len, r, (size_t)n);
+    acc_len += (uint32_t)n;
+  }
+}
+
 static int sem_do_cat(const sem_cap_t* caps, uint32_t cap_n, const char* fs_root, const char* guest_path) {
   if (!fs_root || fs_root[0] == '\0') {
     fprintf(stderr, "sem: --cat requires --fs-root\n");
@@ -744,93 +822,310 @@ static int sem_do_cat(const sem_cap_t* caps, uint32_t cap_n, const char* fs_root
   }
   memcpy(w, params, sizeof(params));
 
-  // kind/name bytes in guest memory.
-  const char* kind = "file";
-  const char* name = "fs";
-  const uint32_t kind_len = (uint32_t)strlen(kind);
-  const uint32_t name_len = (uint32_t)strlen(name);
-  const zi_ptr_t kind_ptr = sir_zi_alloc(&rt, kind_len);
-  const zi_ptr_t name_ptr = sir_zi_alloc(&rt, name_len);
-  if (!kind_ptr || !name_ptr) {
+  // Open sys/loop.
+  const char* loop_kind = "sys";
+  const char* loop_name = "loop";
+  const uint32_t loop_kind_len = (uint32_t)strlen(loop_kind);
+  const uint32_t loop_name_len = (uint32_t)strlen(loop_name);
+  const zi_ptr_t loop_kind_ptr = sir_zi_alloc(&rt, loop_kind_len);
+  const zi_ptr_t loop_name_ptr = sir_zi_alloc(&rt, loop_name_len);
+  if (!loop_kind_ptr || !loop_name_ptr) {
     sir_hosted_zabi_dispose(&rt);
     fprintf(stderr, "sem: alloc failed\n");
     return 1;
   }
-  if (!sem_guest_mem_map_rw(rt.mem, kind_ptr, kind_len, &w) || !w) {
+  if (!sem_guest_mem_map_rw(rt.mem, loop_kind_ptr, loop_kind_len, &w) || !w) {
     sir_hosted_zabi_dispose(&rt);
     fprintf(stderr, "sem: map failed\n");
     return 1;
   }
-  memcpy(w, kind, kind_len);
-  if (!sem_guest_mem_map_rw(rt.mem, name_ptr, name_len, &w) || !w) {
+  memcpy(w, loop_kind, loop_kind_len);
+  if (!sem_guest_mem_map_rw(rt.mem, loop_name_ptr, loop_name_len, &w) || !w) {
     sir_hosted_zabi_dispose(&rt);
     fprintf(stderr, "sem: map failed\n");
     return 1;
   }
-  memcpy(w, name, name_len);
+  memcpy(w, loop_name, loop_name_len);
 
-  // zi_cap_open request: u64 kind_ptr, u32 kind_len, u64 name_ptr, u32 name_len, u32 mode, u64 params_ptr, u32 params_len
-  uint8_t open_req[40];
-  memset(open_req, 0, sizeof(open_req));
-  zcl1_write_u32le(open_req + 0, (uint32_t)((uint64_t)kind_ptr & 0xFFFFFFFFu));
-  zcl1_write_u32le(open_req + 4, (uint32_t)(((uint64_t)kind_ptr >> 32) & 0xFFFFFFFFu));
-  zcl1_write_u32le(open_req + 8, kind_len);
-  zcl1_write_u32le(open_req + 12, (uint32_t)((uint64_t)name_ptr & 0xFFFFFFFFu));
-  zcl1_write_u32le(open_req + 16, (uint32_t)(((uint64_t)name_ptr >> 32) & 0xFFFFFFFFu));
-  zcl1_write_u32le(open_req + 20, name_len);
-  zcl1_write_u32le(open_req + 24, 0);
-  zcl1_write_u32le(open_req + 28, (uint32_t)((uint64_t)params_ptr & 0xFFFFFFFFu));
-  zcl1_write_u32le(open_req + 32, (uint32_t)(((uint64_t)params_ptr >> 32) & 0xFFFFFFFFu));
-  zcl1_write_u32le(open_req + 36, (uint32_t)sizeof(params));
+  uint8_t loop_open_req[40];
+  memset(loop_open_req, 0, sizeof(loop_open_req));
+  zcl1_write_u32le(loop_open_req + 0, (uint32_t)((uint64_t)loop_kind_ptr & 0xFFFFFFFFu));
+  zcl1_write_u32le(loop_open_req + 4, (uint32_t)(((uint64_t)loop_kind_ptr >> 32) & 0xFFFFFFFFu));
+  zcl1_write_u32le(loop_open_req + 8, loop_kind_len);
+  zcl1_write_u32le(loop_open_req + 12, (uint32_t)((uint64_t)loop_name_ptr & 0xFFFFFFFFu));
+  zcl1_write_u32le(loop_open_req + 16, (uint32_t)(((uint64_t)loop_name_ptr >> 32) & 0xFFFFFFFFu));
+  zcl1_write_u32le(loop_open_req + 20, loop_name_len);
+  zcl1_write_u32le(loop_open_req + 24, 0);
+  zcl1_write_u32le(loop_open_req + 28, 0);
+  zcl1_write_u32le(loop_open_req + 32, 0);
+  zcl1_write_u32le(loop_open_req + 36, 0);
 
-  const zi_ptr_t open_req_ptr = sir_zi_alloc(&rt, (zi_size32_t)sizeof(open_req));
-  if (!open_req_ptr) {
+  const zi_ptr_t loop_open_req_ptr = sir_zi_alloc(&rt, (zi_size32_t)sizeof(loop_open_req));
+  if (!loop_open_req_ptr) {
     sir_hosted_zabi_dispose(&rt);
     fprintf(stderr, "sem: alloc failed\n");
     return 1;
   }
-  if (!sem_guest_mem_map_rw(rt.mem, open_req_ptr, (zi_size32_t)sizeof(open_req), &w) || !w) {
+  if (!sem_guest_mem_map_rw(rt.mem, loop_open_req_ptr, (zi_size32_t)sizeof(loop_open_req), &w) || !w) {
     sir_hosted_zabi_dispose(&rt);
     fprintf(stderr, "sem: map failed\n");
     return 1;
   }
-  memcpy(w, open_req, sizeof(open_req));
+  memcpy(w, loop_open_req, sizeof(loop_open_req));
 
-  const zi_handle_t h = sir_zi_cap_open(&rt, open_req_ptr);
-  if (h < 0) {
+  const zi_handle_t loop_h = sir_zi_cap_open(&rt, loop_open_req_ptr);
+  if (loop_h < 0) {
     sir_hosted_zabi_dispose(&rt);
-    fprintf(stderr, "sem: cap_open failed: %d\n", h);
+    fprintf(stderr, "sem: cap_open sys:loop failed: %d\n", loop_h);
     return 1;
   }
 
-  const zi_ptr_t buf_ptr = sir_zi_alloc(&rt, 4096);
-  if (!buf_ptr) {
-    (void)sir_zi_end(&rt, h);
+  // Open file/aio.
+  const char* aio_kind = "file";
+  const char* aio_name = "aio";
+  const uint32_t aio_kind_len = (uint32_t)strlen(aio_kind);
+  const uint32_t aio_name_len = (uint32_t)strlen(aio_name);
+  const zi_ptr_t aio_kind_ptr = sir_zi_alloc(&rt, aio_kind_len);
+  const zi_ptr_t aio_name_ptr = sir_zi_alloc(&rt, aio_name_len);
+  if (!aio_kind_ptr || !aio_name_ptr) {
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: alloc failed\n");
+    return 1;
+  }
+  if (!sem_guest_mem_map_rw(rt.mem, aio_kind_ptr, aio_kind_len, &w) || !w) {
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: map failed\n");
+    return 1;
+  }
+  memcpy(w, aio_kind, aio_kind_len);
+  if (!sem_guest_mem_map_rw(rt.mem, aio_name_ptr, aio_name_len, &w) || !w) {
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: map failed\n");
+    return 1;
+  }
+  memcpy(w, aio_name, aio_name_len);
+
+  uint8_t aio_open_req[40];
+  memset(aio_open_req, 0, sizeof(aio_open_req));
+  zcl1_write_u32le(aio_open_req + 0, (uint32_t)((uint64_t)aio_kind_ptr & 0xFFFFFFFFu));
+  zcl1_write_u32le(aio_open_req + 4, (uint32_t)(((uint64_t)aio_kind_ptr >> 32) & 0xFFFFFFFFu));
+  zcl1_write_u32le(aio_open_req + 8, aio_kind_len);
+  zcl1_write_u32le(aio_open_req + 12, (uint32_t)((uint64_t)aio_name_ptr & 0xFFFFFFFFu));
+  zcl1_write_u32le(aio_open_req + 16, (uint32_t)(((uint64_t)aio_name_ptr >> 32) & 0xFFFFFFFFu));
+  zcl1_write_u32le(aio_open_req + 20, aio_name_len);
+  zcl1_write_u32le(aio_open_req + 24, 0);
+  zcl1_write_u32le(aio_open_req + 28, 0);
+  zcl1_write_u32le(aio_open_req + 32, 0);
+  zcl1_write_u32le(aio_open_req + 36, 0);
+
+  const zi_ptr_t aio_open_req_ptr = sir_zi_alloc(&rt, (zi_size32_t)sizeof(aio_open_req));
+  if (!aio_open_req_ptr) {
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: alloc failed\n");
+    return 1;
+  }
+  if (!sem_guest_mem_map_rw(rt.mem, aio_open_req_ptr, (zi_size32_t)sizeof(aio_open_req), &w) || !w) {
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: map failed\n");
+    return 1;
+  }
+  memcpy(w, aio_open_req, sizeof(aio_open_req));
+
+  const zi_handle_t aio_h = sir_zi_cap_open(&rt, aio_open_req_ptr);
+  if (aio_h < 0) {
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: cap_open file:aio failed: %d\n", aio_h);
+    return 1;
+  }
+
+  // WATCH the aio handle for readability.
+  const uint64_t watch_id = 1;
+  uint8_t watch_pl[20];
+  zcl1_write_u32le(watch_pl + 0, (uint32_t)aio_h);
+  zcl1_write_u32le(watch_pl + 4, 0x1u);
+  zcl1_write_u32le(watch_pl + 8, (uint32_t)(watch_id & 0xFFFFFFFFu));
+  zcl1_write_u32le(watch_pl + 12, (uint32_t)((watch_id >> 32) & 0xFFFFFFFFu));
+  zcl1_write_u32le(watch_pl + 16, 0);
+
+  uint8_t watch_fr[ZCL1_HDR_SIZE + sizeof(watch_pl)];
+  uint32_t watch_fr_len = 0;
+  if (!zcl1_write(watch_fr, (uint32_t)sizeof(watch_fr), 1 /*WATCH*/, 1 /*rid*/, 0, watch_pl, (uint32_t)sizeof(watch_pl), &watch_fr_len)) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: internal: failed to build WATCH frame\n");
+    return 1;
+  }
+  const zi_ptr_t watch_ptr = sir_zi_alloc(&rt, watch_fr_len);
+  if (!watch_ptr || !sem_guest_mem_map_rw(rt.mem, watch_ptr, watch_fr_len, &w) || !w) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: alloc/map failed\n");
+    return 1;
+  }
+  memcpy(w, watch_fr, watch_fr_len);
+  if (sir_zi_write(&rt, loop_h, watch_ptr, watch_fr_len) < 0) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: WATCH write failed\n");
+    return 1;
+  }
+
+  // Allocate a shared I/O buffer in guest memory.
+  const zi_ptr_t io_ptr = sir_zi_alloc(&rt, 65536);
+  if (!io_ptr) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
     sir_hosted_zabi_dispose(&rt);
     fprintf(stderr, "sem: alloc failed\n");
     return 1;
   }
 
-  for (;;) {
-    const int32_t n = sir_zi_read(&rt, h, buf_ptr, 4096);
-    if (n < 0) {
-      (void)sir_zi_end(&rt, h);
-      sir_hosted_zabi_dispose(&rt);
-      fprintf(stderr, "sem: read failed: %d\n", n);
-      return 1;
-    }
-    if (n == 0) break;
-    const uint8_t* r = NULL;
-    if (!sem_guest_mem_map_ro(rt.mem, buf_ptr, (zi_size32_t)n, &r) || !r) {
-      (void)sir_zi_end(&rt, h);
-      sir_hosted_zabi_dispose(&rt);
-      fprintf(stderr, "sem: map failed\n");
-      return 1;
-    }
-    (void)fwrite(r, 1, (size_t)n, stdout);
+  // Drain WATCH response.
+  uint8_t fr[65536];
+  uint32_t fr_len = 0;
+  if (!sem_read_zcl1_frame_wait(&rt, loop_h, loop_h, io_ptr, 65536, fr, (uint32_t)sizeof(fr), &fr_len)) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: WATCH response read failed\n");
+    return 1;
   }
 
-  (void)sir_zi_end(&rt, h);
+  // Submit file/aio OPEN job (rid=1).
+  uint8_t open_fr[ZCL1_HDR_SIZE + sizeof(params)];
+  uint32_t open_fr_len = 0;
+  if (!zcl1_write(open_fr, (uint32_t)sizeof(open_fr), 1 /*OPEN*/, 1 /*rid*/, 0, params, (uint32_t)sizeof(params), &open_fr_len)) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: internal: failed to build OPEN frame\n");
+    return 1;
+  }
+  const zi_ptr_t open_fr_ptr = sir_zi_alloc(&rt, open_fr_len);
+  if (!open_fr_ptr || !sem_guest_mem_map_rw(rt.mem, open_fr_ptr, open_fr_len, &w) || !w) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: alloc/map failed\n");
+    return 1;
+  }
+  memcpy(w, open_fr, open_fr_len);
+  if (sir_zi_write(&rt, aio_h, open_fr_ptr, open_fr_len) < 0) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: file/aio OPEN write failed\n");
+    return 1;
+  }
+
+  // Read immediate ACK then EV_DONE.
+  if (!sem_read_zcl1_frame_wait(&rt, loop_h, aio_h, io_ptr, 65536, fr, (uint32_t)sizeof(fr), &fr_len)) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: file/aio ack read failed\n");
+    return 1;
+  }
+  if (!sem_read_zcl1_frame_wait(&rt, loop_h, aio_h, io_ptr, 65536, fr, (uint32_t)sizeof(fr), &fr_len)) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: file/aio done read failed\n");
+    return 1;
+  }
+
+  zcl1_hdr_t dh = {0};
+  const uint8_t* dpl = NULL;
+  if (!zcl1_parse(fr, fr_len, &dh, &dpl) || dh.op != 100 || dh.status == 0 || dh.payload_len < 16) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: file/aio OPEN completion malformed\n");
+    return 1;
+  }
+  const uint64_t file_id = (uint64_t)zcl1_read_u32le(dpl + 8) | ((uint64_t)zcl1_read_u32le(dpl + 12) << 32);
+
+  // Submit READ job (rid=2).
+  uint8_t read_pl[24];
+  zcl1_write_u32le(read_pl + 0, (uint32_t)(file_id & 0xFFFFFFFFu));
+  zcl1_write_u32le(read_pl + 4, (uint32_t)((file_id >> 32) & 0xFFFFFFFFu));
+  zcl1_write_u32le(read_pl + 8, 0);
+  zcl1_write_u32le(read_pl + 12, 0);
+  zcl1_write_u32le(read_pl + 16, 65536);
+  zcl1_write_u32le(read_pl + 20, 0);
+
+  uint8_t read_fr[ZCL1_HDR_SIZE + sizeof(read_pl)];
+  uint32_t read_fr_len = 0;
+  if (!zcl1_write(read_fr, (uint32_t)sizeof(read_fr), 3 /*READ*/, 2 /*rid*/, 0, read_pl, (uint32_t)sizeof(read_pl), &read_fr_len)) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: internal: failed to build READ frame\n");
+    return 1;
+  }
+  const zi_ptr_t read_fr_ptr = sir_zi_alloc(&rt, read_fr_len);
+  if (!read_fr_ptr || !sem_guest_mem_map_rw(rt.mem, read_fr_ptr, read_fr_len, &w) || !w) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: alloc/map failed\n");
+    return 1;
+  }
+  memcpy(w, read_fr, read_fr_len);
+  if (sir_zi_write(&rt, aio_h, read_fr_ptr, read_fr_len) < 0) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: file/aio READ write failed\n");
+    return 1;
+  }
+
+  // Drain ACK then DONE; print bytes.
+  if (!sem_read_zcl1_frame_wait(&rt, loop_h, aio_h, io_ptr, 65536, fr, (uint32_t)sizeof(fr), &fr_len)) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: file/aio READ ack read failed\n");
+    return 1;
+  }
+  if (!sem_read_zcl1_frame_wait(&rt, loop_h, aio_h, io_ptr, 65536, fr, (uint32_t)sizeof(fr), &fr_len)) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: file/aio READ done read failed\n");
+    return 1;
+  }
+
+  zcl1_hdr_t rh = {0};
+  const uint8_t* rpl = NULL;
+  if (!zcl1_parse(fr, fr_len, &rh, &rpl) || rh.op != 100 || rh.status == 0 || rh.payload_len < 8) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: file/aio READ completion malformed\n");
+    return 1;
+  }
+  const uint32_t nbytes = zcl1_read_u32le(rpl + 4);
+  if (rh.payload_len < 8u + nbytes) {
+    (void)sir_zi_end(&rt, aio_h);
+    (void)sir_zi_end(&rt, loop_h);
+    sir_hosted_zabi_dispose(&rt);
+    fprintf(stderr, "sem: file/aio READ completion truncated\n");
+    return 1;
+  }
+  (void)fwrite(rpl + 8, 1, nbytes, stdout);
+
+  (void)sir_zi_end(&rt, aio_h);
+  (void)sir_zi_end(&rt, loop_h);
   sir_hosted_zabi_dispose(&rt);
   return 0;
 }
@@ -1148,8 +1443,8 @@ int main(int argc, char** argv) {
         argv_enabled = true;
         continue;
       }
-      if (strcmp(what, "file:fs") == 0) {
-        if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "file:fs:open,block")) {
+      if (strcmp(what, "sys:loop") == 0) {
+        if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "sys:loop:open,block")) {
           fprintf(stderr, "sem: failed to add cap\n");
           sem_free_caps(dyn_caps, dyn_n);
           sem_free_argv(guest_argv, guest_argc);
@@ -1158,8 +1453,18 @@ int main(int argc, char** argv) {
         }
         continue;
       }
-      if (strcmp(what, "async:default") == 0) {
-        if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "async:default:open,block")) {
+      if (strcmp(what, "file:aio") == 0) {
+        if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "file:aio:open,block")) {
+          fprintf(stderr, "sem: failed to add cap\n");
+          sem_free_caps(dyn_caps, dyn_n);
+          sem_free_argv(guest_argv, guest_argc);
+          sem_free_env(env_buf, env_n);
+          return 2;
+        }
+        continue;
+      }
+      if (strcmp(what, "net:tcp") == 0) {
+        if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "net:tcp:open,block")) {
           fprintf(stderr, "sem: failed to add cap\n");
           sem_free_caps(dyn_caps, dyn_n);
           sem_free_argv(guest_argv, guest_argc);
@@ -1247,27 +1552,6 @@ int main(int argc, char** argv) {
     if (strcmp(a, "--cap") == 0 && i + 1 < argc) {
       if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), argv[++i])) {
         fprintf(stderr, "sem: bad --cap spec\n");
-        sem_free_caps(dyn_caps, dyn_n);
-        sem_free_argv(guest_argv, guest_argc);
-        sem_free_env(env_buf, env_n);
-        return 2;
-      }
-      continue;
-    }
-    if (strcmp(a, "--cap-file-fs") == 0) {
-      if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "file:fs:open,block")) {
-        fprintf(stderr, "sem: failed to add cap\n");
-        sem_free_caps(dyn_caps, dyn_n);
-        sem_free_argv(guest_argv, guest_argc);
-        sem_free_env(env_buf, env_n);
-        return 2;
-      }
-      continue;
-    }
-    if (strcmp(a, "--cap-async-default") == 0) {
-      if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])),
-                       "async:default:open,block")) {
-        fprintf(stderr, "sem: failed to add cap\n");
         sem_free_caps(dyn_caps, dyn_n);
         sem_free_argv(guest_argv, guest_argc);
         sem_free_env(env_buf, env_n);
@@ -1382,14 +1666,26 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  // If user provided a file sandbox root, ensure file/fs is at least listed (openable depends on fs_root).
-  if (fs_root && fs_root[0] != '\0' && !sem_has_cap(dyn_caps, dyn_n, "file", "fs")) {
-    if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "file:fs:open,block")) {
-      fprintf(stderr, "sem: failed to add file/fs cap\n");
-      sem_free_caps(dyn_caps, dyn_n);
-      sem_free_argv(guest_argv, guest_argc);
-      sem_free_env(env_buf, env_n);
-      return 2;
+  // If user provided a file sandbox root, ensure sys/loop + file/aio are listed.
+  // file/aio is sandboxed via the ZI_FS_ROOT env var (wired by the hosted runtime).
+  if (fs_root && fs_root[0] != '\0') {
+    if (!sem_has_cap(dyn_caps, dyn_n, "sys", "loop")) {
+      if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "sys:loop:open,block")) {
+        fprintf(stderr, "sem: failed to add sys/loop cap\n");
+        sem_free_caps(dyn_caps, dyn_n);
+        sem_free_argv(guest_argv, guest_argc);
+        sem_free_env(env_buf, env_n);
+        return 2;
+      }
+    }
+    if (!sem_has_cap(dyn_caps, dyn_n, "file", "aio")) {
+      if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "file:aio:open,block")) {
+        fprintf(stderr, "sem: failed to add file/aio cap\n");
+        sem_free_caps(dyn_caps, dyn_n);
+        sem_free_argv(guest_argv, guest_argc);
+        sem_free_env(env_buf, env_n);
+        return 2;
+      }
     }
   }
 

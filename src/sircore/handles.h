@@ -5,14 +5,20 @@
 
 #include "guest_mem.h"
 
+#ifdef SIR_HAVE_ZINGCORE25
+#include "zi_sysabi25.h"
+#endif
+
 typedef int32_t zi_handle_t;
 
+#ifndef SIR_HAVE_ZINGCORE25
 enum {
   ZI_H_READABLE = 1u << 0,
   ZI_H_WRITABLE = 1u << 1,
   ZI_H_ENDABLE = 1u << 2,
   ZI_H_SEEKABLE = 1u << 3,
 };
+#endif
 
 typedef struct sem_handle_ops {
   int32_t (*read)(void* ctx, sem_guest_mem_t* mem, zi_ptr_t dst_ptr, zi_size32_t cap);

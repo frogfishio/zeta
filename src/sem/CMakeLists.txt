@@ -71,22 +71,30 @@ target_compile_options(sem_unit_semrt_write PRIVATE
 
 add_test(NAME sem_semrt_write COMMAND sem_unit_semrt_write)
 
-add_executable(sem_unit_semrt_file_fs
-  tests/test_semrt_file_fs.c
-)
+# Optional: zingcore25 availability (mirrors sircore_hosted_zabi integration conditions).
+set(SEM_HAVE_ZINGCORE25 OFF)
+if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/lib/libzingcore25.a" AND EXISTS "${CMAKE_SOURCE_DIR}/ext/integration-pack/macos-arm64/include/zi_sysabi25.h")
+  set(SEM_HAVE_ZINGCORE25 ON)
+endif()
 
-target_compile_definitions(sem_unit_semrt_file_fs PRIVATE SIR_VERSION="${SIR_VERSION}")
-target_include_directories(sem_unit_semrt_file_fs PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore)
-target_link_libraries(sem_unit_semrt_file_fs PRIVATE sircore_hosted_zabi)
+if(SEM_HAVE_ZINGCORE25)
+  add_executable(sem_unit_semrt_file_aio
+    tests/test_semrt_file_aio.c
+  )
 
-target_compile_options(sem_unit_semrt_file_fs PRIVATE
-  -Wall
-  -Wextra
-  -Wpedantic
-  -Werror
-)
+  target_compile_definitions(sem_unit_semrt_file_aio PRIVATE SIR_VERSION="${SIR_VERSION}")
+  target_include_directories(sem_unit_semrt_file_aio PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore)
+  target_link_libraries(sem_unit_semrt_file_aio PRIVATE sircore_hosted_zabi sircore_runtime)
 
-add_test(NAME sem_semrt_file_fs COMMAND sem_unit_semrt_file_fs)
+  target_compile_options(sem_unit_semrt_file_aio PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+    -Werror
+  )
+
+  add_test(NAME sem_semrt_file_aio COMMAND sem_unit_semrt_file_aio)
+endif()
 
 add_executable(sem_unit_semrt_proc_env_argv
   tests/test_semrt_proc_env_argv.c
@@ -105,6 +113,23 @@ target_compile_options(sem_unit_semrt_proc_env_argv PRIVATE
 
 add_test(NAME sem_semrt_proc_env_argv COMMAND sem_unit_semrt_proc_env_argv)
 
+add_executable(sem_unit_semrt_sys_loop_timer
+  tests/test_semrt_sys_loop_timer.c
+)
+
+target_compile_definitions(sem_unit_semrt_sys_loop_timer PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_include_directories(sem_unit_semrt_sys_loop_timer PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore)
+target_link_libraries(sem_unit_semrt_sys_loop_timer PRIVATE sircore_hosted_zabi)
+
+target_compile_options(sem_unit_semrt_sys_loop_timer PRIVATE
+  -Wall
+  -Wextra
+  -Wpedantic
+  -Werror
+)
+
+add_test(NAME sem_semrt_sys_loop_timer COMMAND sem_unit_semrt_sys_loop_timer)
+
 add_test(
   NAME sem_run_hello_zabi25_write
   COMMAND $<TARGET_FILE:sem> --run ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_write.sir.jsonl
@@ -118,8 +143,8 @@ add_test(
 add_test(
   NAME sem_run_hello_zabi25_file_cat
   COMMAND $<TARGET_FILE:sem>
-    --run ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_file_cat.sir.jsonl
-    --fs-root ${CMAKE_SOURCE_DIR}/src/sem/tests/fixtures/file_fs_root
+    --cat /hello.txt
+    --fs-root ${CMAKE_SOURCE_DIR}/src/sem/tests/fixtures/file_root
 )
 
 # Regression: ensure sirc-emitted stable IDs for @include-heavy .sir inputs do not collide

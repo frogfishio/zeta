@@ -1,12 +1,44 @@
 #include "hosted_zabi.h"
-
-#include "hosted_file_fs.h"
 #include "zcl1.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
+#ifdef SIR_HAVE_ZINGCORE25
+#include "zingcore25.h"
+#include "zi_file_aio25.h"
+#include "zi_handles25.h"
+#include "zi_net_tcp25.h"
+#include "zi_proc_argv25.h"
+#include "zi_proc_env25.h"
+#include "zi_sys_info25.h"
+#include "zi_sys_loop25.h"
+#include "zi_sysabi25.h"
+
+static int sir_zi_mem_map_ro(void* ctx, zi_ptr_t ptr, zi_size32_t len, const uint8_t** out) {
+  sir_hosted_zabi_t* rt = (sir_hosted_zabi_t*)ctx;
+  if (!rt || !rt->mem || !out) return 0;
+  return sem_guest_mem_map_ro(rt->mem, ptr, len, out) ? 1 : 0;
+}
+
+static int sir_zi_mem_map_rw(void* ctx, zi_ptr_t ptr, zi_size32_t len, uint8_t** out) {
+  sir_hosted_zabi_t* rt = (sir_hosted_zabi_t*)ctx;
+  if (!rt || !rt->mem || !out) return 0;
+  return sem_guest_mem_map_rw(rt->mem, ptr, len, out) ? 1 : 0;
+}
+
+static void sir_zingcore_bind(sir_hosted_zabi_t* rt) {
+  if (!rt) return;
+  zi_runtime25_set_mem(&rt->zi_mem);
+  if (rt->zi_envp_owned) {
+    zi_runtime25_set_env((int)rt->zi_envc_owned, (const char* const*)rt->zi_envp_owned);
+  }
+}
+#endif
+
+#ifndef SIR_HAVE_ZINGCORE25
 enum {
   ZI_E_INVALID = -1,
   ZI_E_BOUNDS = -2,
@@ -19,6 +51,7 @@ enum {
   ZI_E_IO = -9,
   ZI_E_INTERNAL = -10,
 };
+#endif
 
 static uint32_t u32_len(const char* s) {
   if (!s) return 0;
@@ -86,7 +119,16 @@ int32_t sir_zi_cap_get(sir_hosted_zabi_t* rt, int32_t index, zi_ptr_t out_ptr, z
 
 uint32_t sir_zi_handle_hflags(sir_hosted_zabi_t* rt, zi_handle_t h) {
   if (!rt) return 0;
-  return sem_handle_hflags(&rt->handles, h);
+  const uint32_t f = sem_handle_hflags(&rt->handles, h);
+  if (f) return f;
+
+#ifdef SIR_HAVE_ZINGCORE25
+  if (h >= 3) {
+    sir_zingcore_bind(rt);
+    return zi_handle_hflags(h);
+  }
+#endif
+  return 0;
 }
 
 typedef struct sir_stdio_stream {
@@ -123,6 +165,7 @@ static int32_t stdio_end(void* ctx, sem_guest_mem_t* mem) {
   sir_stdio_stream_t* s = (sir_stdio_stream_t*)ctx;
   if (!s) return 0;
   if (s->f) (void)fflush(s->f);
+  free(s);
   return 0;
 }
 
@@ -131,6 +174,25 @@ static const sem_handle_ops_t stdio_ops = {
     .write = stdio_write,
     .end = stdio_end,
 };
+
+#ifndef SIR_HAVE_ZINGCORE25
+static uint64_t mono_ns_now(void) {
+#if defined(CLOCK_MONOTONIC)
+  struct timespec ts;
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+  }
+#endif
+  return 0;
+}
+
+static void sleep_ns(uint64_t ns) {
+  if (ns == 0) return;
+  struct timespec ts;
+  ts.tv_sec = (time_t)(ns / 1000000000ull);
+  ts.tv_nsec = (long)(ns % 1000000000ull);
+  (void)nanosleep(&ts, NULL);
+}
 
 typedef struct sir_blob_stream {
   uint8_t* buf;
@@ -169,6 +231,362 @@ static const sem_handle_ops_t blob_ops = {
     .end = blob_end,
 };
 
+typedef struct sir_stub_stream {
+  const char* trace;
+} sir_stub_stream_t;
+
+static int32_t stub_read(void* ctx, sem_guest_mem_t* mem, zi_ptr_t dst_ptr, zi_size32_t cap) {
+  (void)ctx;
+  (void)mem;
+  (void)dst_ptr;
+  (void)cap;
+  return ZI_E_NOSYS;
+}
+
+static int32_t stub_write(void* ctx, sem_guest_mem_t* mem, zi_ptr_t src_ptr, zi_size32_t len) {
+  (void)ctx;
+  (void)mem;
+  (void)src_ptr;
+  (void)len;
+  return ZI_E_NOSYS;
+}
+
+static int32_t stub_end(void* ctx, sem_guest_mem_t* mem) {
+  (void)mem;
+  free(ctx);
+  return 0;
+}
+
+static const sem_handle_ops_t stub_ops = {
+    .read = stub_read,
+    .write = stub_write,
+    .end = stub_end,
+};
+
+typedef struct sir_zcl1_stream {
+  uint8_t* out;
+  uint32_t out_len;
+  uint32_t out_off;
+
+  // sys/loop timers (very small/simple implementation)
+  struct {
+    bool used;
+    uint64_t id;
+    uint64_t due_ns;
+    uint64_t interval_ns;
+  } timers[64];
+} sir_zcl1_stream_t;
+
+static bool stream_enqueue(sir_zcl1_stream_t* s, const uint8_t* bytes, uint32_t n) {
+  if (!s) return false;
+  if (n == 0) return true;
+  if (s->out_off == s->out_len) {
+    free(s->out);
+    s->out = NULL;
+    s->out_len = 0;
+    s->out_off = 0;
+  }
+  if (s->out_len != 0) return false; // single-frame queue for MVP
+  s->out = (uint8_t*)calloc(1, n);
+  if (!s->out) return false;
+  memcpy(s->out, bytes, n);
+  s->out_len = n;
+  s->out_off = 0;
+  return true;
+}
+
+static int32_t stream_read(void* ctx, sem_guest_mem_t* mem, zi_ptr_t dst_ptr, zi_size32_t cap) {
+  sir_zcl1_stream_t* s = (sir_zcl1_stream_t*)ctx;
+  if (!s) return ZI_E_INTERNAL;
+  if (!s->out || s->out_off >= s->out_len) return ZI_E_AGAIN;
+  if (cap == 0) return 0;
+
+  uint8_t* dst = NULL;
+  if (!sem_guest_mem_map_rw(mem, dst_ptr, cap, &dst) || !dst) return ZI_E_BOUNDS;
+  const uint32_t remain = s->out_len - s->out_off;
+  const uint32_t n = (cap < remain) ? cap : remain;
+  memcpy(dst, s->out + s->out_off, n);
+  s->out_off += n;
+  if (s->out_off == s->out_len) {
+    free(s->out);
+    s->out = NULL;
+    s->out_len = 0;
+    s->out_off = 0;
+  }
+  return (int32_t)n;
+}
+
+static int32_t stream_end(void* ctx, sem_guest_mem_t* mem) {
+  (void)mem;
+  sir_zcl1_stream_t* s = (sir_zcl1_stream_t*)ctx;
+  if (!s) return 0;
+  free(s->out);
+  free(s);
+  return 0;
+}
+
+static bool write_error_frame(uint8_t* out, uint32_t out_cap, uint16_t op, uint32_t rid, const char* trace, const char* msg,
+                              uint32_t* out_len) {
+  uint8_t payload[512];
+  uint32_t payload_len = 0;
+  if (!zcl1_write_error_payload(payload, (uint32_t)sizeof(payload), trace, msg, "", &payload_len)) return false;
+  return zcl1_write(out, out_cap, op, rid, 0, payload, payload_len, out_len);
+}
+
+static bool timer_find(const sir_zcl1_stream_t* s, uint64_t id, uint32_t* out_i) {
+  if (!s || !id) return false;
+  for (uint32_t i = 0; i < (uint32_t)(sizeof(s->timers) / sizeof(s->timers[0])); i++) {
+    if (!s->timers[i].used) continue;
+    if (s->timers[i].id != id) continue;
+    if (out_i) *out_i = i;
+    return true;
+  }
+  return false;
+}
+
+static bool timer_upsert(sir_zcl1_stream_t* s, uint64_t id, uint64_t due_ns, uint64_t interval_ns) {
+  if (!s || !id) return false;
+  uint32_t i = 0;
+  if (timer_find(s, id, &i)) {
+    s->timers[i].due_ns = due_ns;
+    s->timers[i].interval_ns = interval_ns;
+    return true;
+  }
+  for (i = 0; i < (uint32_t)(sizeof(s->timers) / sizeof(s->timers[0])); i++) {
+    if (s->timers[i].used) continue;
+    s->timers[i].used = true;
+    s->timers[i].id = id;
+    s->timers[i].due_ns = due_ns;
+    s->timers[i].interval_ns = interval_ns;
+    return true;
+  }
+  return false;
+}
+
+static bool timer_remove(sir_zcl1_stream_t* s, uint64_t id) {
+  uint32_t i = 0;
+  if (!timer_find(s, id, &i)) return false;
+  memset(&s->timers[i], 0, sizeof(s->timers[i]));
+  return true;
+}
+
+static bool timer_next_due(const sir_zcl1_stream_t* s, uint64_t* out_due) {
+  if (!s || !out_due) return false;
+  bool have = false;
+  uint64_t best = 0;
+  for (uint32_t i = 0; i < (uint32_t)(sizeof(s->timers) / sizeof(s->timers[0])); i++) {
+    if (!s->timers[i].used) continue;
+    if (!have || s->timers[i].due_ns < best) {
+      best = s->timers[i].due_ns;
+      have = true;
+    }
+  }
+  if (!have) return false;
+  *out_due = best;
+  return true;
+}
+
+static uint64_t r_u64le(const uint8_t* p) {
+  const uint64_t lo = (uint64_t)zcl1_read_u32le(p + 0);
+  const uint64_t hi = (uint64_t)zcl1_read_u32le(p + 4);
+  return lo | (hi << 32);
+}
+
+static void w_u64le(uint8_t* p, uint64_t v) {
+  zcl1_write_u32le(p + 0, (uint32_t)(v & 0xFFFFFFFFu));
+  zcl1_write_u32le(p + 4, (uint32_t)((v >> 32) & 0xFFFFFFFFu));
+}
+
+static int32_t sys_loop_write(void* ctx, sem_guest_mem_t* mem, zi_ptr_t src_ptr, zi_size32_t len) {
+  sir_zcl1_stream_t* s = (sir_zcl1_stream_t*)ctx;
+  if (!s) return ZI_E_INTERNAL;
+  if (len < ZCL1_HDR_SIZE) return ZI_E_INVALID;
+  if (s->out_len) return ZI_E_AGAIN;
+
+  const uint8_t* src = NULL;
+  if (!sem_guest_mem_map_ro(mem, src_ptr, len, &src) || !src) return ZI_E_BOUNDS;
+
+  zcl1_hdr_t h = {0};
+  const uint8_t* payload = NULL;
+  if (!zcl1_parse(src, len, &h, &payload)) return ZI_E_INVALID;
+  if (h.version != 1) return ZI_E_INVALID;
+  if (h.status != 0) return ZI_E_INVALID;
+
+  uint8_t frame[4096];
+  uint32_t frame_len = 0;
+
+  switch (h.op) {
+    case 1: { // WATCH
+      (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.nosys", "WATCH not implemented", &frame_len);
+    } break;
+    case 2: { // UNWATCH
+      (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.nosys", "UNWATCH not implemented", &frame_len);
+    } break;
+    case 3: { // TIMER_ARM
+      if (h.payload_len != 28) {
+        (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.invalid", "TIMER_ARM bad payload", &frame_len);
+        break;
+      }
+      const uint64_t timer_id = r_u64le(payload + 0);
+      uint64_t due = r_u64le(payload + 8);
+      const uint64_t interval = r_u64le(payload + 16);
+      const uint32_t flags = zcl1_read_u32le(payload + 24);
+      if (timer_id == 0) {
+        (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.invalid", "timer_id must be nonzero", &frame_len);
+        break;
+      }
+      if (flags & 1u) {
+        due = mono_ns_now() + due;
+      }
+      if (!timer_upsert(s, timer_id, due, interval)) {
+        (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.internal", "too many timers", &frame_len);
+        break;
+      }
+      (void)zcl1_write(frame, (uint32_t)sizeof(frame), h.op, h.rid, 1, NULL, 0, &frame_len);
+    } break;
+    case 4: { // TIMER_CANCEL
+      if (h.payload_len != 8) {
+        (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.invalid", "TIMER_CANCEL bad payload", &frame_len);
+        break;
+      }
+      const uint64_t timer_id = r_u64le(payload + 0);
+      if (!timer_remove(s, timer_id)) {
+        (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.noent", "timer_id not found", &frame_len);
+        break;
+      }
+      (void)zcl1_write(frame, (uint32_t)sizeof(frame), h.op, h.rid, 1, NULL, 0, &frame_len);
+    } break;
+    case 5: { // POLL
+      if (h.payload_len != 8) {
+        (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.invalid", "POLL bad payload", &frame_len);
+        break;
+      }
+      const uint32_t max_events = zcl1_read_u32le(payload + 0);
+      const uint32_t timeout_ms = zcl1_read_u32le(payload + 4);
+      if (max_events < 1) {
+        (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.invalid", "max_events must be >= 1", &frame_len);
+        break;
+      }
+
+      // Wait (blocking inside sys/loop) until a timer fires or timeout.
+      const uint64_t start = mono_ns_now();
+      uint64_t deadline = 0;
+      if (timeout_ms != 0xFFFFFFFFu) deadline = start + (uint64_t)timeout_ms * 1000000ull;
+
+      while (1) {
+        const uint64_t now = mono_ns_now();
+
+        // Build up to max_events timer events.
+        uint8_t payload_out[4096];
+        uint32_t off = 0;
+        zcl1_write_u32le(payload_out + off, 1);
+        off += 4;
+        zcl1_write_u32le(payload_out + off, 0);
+        off += 4;
+        const uint32_t event_count_off = off;
+        off += 4;
+        zcl1_write_u32le(payload_out + off, 0);
+        off += 4;
+
+        uint32_t event_count = 0;
+        for (uint32_t i = 0; i < (uint32_t)(sizeof(s->timers) / sizeof(s->timers[0])); i++) {
+          if (!s->timers[i].used) continue;
+          if (s->timers[i].due_ns > now) continue;
+          if (event_count >= max_events) break;
+          if (off + 32 > (uint32_t)sizeof(payload_out)) break;
+
+          // kind=2 TIMER
+          zcl1_write_u32le(payload_out + off + 0, 2);
+          zcl1_write_u32le(payload_out + off + 4, 0);
+          zcl1_write_u32le(payload_out + off + 8, 0);
+          zcl1_write_u32le(payload_out + off + 12, 0);
+          w_u64le(payload_out + off + 16, s->timers[i].id);
+          w_u64le(payload_out + off + 24, now);
+          off += 32;
+          event_count++;
+
+          if (s->timers[i].interval_ns) {
+            s->timers[i].due_ns = now + s->timers[i].interval_ns;
+          } else {
+            memset(&s->timers[i], 0, sizeof(s->timers[i]));
+          }
+        }
+
+        zcl1_write_u32le(payload_out + event_count_off, event_count);
+        if (event_count) {
+          (void)zcl1_write(frame, (uint32_t)sizeof(frame), h.op, h.rid, 1, payload_out, off, &frame_len);
+          break;
+        }
+
+        if (timeout_ms == 0) {
+          (void)zcl1_write(frame, (uint32_t)sizeof(frame), h.op, h.rid, 1, payload_out, off, &frame_len);
+          break;
+        }
+
+        if (timeout_ms != 0xFFFFFFFFu && now >= deadline) {
+          (void)zcl1_write(frame, (uint32_t)sizeof(frame), h.op, h.rid, 1, payload_out, off, &frame_len);
+          break;
+        }
+
+        uint64_t next_due = 0;
+        if (timer_next_due(s, &next_due) && next_due > now) {
+          uint64_t wait_ns = next_due - now;
+          if (timeout_ms != 0xFFFFFFFFu) {
+            const uint64_t remain_ns = (deadline > now) ? (deadline - now) : 0;
+            if (wait_ns > remain_ns) wait_ns = remain_ns;
+          }
+          sleep_ns(wait_ns);
+        } else {
+          // No timers; don't spin too hard.
+          sleep_ns(1000000ull);
+        }
+      }
+    } break;
+    default: {
+      (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.sys_loop.nosys", "unknown op", &frame_len);
+    } break;
+  }
+
+  if (!frame_len) return ZI_E_INTERNAL;
+  if (!stream_enqueue(s, frame, frame_len)) return ZI_E_INTERNAL;
+  return (int32_t)len;
+}
+
+static const sem_handle_ops_t sys_loop_ops = {
+    .read = stream_read,
+    .write = sys_loop_write,
+    .end = stream_end,
+};
+
+static int32_t file_aio_write(void* ctx, sem_guest_mem_t* mem, zi_ptr_t src_ptr, zi_size32_t len) {
+  sir_zcl1_stream_t* s = (sir_zcl1_stream_t*)ctx;
+  if (!s) return ZI_E_INTERNAL;
+  if (len < ZCL1_HDR_SIZE) return ZI_E_INVALID;
+  if (s->out_len) return ZI_E_AGAIN;
+
+  const uint8_t* src = NULL;
+  if (!sem_guest_mem_map_ro(mem, src_ptr, len, &src) || !src) return ZI_E_BOUNDS;
+
+  zcl1_hdr_t h = {0};
+  const uint8_t* payload = NULL;
+  if (!zcl1_parse(src, len, &h, &payload)) return ZI_E_INVALID;
+  (void)payload;
+
+  uint8_t frame[512];
+  uint32_t frame_len = 0;
+  (void)write_error_frame(frame, (uint32_t)sizeof(frame), h.op, h.rid, "sem.file_aio.nosys", "file/aio not implemented", &frame_len);
+  if (!stream_enqueue(s, frame, frame_len)) return ZI_E_INTERNAL;
+  return (int32_t)len;
+}
+
+static const sem_handle_ops_t file_aio_ops = {
+    .read = stream_read,
+    .write = file_aio_write,
+    .end = stream_end,
+};
+
+#endif
+
 static bool str_eq_bytes(const char* s, const uint8_t* b, uint32_t n) {
   if (!s || !b) return false;
   const size_t sl = strlen(s);
@@ -202,15 +620,21 @@ void sir_hosted_zabi_dispose(sir_hosted_zabi_t* rt) {
     sem_handle_entry_t e;
     if (!sem_handle_lookup(&rt->handles, h, &e)) continue;
     if (e.ops && e.ops->end) (void)e.ops->end(e.ctx, rt->mem);
-    if (h == 0 || h == 1 || h == 2) {
-      free(e.ctx);
-    } else {
-      if (!e.ops || !e.ops->end) free(e.ctx);
-      (void)sem_handle_release(&rt->handles, h);
-    }
+    (void)sem_handle_release(&rt->handles, h);
   }
 
   sem_handles_dispose(&rt->handles);
+
+#ifdef SIR_HAVE_ZINGCORE25
+  if (rt->zi_envp_owned) {
+    for (uint32_t i = 0; i < rt->zi_envc_owned; i++) {
+      free(rt->zi_envp_owned[i]);
+    }
+    free(rt->zi_envp_owned);
+    rt->zi_envp_owned = NULL;
+    rt->zi_envc_owned = 0;
+  }
+#endif
   if (rt->owns_mem && rt->mem) {
     sem_guest_mem_dispose(rt->mem);
     free(rt->mem);
@@ -235,27 +659,54 @@ int32_t sir_zi_free(sir_hosted_zabi_t* rt, zi_ptr_t ptr) {
 int32_t sir_zi_read(sir_hosted_zabi_t* rt, zi_handle_t h, zi_ptr_t dst_ptr, zi_size32_t cap) {
   if (!rt) return ZI_E_INTERNAL;
   sem_handle_entry_t e;
-  if (!sem_handle_lookup(&rt->handles, h, &e) || !e.ops || !e.ops->read) return ZI_E_NOSYS;
-  if ((e.hflags & ZI_H_READABLE) == 0) return ZI_E_NOSYS;
-  return e.ops->read(e.ctx, rt->mem, dst_ptr, cap);
+  if (sem_handle_lookup(&rt->handles, h, &e) && e.ops && e.ops->read) {
+    if ((e.hflags & ZI_H_READABLE) == 0) return ZI_E_NOSYS;
+    return e.ops->read(e.ctx, rt->mem, dst_ptr, cap);
+  }
+
+#ifdef SIR_HAVE_ZINGCORE25
+  if (h >= 3) {
+    sir_zingcore_bind(rt);
+    return zi_read(h, dst_ptr, cap);
+  }
+#endif
+  return ZI_E_NOSYS;
 }
 
 int32_t sir_zi_write(sir_hosted_zabi_t* rt, zi_handle_t h, zi_ptr_t src_ptr, zi_size32_t len) {
   if (!rt) return ZI_E_INTERNAL;
   sem_handle_entry_t e;
-  if (!sem_handle_lookup(&rt->handles, h, &e) || !e.ops || !e.ops->write) return ZI_E_NOSYS;
-  if ((e.hflags & ZI_H_WRITABLE) == 0) return ZI_E_NOSYS;
-  return e.ops->write(e.ctx, rt->mem, src_ptr, len);
+  if (sem_handle_lookup(&rt->handles, h, &e) && e.ops && e.ops->write) {
+    if ((e.hflags & ZI_H_WRITABLE) == 0) return ZI_E_NOSYS;
+    return e.ops->write(e.ctx, rt->mem, src_ptr, len);
+  }
+
+#ifdef SIR_HAVE_ZINGCORE25
+  if (h >= 3) {
+    sir_zingcore_bind(rt);
+    return zi_write(h, src_ptr, len);
+  }
+#endif
+  return ZI_E_NOSYS;
 }
 
 int32_t sir_zi_end(sir_hosted_zabi_t* rt, zi_handle_t h) {
   if (!rt) return ZI_E_INTERNAL;
   sem_handle_entry_t e;
-  if (!sem_handle_lookup(&rt->handles, h, &e) || !e.ops) return ZI_E_NOSYS;
-  int32_t r = 0;
-  if (e.ops->end) r = e.ops->end(e.ctx, rt->mem);
-  if (h >= 3) (void)sem_handle_release(&rt->handles, h);
-  return r;
+  if (sem_handle_lookup(&rt->handles, h, &e) && e.ops) {
+    int32_t r = 0;
+    if (e.ops->end) r = e.ops->end(e.ctx, rt->mem);
+    if (h >= 3) (void)sem_handle_release(&rt->handles, h);
+    return r;
+  }
+
+#ifdef SIR_HAVE_ZINGCORE25
+  if (h >= 3) {
+    sir_zingcore_bind(rt);
+    return zi_end(h);
+  }
+#endif
+  return ZI_E_NOSYS;
 }
 
 int32_t sir_zi_telemetry(sir_hosted_zabi_t* rt, zi_ptr_t topic_ptr, zi_size32_t topic_len, zi_ptr_t msg_ptr, zi_size32_t msg_len) {
@@ -317,10 +768,77 @@ zi_handle_t sir_zi_cap_open(sir_hosted_zabi_t* rt, zi_ptr_t req_ptr) {
   if (!found) return (zi_handle_t)ZI_E_NOENT;
   if ((found->flags & SEM_ZI_CAP_CAN_OPEN) == 0) return (zi_handle_t)ZI_E_DENIED;
 
-  if (strcmp(found->kind, "file") == 0 && strcmp(found->name, "fs") == 0) {
-    sir_hosted_file_fs_t fs;
-    sir_hosted_file_fs_init(&fs, (sir_hosted_file_fs_cfg_t){.fs_root = rt->fs_root});
-    return sir_hosted_file_fs_open_from_params(&fs, &rt->handles, rt->mem, (zi_ptr_t)params_ptr, (zi_size32_t)params_len);
+#ifdef SIR_HAVE_ZINGCORE25
+  // Golden caps are implemented by zingcore25; open them here and return the
+  // zingcore-owned handle directly so sys/loop readiness integration works.
+  sir_zingcore_bind(rt);
+
+  if (strcmp(found->kind, "sys") == 0 && strcmp(found->name, "loop") == 0) {
+    return zi_sys_loop25_open_from_params((zi_ptr_t)params_ptr, (zi_size32_t)params_len);
+  }
+  if (strcmp(found->kind, "file") == 0 && strcmp(found->name, "aio") == 0) {
+    return zi_file_aio25_open_from_params((zi_ptr_t)params_ptr, (zi_size32_t)params_len);
+  }
+  if (strcmp(found->kind, "net") == 0 && strcmp(found->name, "tcp") == 0) {
+    return zi_net_tcp25_open_from_params((zi_ptr_t)params_ptr, (zi_size32_t)params_len);
+  }
+  if (strcmp(found->kind, "proc") == 0 && strcmp(found->name, "argv") == 0) {
+    if (!rt->ctl_host.cfg.argv_enabled) return (zi_handle_t)ZI_E_DENIED;
+    if (params_len != 0) return (zi_handle_t)ZI_E_INVALID;
+    return zi_proc_argv25_open();
+  }
+  if (strcmp(found->kind, "proc") == 0 && strcmp(found->name, "env") == 0) {
+    if (!rt->ctl_host.cfg.env_enabled) return (zi_handle_t)ZI_E_DENIED;
+    if (params_len != 0) return (zi_handle_t)ZI_E_INVALID;
+    return zi_proc_env25_open();
+  }
+  if (strcmp(found->kind, "sys") == 0 && strcmp(found->name, "info") == 0) {
+    return zi_sys_info25_open_from_params((zi_ptr_t)params_ptr, (zi_size32_t)params_len);
+  }
+#endif
+
+  if (strcmp(found->kind, "file") == 0 && strcmp(found->name, "fs") == 0) return (zi_handle_t)ZI_E_NOSYS;
+
+#ifndef SIR_HAVE_ZINGCORE25
+  if (strcmp(found->kind, "sys") == 0 && strcmp(found->name, "loop") == 0) {
+    if (params_len != 0) return (zi_handle_t)ZI_E_INVALID;
+    sir_zcl1_stream_t* s = (sir_zcl1_stream_t*)calloc(1, sizeof(*s));
+    if (!s) return (zi_handle_t)ZI_E_OOM;
+    const zi_handle_t h = sem_handle_alloc(&rt->handles,
+                                           (sem_handle_entry_t){.ops = &sys_loop_ops, .ctx = s, .hflags = ZI_H_READABLE | ZI_H_WRITABLE | ZI_H_ENDABLE});
+    if (h < 3) {
+      free(s);
+      return h;
+    }
+    return h;
+  }
+
+  if (strcmp(found->kind, "file") == 0 && strcmp(found->name, "aio") == 0) {
+    if (params_len != 0) return (zi_handle_t)ZI_E_INVALID;
+    sir_zcl1_stream_t* s = (sir_zcl1_stream_t*)calloc(1, sizeof(*s));
+    if (!s) return (zi_handle_t)ZI_E_OOM;
+    const zi_handle_t h = sem_handle_alloc(&rt->handles,
+                                           (sem_handle_entry_t){.ops = &file_aio_ops, .ctx = s, .hflags = ZI_H_READABLE | ZI_H_WRITABLE | ZI_H_ENDABLE});
+    if (h < 3) {
+      free(s);
+      return h;
+    }
+    return h;
+  }
+
+  if (strcmp(found->kind, "net") == 0 && strcmp(found->name, "tcp") == 0) {
+    // Stub: validate minimal params size (spec uses 20 bytes) but do not implement networking.
+    if (params_len < 20) return (zi_handle_t)ZI_E_INVALID;
+    sir_stub_stream_t* s = (sir_stub_stream_t*)calloc(1, sizeof(*s));
+    if (!s) return (zi_handle_t)ZI_E_OOM;
+    s->trace = "sem.net_tcp.nosys";
+    const zi_handle_t h = sem_handle_alloc(&rt->handles,
+                                           (sem_handle_entry_t){.ops = &stub_ops, .ctx = s, .hflags = ZI_H_READABLE | ZI_H_WRITABLE | ZI_H_ENDABLE});
+    if (h < 3) {
+      free(s);
+      return h;
+    }
+    return h;
   }
 
   if (strcmp(found->kind, "proc") == 0 && strcmp(found->name, "argv") == 0) {
@@ -434,6 +952,7 @@ zi_handle_t sir_zi_cap_open(sir_hosted_zabi_t* rt, zi_ptr_t req_ptr) {
     }
     return h;
   }
+#endif
 
   (void)params_ptr;
   (void)params_len;
@@ -453,6 +972,64 @@ bool sir_hosted_zabi_init_with_mem(sir_hosted_zabi_t* rt, sem_guest_mem_t* mem, 
 
   rt->abi_version = cfg.abi_version ? cfg.abi_version : 0x00020005u;
   rt->fs_root = (cfg.fs_root && cfg.fs_root[0] != '\0') ? cfg.fs_root : NULL;
+
+#ifdef SIR_HAVE_ZINGCORE25
+  // Process-global zingcore runtime wiring.
+  if (!zingcore25_init()) {
+    sem_handles_dispose(&rt->handles);
+    return false;
+  }
+  (void)zi_handles25_init();
+
+  memset(&rt->zi_mem, 0, sizeof(rt->zi_mem));
+  rt->zi_mem.ctx = rt;
+  rt->zi_mem.map_ro = sir_zi_mem_map_ro;
+  rt->zi_mem.map_rw = sir_zi_mem_map_rw;
+  zi_runtime25_set_mem(&rt->zi_mem);
+
+  if (cfg.argv_enabled) {
+    zi_runtime25_set_argv((int)cfg.argv_count, cfg.argv);
+  } else {
+    zi_runtime25_set_argv(0, NULL);
+  }
+
+  if (cfg.env_enabled && cfg.env && cfg.env_count) {
+    rt->zi_envc_owned = cfg.env_count;
+    rt->zi_envp_owned = (char**)calloc(rt->zi_envc_owned + 1u, sizeof(char*));
+    if (!rt->zi_envp_owned) {
+      sem_handles_dispose(&rt->handles);
+      return false;
+    }
+    for (uint32_t i = 0; i < rt->zi_envc_owned; i++) {
+      const sem_env_kv_t* kv = &cfg.env[i];
+      const char* k = (kv && kv->key) ? kv->key : "";
+      const char* v = (kv && kv->val) ? kv->val : "";
+      const size_t kl = strlen(k);
+      const size_t vl = strlen(v);
+
+      char* s = (char*)calloc(1, kl + 1u + vl + 1u);
+      if (!s) {
+        for (uint32_t j = 0; j < i; j++) free(rt->zi_envp_owned[j]);
+        free(rt->zi_envp_owned);
+        rt->zi_envp_owned = NULL;
+        rt->zi_envc_owned = 0;
+        sem_handles_dispose(&rt->handles);
+        return false;
+      }
+      memcpy(s, k, kl);
+      s[kl] = '=';
+      memcpy(s + kl + 1u, v, vl);
+      rt->zi_envp_owned[i] = s;
+    }
+    zi_runtime25_set_env((int)rt->zi_envc_owned, (const char* const*)rt->zi_envp_owned);
+  } else {
+    zi_runtime25_set_env(0, NULL);
+  }
+
+  if (rt->fs_root && rt->fs_root[0] != '\0') {
+    (void)setenv("ZI_FS_ROOT", rt->fs_root, 1);
+  }
+#endif
 
   sem_host_init(&rt->ctl_host, (sem_host_cfg_t){
                                  .caps = cfg.caps,

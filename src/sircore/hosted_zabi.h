@@ -7,6 +7,10 @@
 #include "handles.h"
 #include "sem_host.h"
 
+#ifdef SIR_HAVE_ZINGCORE25
+#include "zi_runtime25.h"
+#endif
+
 // Hosted zABI-ish runtime core used by emulators/tools/VM.
 //
 // This is a "hosted implementation" of the zABI syscall surface:
@@ -27,6 +31,14 @@ typedef struct sir_hosted_zabi {
   sem_host_t ctl_host; // zi_ctl ops (e.g. CAPS_LIST)
   uint32_t abi_version;
   const char* fs_root;
+
+#ifdef SIR_HAVE_ZINGCORE25
+  // Process-global zingcore25 wiring is driven from the hosted runtime.
+  // These snapshots are owned by the runtime instance.
+  zi_mem_v1 zi_mem;
+  char** zi_envp_owned;
+  uint32_t zi_envc_owned;
+#endif
 } sir_hosted_zabi_t;
 
 typedef struct sir_hosted_zabi_cfg {
@@ -47,7 +59,7 @@ typedef struct sir_hosted_zabi_cfg {
   const sem_env_kv_t* env;
   uint32_t env_count;
 
-  // Optional: enable file/fs sandbox.
+  // Optional: sandbox root for file/aio (propagated as ZI_FS_ROOT).
   const char* fs_root;
 } sir_hosted_zabi_cfg_t;
 
