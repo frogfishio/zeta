@@ -1,0 +1,67 @@
+unit file_read_demo target host
+@mod main
+
+@include "../file/file.sir"
+
+fn bytes_eq(a:ptr, b:ptr, n:i32) -> bool
+  block entry
+    term.br to loop args:[0:i32, true]
+  end
+
+  block loop(i:i32, ok:bool)
+    let i_lt: bool = i32.cmp.slt(i, n)
+    let cont: bool = bool.and(ok, i_lt)
+    term.cbr cond:cont,
+      then:body args:[i],
+      else:done args:[ok]
+  end
+
+  block body(i:i32)
+    let av: i8 = load.i8(ptr.offset(i8, a, i))
+    let bv: i8 = load.i8(ptr.offset(i8, b, i))
+    let ok2: bool = i32.cmp.eq(i32.zext.i8(av), i32.zext.i8(bv))
+    term.br to loop args:[i32.add(i, 1:i32), ok2]
+  end
+
+  block done(ok:bool)
+    term.ret value:ok
+  end
+end
+
+fn main() -> i32 public
+  ;; Read /hello.txt under sem --fs-root.
+  block entry
+    let outp: ptr = zi_alloc(8:i32)
+    let outn: ptr = zi_alloc(4:i32)
+
+    let rc: i32 = file_read_all_alloc("/hello.txt", 10:i32, 1000:i32, outp, outn)
+    let ok: bool = i32.cmp.eq(rc, 0:i32)
+    term.cbr cond:ok,
+      then:cont args:[outp, outn],
+      else:fail args:[outp, outn]
+  end
+
+  block fail(outp:ptr, outn:ptr)
+    let _: i32 = zi_free(outp)
+    let _: i32 = zi_free(outn)
+    term.ret value:1:i32
+  end
+
+  block cont(outp:ptr, outn:ptr)
+    let p: ptr = file_load_ptr(outp)
+    let n: i32 = zcl1_read_u32le(outn)
+
+    ;; Expected contents (fixture: src/sem/tests/fixtures/file_root/hello.txt)
+    let exp: ptr = "hello from file/aio via sem"
+    let exp_len: i32 = 27:i32
+
+    let ok_len: bool = i32.cmp.eq(n, exp_len)
+    let ok_bytes: bool = select(bool, ok_len, bytes_eq(p, exp, n), false)
+
+    let _: i32 = zi_free(p)
+    let _: i32 = zi_free(outp)
+    let _: i32 = zi_free(outn)
+
+    term.ret value:select(i32, ok_bytes, 0:i32, 2:i32)
+  end
+end

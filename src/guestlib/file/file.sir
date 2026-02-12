@@ -1,0 +1,863 @@
+@mod file
+
+@include "../include/zabi_externs.sir"
+@include "../std/zcl1.sir"
+@include "../loop/loop.sir"
+
+;; Guest-side helpers for the golden capability `file:aio@v1`.
+;;
+;; Design goals (DX):
+;; - Simple synchronous helpers for common tasks (read whole file, write whole file, stat, mkdir, readdir)
+;; - Still exposes a small low-level layer (open handle + submit/wait)
+;; - No hosted fallbacks; relies on real zABI caps (cap open may fail if not enabled)
+;;
+;; Notes:
+;; - file/aio is an async, completion-based protocol over a pollable stream.
+;; - We use `sys:loop` (via `loop_wait_readable_until`) to wait for completions instead of busy spinning.
+
+fn file_zi_e_again() -> i32
+  ;; From zi_sysabi25.h
+  return -6:i32
+end
+
+;; --- small helpers (ptr as i64 in memory) ---
+
+fn file_store_ptr(dst:ptr, v:ptr) -> i32
+  store.i64(dst, ptr.to_i64(v)) +align=1
+  return 0:i32
+end
+
+fn file_load_ptr(src:ptr) -> ptr
+  let v: i64 = load.i64(src) +align=1
+  return ptr.from_i64(v)
+end
+
+fn file_store_i64(dst:ptr, v:i64) -> i32
+  store.i64(dst, v) +align=1
+  return 0:i32
+end
+
+fn file_load_i64(src:ptr) -> i64
+  return load.i64(src) +align=1
+end
+
+fn file_cstr_len(p:ptr) -> i32
+  ;; Returns length in bytes, not including trailing NUL.
+  block entry
+    term.br to loop args:[0:i32]
+  end
+
+  block loop(i:i32)
+    let c: i8 = load.i8(ptr.offset(i8, p, i))
+    let z: bool = i32.cmp.eq(i32.zext.i8(c), 0:i32)
+    term.cbr cond:z,
+      then:done args:[i],
+      else:cont args:[i]
+  end
+
+  block cont(i:i32)
+    term.br to loop args:[i32.add(i, 1:i32)]
+  end
+
+  block done(n:i32)
+    term.ret value:n
+  end
+end
+
+fn file_read_u16le(p:ptr) -> i32
+  let b0: i8 = load.i8(p)
+  let b1: i8 = load.i8(ptr.offset(i8, p, 1:i64))
+  let lo: i32 = i32.zext.i8(b0)
+  let hi: i32 = i32.zext.i8(b1)
+  return i32.add(lo, i32.mul(hi, 256:i32))
+end
+
+fn file_read_u64le(p:ptr) -> i64
+  return load.i64(p) +align=1
+end
+
+fn file_write_u64le(p:ptr, v:i64) -> i32
+  store.i64(p, v) +align=1
+  return 8:i32
+end
+
+;; --- cap open ---
+
+fn file_aio_open() -> i32
+  ;; Open request layout (40 bytes), little-endian:
+  ;;   u64 kind_ptr; u32 kind_len;
+  ;;   u64 name_ptr; u32 name_len;
+  ;;   u32 mode; u64 params_ptr; u32 params_len
+
+  let kind: ptr = "file"
+  let name: ptr = "aio"
+
+  let req: ptr = zi_alloc(40:i32)
+
+  let kind_i64: i64 = ptr.to_i64(kind)
+  let name_i64: i64 = ptr.to_i64(name)
+
+  let _: i32 = file_write_u64le(ptr.offset(i8, req, 0:i64), kind_i64)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, req, 8:i64), 4:i32)
+  let _: i32 = file_write_u64le(ptr.offset(i8, req, 12:i64), name_i64)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, req, 20:i64), 3:i32)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, req, 24:i64), 0:i32)
+  let _: i32 = file_write_u64le(ptr.offset(i8, req, 28:i64), 0:i64)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, req, 36:i64), 0:i32)
+
+  let h: i32 = zi_cap_open(req)
+  let ignored_free: i32 = zi_free(req)
+  return h
+end
+
+fn file_aio_ev_done() -> i32
+  return 100:i32
+end
+
+fn file_aio_op_open() -> i32
+  return 1:i32
+end
+
+fn file_aio_op_close() -> i32
+  return 2:i32
+end
+
+fn file_aio_op_read() -> i32
+  return 3:i32
+end
+
+fn file_aio_op_write() -> i32
+  return 4:i32
+end
+
+fn file_aio_op_mkdir() -> i32
+  return 5:i32
+end
+
+fn file_aio_op_rmdir() -> i32
+  return 6:i32
+end
+
+fn file_aio_op_unlink() -> i32
+  return 7:i32
+end
+
+fn file_aio_op_stat() -> i32
+  return 8:i32
+end
+
+fn file_aio_op_readdir() -> i32
+  return 9:i32
+end
+
+;; Open flags (zi_file_open_flags25.h)
+fn file_o_read() -> i32
+  return 1:i32
+end
+fn file_o_write() -> i32
+  return 2:i32
+end
+fn file_o_create() -> i32
+  return 4:i32
+end
+fn file_o_trunc() -> i32
+  return 8:i32
+end
+fn file_o_append() -> i32
+  return 16:i32
+end
+
+;; --- ZCL1 error payload decode (optional DX) ---
+
+fn file_zcl1_error_parse(fr:ptr, fr_len:i32, out_trace_ptr:ptr, out_trace_len:ptr, out_msg_ptr:ptr, out_msg_len:ptr) -> i32
+  ;; On success:
+  ;; - writes trace ptr/len and msg ptr/len to out params
+  ;; - returns 0
+  ;; On failure: returns -1
+  block entry
+    let ok_hdr: bool = zcl1_is_hdr(fr, fr_len)
+    let st: i32 = zcl1_read_status(fr)
+    let is_err: bool = i32.cmp.eq(st, 0:i32)
+    let ok0: bool = bool.and(ok_hdr, is_err)
+    term.cbr cond:ok0,
+      then:have_pl,
+      else:bad
+  end
+
+  block have_pl
+    let pl_len: i32 = zcl1_read_payload_len(fr)
+    let ok_len: bool = i32.cmp.sge(fr_len, i32.add(24:i32, pl_len))
+    term.cbr cond:ok_len,
+      then:parse_tlen,
+      else:bad
+  end
+
+  block parse_tlen
+    let pl: ptr = ptr.offset(i8, fr, 24:i64)
+    let ok_tlen: bool = i32.cmp.sge(zcl1_read_payload_len(fr), 4:i32)
+    term.cbr cond:ok_tlen,
+      then:cont_tlen,
+      else:bad
+  end
+
+  block cont_tlen
+    let pl: ptr = ptr.offset(i8, fr, 24:i64)
+    let tlen: i32 = zcl1_read_u32le(pl)
+    let off1: i32 = i32.add(4:i32, tlen)
+    let ok1: bool = i32.cmp.sle(off1, zcl1_read_payload_len(fr))
+    term.cbr cond:ok1,
+      then:parse_mlen args:[tlen, off1],
+      else:bad
+  end
+
+  block parse_mlen(tlen:i32, off1:i32)
+    let pl: ptr = ptr.offset(i8, fr, 24:i64)
+    let trace_ptr2: ptr = ptr.offset(i8, pl, 4:i64)
+    let mlen_off: ptr = ptr.offset(i8, pl, off1)
+    let ok2: bool = i32.cmp.sle(i32.add(off1, 4:i32), zcl1_read_payload_len(fr))
+    term.cbr cond:ok2,
+      then:cont_mlen args:[tlen, trace_ptr2, off1, mlen_off],
+      else:bad
+  end
+
+  block cont_mlen(tlen:i32, trace_ptr2:ptr, off1:i32, mlen_off:ptr)
+    let pl: ptr = ptr.offset(i8, fr, 24:i64)
+    let mlen: i32 = zcl1_read_u32le(mlen_off)
+    let msg_ptr2: ptr = ptr.offset(i8, pl, i32.add(off1, 4:i32))
+    let off2: i32 = i32.add(i32.add(off1, 4:i32), mlen)
+    let ok3: bool = i32.cmp.sle(off2, zcl1_read_payload_len(fr))
+    term.cbr cond:ok3,
+      then:write_out args:[tlen, trace_ptr2, mlen, msg_ptr2],
+      else:bad
+  end
+
+  block write_out(tlen:i32, trace_ptr2:ptr, mlen:i32, msg_ptr2:ptr)
+    let _: i32 = file_store_ptr(out_trace_ptr, trace_ptr2)
+    let _: i32 = zcl1_write_u32le(out_trace_len, tlen)
+    let _: i32 = file_store_ptr(out_msg_ptr, msg_ptr2)
+    let _: i32 = zcl1_write_u32le(out_msg_len, mlen)
+    term.ret value:0:i32
+  end
+
+  block bad
+    term.ret value:-1:i32
+  end
+end
+
+;; --- protocol helpers ---
+
+fn file_aio_resp_ok(resp_ptr:ptr, resp_len:i32, op:i32, rid:i32) -> bool
+  let ok_hdr: bool = zcl1_is_hdr(resp_ptr, resp_len)
+  let ok_op: bool = i32.cmp.eq(zcl1_read_op_u16(resp_ptr), op)
+  let ok_rid: bool = i32.cmp.eq(zcl1_read_rid(resp_ptr), rid)
+  let ok_status: bool = i32.cmp.eq(zcl1_read_status(resp_ptr), 1:i32)
+  let pl: i32 = zcl1_read_payload_len(resp_ptr)
+  let ok_len: bool = i32.cmp.sge(resp_len, i32.add(24:i32, pl))
+  return bool.and(ok_hdr, bool.and(ok_op, bool.and(ok_rid, bool.and(ok_status, ok_len))))
+end
+
+fn file_aio_done_ok(done_ptr:ptr, done_len:i32, rid:i32, want_orig_op:i32) -> bool
+  ;; Validate EV_DONE header + payload prefix.
+  let ok_hdr: bool = file_aio_resp_ok(done_ptr, done_len, file_aio_ev_done(), rid)
+  let pl: i32 = zcl1_read_payload_len(done_ptr)
+  let ok_pl: bool = i32.cmp.sge(pl, 8:i32)
+  let ok0: bool = bool.and(ok_hdr, ok_pl)
+  let pl_ptr: ptr = ptr.offset(i8, done_ptr, 24:i64)
+  let orig: i32 = file_read_u16le(pl_ptr)
+  let ok_orig: bool = i32.cmp.eq(orig, want_orig_op)
+  return bool.and(ok0, ok_orig)
+end
+
+fn file_aio_done_result_u32(done_ptr:ptr) -> i32
+  let pl: ptr = ptr.offset(i8, done_ptr, 24:i64)
+  ;; payload: u16 orig_op, u16 reserved, u32 result
+  return zcl1_read_u32le(ptr.offset(i8, pl, 4:i64))
+end
+
+fn file_aio_done_extra_ptr(done_ptr:ptr) -> ptr
+  let pl: ptr = ptr.offset(i8, done_ptr, 24:i64)
+  return ptr.offset(i8, pl, 8:i64)
+end
+
+fn file_aio_submit_and_wait(aio_h:i32, op:i32, rid:i32, payload:ptr, payload_len:i32, timeout_ms:i32, done_ptr:ptr, done_cap:i32) -> i32
+  ;; Writes request frame, reads immediate ack, waits, then reads EV_DONE.
+  block entry
+    let fr_len: i32 = i32.add(24:i32, payload_len)
+    let fr: ptr = zi_alloc(fr_len)
+    let _: i32 = zcl1_write_hdr(fr, op, rid, 0:i32, payload_len)
+
+    let has_pl: bool = i32.cmp.sgt(payload_len, 0:i32)
+    term.cbr cond:has_pl,
+      then:copy args:[fr, fr_len],
+      else:write args:[fr, fr_len]
+  end
+
+  block copy(fr:ptr, fr_len:i32)
+    let dst: ptr = ptr.offset(i8, fr, 24:i64)
+    mem.copy(dst, payload, payload_len) +alignDst=1 +alignSrc=1 +overlap=disallow
+    term.br to write args:[fr, fr_len]
+  end
+
+  block write(fr:ptr, fr_len:i32)
+    let wrc: i32 = loop_write_all(aio_h, fr, fr_len)
+    let ignored_free: i32 = zi_free(fr)
+    let ok: bool = i32.cmp.eq(wrc, 0:i32)
+    term.cbr cond:ok,
+      then:read_ack,
+      else:exit_err
+  end
+
+  block read_ack
+    let ack: ptr = zi_alloc(256:i32)
+    let n: i32 = loop_read_full_frame(aio_h, ack, 256:i32)
+    let ok_ack: bool = file_aio_resp_ok(ack, n, op, rid)
+    term.cbr cond:ok_ack,
+      then:wait_done args:[ack],
+      else:ack_err args:[ack]
+  end
+
+  block ack_err(ack:ptr)
+    let ignored_free: i32 = zi_free(ack)
+    term.ret value:-1:i32
+  end
+
+  block wait_done(ack:ptr)
+    let ignored_free: i32 = zi_free(ack)
+    let w: i32 = loop_wait_readable_until(aio_h, timeout_ms)
+    let ready: bool = i32.cmp.eq(w, loop_wait_rc_ready())
+    term.cbr cond:ready,
+      then:read_done,
+      else:exit_timeout
+  end
+
+  block read_done
+    let dn: i32 = loop_read_full_frame(aio_h, done_ptr, done_cap)
+    term.ret value:dn
+  end
+
+  block exit_timeout
+    term.ret value:-2:i32
+  end
+
+  block exit_err
+    term.ret value:-1:i32
+  end
+end
+
+;; --- high-level operations ---
+
+;; stat struct (matches zi_file_aio25.h STAT extra: 32 bytes)
+;;  u64 size
+;;  u64 mtime_ns
+;;  u32 mode
+;;  u32 uid
+;;  u32 gid
+;;  u32 reserved
+
+;; SIR surface syntax for named-field structs is not currently used elsewhere in
+;; this repo, so we treat STAT as a fixed 32-byte little-endian blob.
+fn file_stat_size(st:ptr) -> i64
+  return file_read_u64le(ptr.offset(i8, st, 0:i64))
+end
+
+fn file_stat_mtime_ns(st:ptr) -> i64
+  return file_read_u64le(ptr.offset(i8, st, 8:i64))
+end
+
+fn file_stat_mode(st:ptr) -> i32
+  return zcl1_read_u32le(ptr.offset(i8, st, 16:i64))
+end
+
+fn file_stat_uid(st:ptr) -> i32
+  return zcl1_read_u32le(ptr.offset(i8, st, 20:i64))
+end
+
+fn file_stat_gid(st:ptr) -> i32
+  return zcl1_read_u32le(ptr.offset(i8, st, 24:i64))
+end
+
+fn file_stat_reserved(st:ptr) -> i32
+  return zcl1_read_u32le(ptr.offset(i8, st, 28:i64))
+end
+
+fn file_stat(path:ptr, path_len:i32, timeout_ms:i32, out_stat:ptr) -> i32
+  block entry
+    let aio_h: i32 = file_aio_open()
+    let ok_open: bool = i32.cmp.sge(aio_h, 3:i32)
+    term.cbr cond:ok_open,
+      then:submit args:[aio_h],
+      else:fail_open
+  end
+
+  block fail_open
+    term.ret value:-10:i32
+  end
+
+  block submit(aio_h:i32)
+    let pl: ptr = zi_alloc(16:i32)
+    let _: i32 = file_write_u64le(ptr.offset(i8, pl, 0:i64), ptr.to_i64(path))
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 8:i64), path_len)
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 12:i64), 0:i32)
+
+    let done: ptr = zi_alloc(256:i32)
+    let dn: i32 = file_aio_submit_and_wait(aio_h, file_aio_op_stat(), 1:i32, pl, 16:i32, timeout_ms, done, 256:i32)
+    let ignored_free: i32 = zi_free(pl)
+
+    let ok_done: bool = file_aio_done_ok(done, dn, 1:i32, file_aio_op_stat())
+    term.cbr cond:ok_done,
+      then:copy args:[aio_h, done],
+      else:err args:[aio_h, done, dn]
+  end
+
+  block copy(aio_h:i32, done:ptr)
+    let extra: ptr = file_aio_done_extra_ptr(done)
+    ;; extra is 32 bytes
+    mem.copy(out_stat, extra, 32:i32) +alignDst=1 +alignSrc=1 +overlap=disallow
+    let ignored_free: i32 = zi_free(done)
+    let ignored_end: i32 = zi_end(aio_h)
+    term.ret value:0:i32
+  end
+
+  block err(aio_h:i32, done:ptr, dn:i32)
+    let ignored_free: i32 = zi_free(done)
+    let ignored_end: i32 = zi_end(aio_h)
+    ;; propagate timeout vs generic error
+    let is_timeout: bool = i32.cmp.eq(dn, -2:i32)
+    term.ret value:select(i32, is_timeout, -20:i32, -1:i32)
+  end
+end
+
+fn file_stat_cstr(path:ptr, timeout_ms:i32, out_stat:ptr) -> i32
+  return file_stat(path, file_cstr_len(path), timeout_ms, out_stat)
+end
+
+fn file_read_all_alloc(path:ptr, path_len:i32, timeout_ms:i32, out_ptr:ptr, out_len:ptr) -> i32
+  ;; Reads whole file into a freshly allocated buffer.
+  ;; On success: writes buf ptr + length; returns 0.
+  ;; Caller owns the buffer and must `zi_free` it.
+  block entry
+    let aio_h: i32 = file_aio_open()
+    let ok_open: bool = i32.cmp.sge(aio_h, 3:i32)
+    term.cbr cond:ok_open,
+      then:stat args:[aio_h],
+      else:fail_open
+  end
+
+  block fail_open
+    term.ret value:-10:i32
+  end
+
+  block stat(aio_h:i32)
+    let st: ptr = zi_alloc(32:i32)
+    let rc: i32 = file_stat(path, path_len, timeout_ms, st)
+    let ok: bool = i32.cmp.eq(rc, 0:i32)
+    term.cbr cond:ok,
+      then:open_file args:[aio_h, st],
+      else:stat_err args:[aio_h, st, rc]
+  end
+
+  block stat_err(aio_h:i32, st:ptr, rc:i32)
+    let ignored_free: i32 = zi_free(st)
+    let ignored_end: i32 = zi_end(aio_h)
+    term.ret value:rc
+  end
+
+  block open_file(aio_h:i32, st:ptr)
+    ;; OPEN payload: u64 path_ptr, u32 path_len, u32 oflags, u32 create_mode
+    let pl: ptr = zi_alloc(20:i32)
+    let _: i32 = file_write_u64le(ptr.offset(i8, pl, 0:i64), ptr.to_i64(path))
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 8:i64), path_len)
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 12:i64), file_o_read())
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 16:i64), 0:i32)
+
+    let done: ptr = zi_alloc(256:i32)
+    let dn: i32 = file_aio_submit_and_wait(aio_h, file_aio_op_open(), 1:i32, pl, 20:i32, timeout_ms, done, 256:i32)
+    let ignored_free: i32 = zi_free(pl)
+
+    let ok_done: bool = file_aio_done_ok(done, dn, 1:i32, file_aio_op_open())
+    term.cbr cond:ok_done,
+      then:read_loop_init args:[aio_h, st, done],
+      else:open_err args:[aio_h, st, done, dn]
+  end
+
+  block open_err(aio_h:i32, st:ptr, done:ptr, dn:i32)
+    let ignored_free: i32 = zi_free(st)
+    let ignored_free: i32 = zi_free(done)
+    let ignored_end: i32 = zi_end(aio_h)
+    let is_timeout: bool = i32.cmp.eq(dn, -2:i32)
+    term.ret value:select(i32, is_timeout, -20:i32, -1:i32)
+  end
+
+  block read_loop_init(aio_h:i32, st:ptr, done:ptr)
+    let extra: ptr = file_aio_done_extra_ptr(done)
+    let file_id: i64 = file_read_u64le(extra)
+
+    let size: i64 = file_load_i64(st)
+    let size32: i32 = i32.trunc.i64(size)
+    let buf: ptr = zi_alloc(size32)
+
+    let ignored_free: i32 = zi_free(done)
+    let ignored_free: i32 = zi_free(st)
+
+    term.br to read_loop args:[aio_h, file_id, 0:i32, buf, size32]
+  end
+
+  block read_loop(aio_h:i32, file_id:i64, off:i32, buf:ptr, total:i32)
+    let done: bool = i32.cmp.sge(off, total)
+    term.cbr cond:done,
+      then:close_file args:[aio_h, file_id, buf, total],
+      else:read_chunk args:[aio_h, file_id, off, buf, total]
+  end
+
+  block read_chunk(aio_h:i32, file_id:i64, off:i32, buf:ptr, total:i32)
+    let rem: i32 = i32.sub(total, off)
+    let want: i32 = select(i32, i32.cmp.sgt(rem, 65536:i32), 65536:i32, rem)
+
+    ;; READ payload: u64 file_id, u64 offset, u32 max_len, u32 flags(0)
+    let pl: ptr = zi_alloc(24:i32)
+    let _: i32 = file_write_u64le(ptr.offset(i8, pl, 0:i64), file_id)
+    let _: i32 = file_write_u64le(ptr.offset(i8, pl, 8:i64), i64.zext.i32(off))
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 16:i64), want)
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 20:i64), 0:i32)
+
+    let done_fr: ptr = zi_alloc(i32.add(64:i32, want))
+    let dn: i32 = file_aio_submit_and_wait(aio_h, file_aio_op_read(), 2:i32, pl, 24:i32, timeout_ms, done_fr, i32.add(64:i32, want))
+    let ignored_free: i32 = zi_free(pl)
+
+    let ok_done: bool = file_aio_done_ok(done_fr, dn, 2:i32, file_aio_op_read())
+    term.cbr cond:ok_done,
+      then:copy_bytes args:[aio_h, file_id, off, buf, total, done_fr],
+      else:read_err args:[aio_h, file_id, buf, total, done_fr, dn]
+  end
+
+  block copy_bytes(aio_h:i32, file_id:i64, off:i32, buf:ptr, total:i32, done_fr:ptr)
+    let n: i32 = file_aio_done_result_u32(done_fr)
+    let extra: ptr = file_aio_done_extra_ptr(done_fr)
+    let dst: ptr = ptr.offset(i8, buf, off)
+    mem.copy(dst, extra, n) +alignDst=1 +alignSrc=1 +overlap=disallow
+    let ignored_free: i32 = zi_free(done_fr)
+    term.br to read_loop args:[aio_h, file_id, i32.add(off, n), buf, total]
+  end
+
+  block read_err(aio_h:i32, file_id:i64, buf:ptr, total:i32, done_fr:ptr, dn:i32)
+    let ignored_free: i32 = zi_free(done_fr)
+    let ignored_free: i32 = zi_free(buf)
+    let ignored_end: i32 = zi_end(aio_h)
+    let is_timeout: bool = i32.cmp.eq(dn, -2:i32)
+    term.ret value:select(i32, is_timeout, -20:i32, -1:i32)
+  end
+
+  block close_file(aio_h:i32, file_id:i64, buf:ptr, total:i32)
+    ;; CLOSE payload: u64 file_id
+    let pl: ptr = zi_alloc(8:i32)
+    let _: i32 = file_write_u64le(pl, file_id)
+
+    let done_fr: ptr = zi_alloc(128:i32)
+    let dn: i32 = file_aio_submit_and_wait(aio_h, file_aio_op_close(), 3:i32, pl, 8:i32, timeout_ms, done_fr, 128:i32)
+    let ignored_free: i32 = zi_free(pl)
+
+    let ok_done: bool = file_aio_done_ok(done_fr, dn, 3:i32, file_aio_op_close())
+    let ignored_free: i32 = zi_free(done_fr)
+    let ignored_end: i32 = zi_end(aio_h)
+
+    term.cbr cond:ok_done,
+      then:ok args:[buf, total],
+      else:close_err args:[buf, dn]
+  end
+
+  block ok(buf:ptr, total:i32)
+    let _: i32 = file_store_ptr(out_ptr, buf)
+    let _: i32 = zcl1_write_u32le(out_len, total)
+    term.ret value:0:i32
+  end
+
+  block close_err(buf:ptr, dn:i32)
+    let ignored_free: i32 = zi_free(buf)
+    let is_timeout: bool = i32.cmp.eq(dn, -2:i32)
+    term.ret value:select(i32, is_timeout, -20:i32, -1:i32)
+  end
+end
+
+fn file_read_all_alloc_cstr(path:ptr, timeout_ms:i32, out_ptr:ptr, out_len:ptr) -> i32
+  return file_read_all_alloc(path, file_cstr_len(path), timeout_ms, out_ptr, out_len)
+end
+
+fn file_write_all(path:ptr, path_len:i32, src:ptr, src_len:i32, timeout_ms:i32) -> i32
+  ;; Writes whole buffer to a file (CREATE|TRUNC|WRITE).
+  block entry
+    let aio_h: i32 = file_aio_open()
+    let ok_open: bool = i32.cmp.sge(aio_h, 3:i32)
+    term.cbr cond:ok_open,
+      then:open_file args:[aio_h],
+      else:fail_open
+  end
+
+  block fail_open
+    term.ret value:-10:i32
+  end
+
+  block open_file(aio_h:i32)
+    let pl: ptr = zi_alloc(20:i32)
+    let _: i32 = file_write_u64le(ptr.offset(i8, pl, 0:i64), ptr.to_i64(path))
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 8:i64), path_len)
+    let oflags: i32 = i32.add(file_o_write(), i32.add(file_o_create(), file_o_trunc()))
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 12:i64), oflags)
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 16:i64), 420:i32) ;; 0644
+
+    let done: ptr = zi_alloc(256:i32)
+    let dn: i32 = file_aio_submit_and_wait(aio_h, file_aio_op_open(), 1:i32, pl, 20:i32, timeout_ms, done, 256:i32)
+    let ignored_free: i32 = zi_free(pl)
+
+    let ok_done: bool = file_aio_done_ok(done, dn, 1:i32, file_aio_op_open())
+    term.cbr cond:ok_done,
+      then:write_data args:[aio_h, done],
+      else:open_err args:[aio_h, done, dn]
+  end
+
+  block open_err(aio_h:i32, done:ptr, dn:i32)
+    let ignored_free: i32 = zi_free(done)
+    let ignored_end: i32 = zi_end(aio_h)
+    let is_timeout: bool = i32.cmp.eq(dn, -2:i32)
+    term.ret value:select(i32, is_timeout, -20:i32, -1:i32)
+  end
+
+  block write_data(aio_h:i32, done:ptr)
+    let file_id: i64 = file_read_u64le(file_aio_done_extra_ptr(done))
+    let ignored_free: i32 = zi_free(done)
+
+    ;; WRITE payload: u64 file_id, u64 offset, u64 src_ptr, u32 src_len, u32 flags(0)
+    let pl: ptr = zi_alloc(32:i32)
+    let _: i32 = file_write_u64le(ptr.offset(i8, pl, 0:i64), file_id)
+    let _: i32 = file_write_u64le(ptr.offset(i8, pl, 8:i64), 0:i64)
+    let _: i32 = file_write_u64le(ptr.offset(i8, pl, 16:i64), ptr.to_i64(src))
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 24:i64), src_len)
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 28:i64), 0:i32)
+
+    let done_fr: ptr = zi_alloc(256:i32)
+    let dn: i32 = file_aio_submit_and_wait(aio_h, file_aio_op_write(), 2:i32, pl, 32:i32, timeout_ms, done_fr, 256:i32)
+    let ignored_free: i32 = zi_free(pl)
+
+    let ok_done: bool = file_aio_done_ok(done_fr, dn, 2:i32, file_aio_op_write())
+    let ignored_free: i32 = zi_free(done_fr)
+
+    term.cbr cond:ok_done,
+      then:close args:[aio_h, file_id],
+      else:err args:[aio_h, dn]
+  end
+
+  block close(aio_h:i32, file_id:i64)
+    let pl: ptr = zi_alloc(8:i32)
+    let _: i32 = file_write_u64le(pl, file_id)
+    let done_fr: ptr = zi_alloc(128:i32)
+    let dn: i32 = file_aio_submit_and_wait(aio_h, file_aio_op_close(), 3:i32, pl, 8:i32, timeout_ms, done_fr, 128:i32)
+    let ignored_free: i32 = zi_free(pl)
+
+    let ok_done: bool = file_aio_done_ok(done_fr, dn, 3:i32, file_aio_op_close())
+    let ignored_free: i32 = zi_free(done_fr)
+    let ignored_end: i32 = zi_end(aio_h)
+
+    let is_timeout: bool = i32.cmp.eq(dn, -2:i32)
+    term.cbr cond:ok_done,
+      then:ok,
+      else:ret_timeout args:[is_timeout]
+  end
+
+  block ok
+    term.ret value:0:i32
+  end
+
+  block ret_timeout(is_timeout:bool)
+    term.ret value:select(i32, is_timeout, -20:i32, -1:i32)
+  end
+
+  block err(aio_h:i32, dn:i32)
+    let ignored_end: i32 = zi_end(aio_h)
+    let is_timeout: bool = i32.cmp.eq(dn, -2:i32)
+    term.ret value:select(i32, is_timeout, -20:i32, -1:i32)
+  end
+end
+
+fn file_write_all_cstr(path:ptr, src:ptr, src_len:i32, timeout_ms:i32) -> i32
+  return file_write_all(path, file_cstr_len(path), src, src_len, timeout_ms)
+end
+
+fn file_mkdir(path:ptr, path_len:i32, mode:i32, timeout_ms:i32) -> i32
+  block entry
+    let aio_h: i32 = file_aio_open()
+    let ok_open: bool = i32.cmp.sge(aio_h, 3:i32)
+    term.cbr cond:ok_open,
+      then:submit args:[aio_h],
+      else:fail_open
+  end
+
+  block fail_open
+    term.ret value:-10:i32
+  end
+
+  block submit(aio_h:i32)
+    ;; MKDIR payload: u64 path_ptr, u32 path_len, u32 mode, u32 flags(0)
+    let pl: ptr = zi_alloc(20:i32)
+    let _: i32 = file_write_u64le(ptr.offset(i8, pl, 0:i64), ptr.to_i64(path))
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 8:i64), path_len)
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 12:i64), mode)
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 16:i64), 0:i32)
+
+    let done: ptr = zi_alloc(128:i32)
+    let dn: i32 = file_aio_submit_and_wait(aio_h, file_aio_op_mkdir(), 1:i32, pl, 20:i32, timeout_ms, done, 128:i32)
+    let ignored_free: i32 = zi_free(pl)
+
+    let ok_done: bool = file_aio_done_ok(done, dn, 1:i32, file_aio_op_mkdir())
+    let ignored_free: i32 = zi_free(done)
+    let ignored_end: i32 = zi_end(aio_h)
+
+    let is_timeout: bool = i32.cmp.eq(dn, -2:i32)
+    term.ret value:select(i32, ok_done, 0:i32, select(i32, is_timeout, -20:i32, -1:i32))
+  end
+end
+
+fn file_mkdir_cstr(path:ptr, mode:i32, timeout_ms:i32) -> i32
+  return file_mkdir(path, file_cstr_len(path), mode, timeout_ms)
+end
+
+fn file_unlink(path:ptr, path_len:i32, timeout_ms:i32) -> i32
+  block entry
+    let aio_h: i32 = file_aio_open()
+    let ok_open: bool = i32.cmp.sge(aio_h, 3:i32)
+    term.cbr cond:ok_open,
+      then:submit args:[aio_h],
+      else:fail_open
+  end
+
+  block fail_open
+    term.ret value:-10:i32
+  end
+
+  block submit(aio_h:i32)
+    ;; UNLINK payload: u64 path_ptr, u32 path_len, u32 flags(0)
+    let pl: ptr = zi_alloc(16:i32)
+    let _: i32 = file_write_u64le(ptr.offset(i8, pl, 0:i64), ptr.to_i64(path))
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 8:i64), path_len)
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 12:i64), 0:i32)
+
+    let done: ptr = zi_alloc(128:i32)
+    let dn: i32 = file_aio_submit_and_wait(aio_h, file_aio_op_unlink(), 1:i32, pl, 16:i32, timeout_ms, done, 128:i32)
+    let ignored_free: i32 = zi_free(pl)
+
+    let ok_done: bool = file_aio_done_ok(done, dn, 1:i32, file_aio_op_unlink())
+    let ignored_free: i32 = zi_free(done)
+    let ignored_end: i32 = zi_end(aio_h)
+
+    let is_timeout: bool = i32.cmp.eq(dn, -2:i32)
+    term.ret value:select(i32, ok_done, 0:i32, select(i32, is_timeout, -20:i32, -1:i32))
+  end
+end
+
+fn file_unlink_cstr(path:ptr, timeout_ms:i32) -> i32
+  return file_unlink(path, file_cstr_len(path), timeout_ms)
+end
+
+fn file_readdir(path:ptr, path_len:i32, max_bytes:i32, timeout_ms:i32, out_buf:ptr, out_cap:i32, out_len:ptr) -> i32
+  ;; Issues READDIR and returns the *raw EV_DONE frame* in out_buf/out_len.
+  ;; The caller can parse entries using file_readdir_* helpers.
+  block entry
+    let aio_h: i32 = file_aio_open()
+    let ok_open: bool = i32.cmp.sge(aio_h, 3:i32)
+    term.cbr cond:ok_open,
+      then:submit args:[aio_h],
+      else:fail_open
+  end
+
+  block fail_open
+    term.ret value:-10:i32
+  end
+
+  block submit(aio_h:i32)
+    ;; READDIR payload: u64 path_ptr, u32 path_len, u32 max_bytes, u32 flags(0)
+    let pl: ptr = zi_alloc(20:i32)
+    let _: i32 = file_write_u64le(ptr.offset(i8, pl, 0:i64), ptr.to_i64(path))
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 8:i64), path_len)
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 12:i64), max_bytes)
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, pl, 16:i64), 0:i32)
+
+    let dn: i32 = file_aio_submit_and_wait(aio_h, file_aio_op_readdir(), 1:i32, pl, 20:i32, timeout_ms, out_buf, out_cap)
+    let ignored_free: i32 = zi_free(pl)
+
+    let ok_done: bool = file_aio_done_ok(out_buf, dn, 1:i32, file_aio_op_readdir())
+    let ignored_end: i32 = zi_end(aio_h)
+
+    term.cbr cond:ok_done,
+      then:ok args:[dn],
+      else:err args:[dn]
+  end
+
+  block ok(dn:i32)
+    let _: i32 = zcl1_write_u32le(out_len, dn)
+    term.ret value:0:i32
+  end
+
+  block err(dn:i32)
+    let is_timeout: bool = i32.cmp.eq(dn, -2:i32)
+    term.ret value:select(i32, is_timeout, -20:i32, -1:i32)
+  end
+end
+
+fn file_readdir_cstr(path:ptr, max_bytes:i32, timeout_ms:i32, out_buf:ptr, out_cap:i32, out_len:ptr) -> i32
+  return file_readdir(path, file_cstr_len(path), max_bytes, timeout_ms, out_buf, out_cap, out_len)
+end
+
+;; READDIR parse helpers.
+
+fn file_readdir_entry_count(done_ptr:ptr, done_len:i32) -> i32
+  let ok: bool = file_aio_done_ok(done_ptr, done_len, 1:i32, file_aio_op_readdir())
+  return select(i32, ok, file_aio_done_result_u32(done_ptr), -1:i32)
+end
+
+fn file_readdir_truncated(done_ptr:ptr) -> bool
+  let extra: ptr = file_aio_done_extra_ptr(done_ptr)
+  let fl: i32 = zcl1_read_u32le(extra)
+  let trunc: bool = i32.cmp.ne(i32.and(fl, 1:i32), 0:i32)
+  return trunc
+end
+
+fn file_readdir_entry_at(done_ptr:ptr, done_len:i32, idx:i32, out_dtype:ptr, out_name_ptr:ptr, out_name_len:ptr) -> i32
+  ;; Walks the variable-length directory listing.
+  block entry
+    let n_entries: i32 = file_aio_done_result_u32(done_ptr)
+    let ok_idx: bool = bool.and(i32.cmp.sge(idx, 0:i32), i32.cmp.slt(idx, n_entries))
+    term.cbr cond:ok_idx,
+      then:init,
+      else:bad
+  end
+
+  block init
+    let p: ptr = ptr.offset(i8, file_aio_done_extra_ptr(done_ptr), 4:i64)
+    term.br to loop args:[0:i32, p]
+  end
+
+  block loop(i:i32, p:ptr)
+    let is_target: bool = i32.cmp.eq(i, idx)
+    term.cbr cond:is_target,
+      then:read_target args:[p],
+      else:skip args:[i, p]
+  end
+
+  block read_target(p:ptr)
+    let dtype: i32 = zcl1_read_u32le(p)
+    let nlen: i32 = zcl1_read_u32le(ptr.offset(i8, p, 4:i64))
+    let namep: ptr = ptr.offset(i8, p, 8:i64)
+    let _: i32 = zcl1_write_u32le(out_dtype, dtype)
+    let _: i32 = file_store_ptr(out_name_ptr, namep)
+    let _: i32 = zcl1_write_u32le(out_name_len, nlen)
+    term.ret value:0:i32
+  end
+
+  block skip(i:i32, p:ptr)
+    let nlen: i32 = zcl1_read_u32le(ptr.offset(i8, p, 4:i64))
+    let p2: ptr = ptr.offset(i8, p, i32.add(8:i32, nlen))
+    term.br to loop args:[i32.add(i, 1:i32), p2]
+  end
+
+  block bad
+    term.ret value:-1:i32
+  end
+end
