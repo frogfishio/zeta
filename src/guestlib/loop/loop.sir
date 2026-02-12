@@ -696,6 +696,133 @@ fn loop_wait_writable(handle:i32, timeout_ms:i32) -> i32
   return loop_wait_events(handle, loop_watch_ev_writable(), timeout_ms)
 end
 
+fn loop_i32_min(a:i32, b:i32) -> i32
+  let a_le_b: bool = i32.cmp.sle(a, b)
+  return select(i32, a_le_b, a, b)
+end
+
+fn loop_wait_events_until(handle:i32, events:i32, timeout_ms:i32, poll_step_ms:i32) -> i32
+  ;; Like `loop_wait_events`, but keeps polling until ready/timeout.
+  ;;
+  ;; Notes:
+  ;; - If timeout_ms == -1, uses the sys/loop “infinite” timeout (0xFFFFFFFF).
+  ;; - For finite timeouts, uses bounded poll slices of up to poll_step_ms.
+  block entry
+    let h: i32 = loop_open()
+    let resp: ptr = zi_alloc(1024:i32)
+    let ok_open: bool = i32.cmp.sge(h, 3:i32)
+    term.cbr cond:ok_open,
+      then:watch args:[h, resp],
+      else:fail_open args:[resp]
+  end
+
+  block watch(h:i32, resp:ptr)
+    let watch_id: i64 = 1:i64
+    let n1: i32 = loop_watch(h, 1:i32, handle, events, watch_id, 0:i32, resp, 1024:i32)
+    let ok1: bool = loop_resp_ok(resp, n1, loop_op_watch(), 1:i32)
+    term.cbr cond:ok1,
+      then:loop_init args:[h, resp, watch_id],
+      else:watch_err args:[h, resp, n1]
+  end
+
+  block watch_err(h:i32, resp:ptr, n1:i32)
+    let nosys_trace: ptr = "sem.sys_loop.nosys"
+    let is_nosys: bool = loop_resp_err_trace_is(resp, n1, loop_op_watch(), 1:i32, nosys_trace, 18:i32)
+    let ignored_end: i32 = zi_end(h)
+    let ignored_free: i32 = zi_free(resp)
+    term.ret value:select(i32, is_nosys, loop_wait_rc_nosys(), loop_wait_rc_watch_failed())
+  end
+
+  block loop_init(h:i32, resp:ptr, watch_id:i64)
+    term.br to loop args:[h, resp, watch_id, timeout_ms]
+  end
+
+  block loop(h:i32, resp:ptr, watch_id:i64, remaining:i32)
+    let inf: bool = i32.cmp.eq(remaining, -1:i32)
+    term.cbr cond:inf,
+      then:poll_inf args:[h, resp, watch_id],
+      else:poll_fin args:[h, resp, watch_id, remaining]
+  end
+
+  block poll_inf(h:i32, resp:ptr, watch_id:i64)
+    let n2: i32 = loop_poll(h, 2:i32, 16:i32, -1:i32, resp, 1024:i32)
+    let ok2: bool = loop_resp_ok(resp, n2, loop_op_poll(), 2:i32)
+    term.cbr cond:ok2,
+      then:check_ready_inf args:[h, resp, watch_id, n2],
+      else:poll_err args:[h, resp, watch_id]
+  end
+
+  block check_ready_inf(h:i32, resp:ptr, watch_id:i64, n2:i32)
+    let ok_ready: bool = loop_poll_has_ready(resp, n2, 2:i32, handle, watch_id, events)
+    term.cbr cond:ok_ready,
+      then:exit_ready args:[h, resp, watch_id],
+      else:loop args:[h, resp, watch_id, -1:i32]
+  end
+
+  block poll_fin(h:i32, resp:ptr, watch_id:i64, remaining:i32)
+    let done: bool = i32.cmp.sle(remaining, 0:i32)
+    term.cbr cond:done,
+      then:exit_timeout args:[h, resp, watch_id],
+      else:poll_step args:[h, resp, watch_id, remaining]
+  end
+
+  block poll_step(h:i32, resp:ptr, watch_id:i64, remaining:i32)
+    let step0: bool = i32.cmp.sle(poll_step_ms, 0:i32)
+    let slice: i32 = select(i32, step0, remaining, loop_i32_min(remaining, poll_step_ms))
+    let n2: i32 = loop_poll(h, 2:i32, 16:i32, slice, resp, 1024:i32)
+    let ok2: bool = loop_resp_ok(resp, n2, loop_op_poll(), 2:i32)
+    term.cbr cond:ok2,
+      then:check_ready_fin args:[h, resp, watch_id, remaining, slice, n2],
+      else:poll_err args:[h, resp, watch_id]
+  end
+
+  block check_ready_fin(h:i32, resp:ptr, watch_id:i64, remaining:i32, slice:i32, n2:i32)
+    let ok_ready: bool = loop_poll_has_ready(resp, n2, 2:i32, handle, watch_id, events)
+    term.cbr cond:ok_ready,
+      then:exit_ready args:[h, resp, watch_id],
+      else:cont args:[h, resp, watch_id, remaining, slice]
+  end
+
+  block cont(h:i32, resp:ptr, watch_id:i64, remaining:i32, slice:i32)
+    let remaining2: i32 = i32.sub(remaining, slice)
+    term.br to loop args:[h, resp, watch_id, remaining2]
+  end
+
+  block poll_err(h:i32, resp:ptr, watch_id:i64)
+    let ignored_unwatch: i32 = loop_unwatch(h, 3:i32, watch_id, resp, 1024:i32)
+    let ignored_end: i32 = zi_end(h)
+    let ignored_free: i32 = zi_free(resp)
+    term.ret value:loop_wait_rc_poll_failed()
+  end
+
+  block exit_ready(h:i32, resp:ptr, watch_id:i64)
+    let ignored_unwatch: i32 = loop_unwatch(h, 3:i32, watch_id, resp, 1024:i32)
+    let ignored_end: i32 = zi_end(h)
+    let ignored_free: i32 = zi_free(resp)
+    term.ret value:loop_wait_rc_ready()
+  end
+
+  block exit_timeout(h:i32, resp:ptr, watch_id:i64)
+    let ignored_unwatch: i32 = loop_unwatch(h, 3:i32, watch_id, resp, 1024:i32)
+    let ignored_end: i32 = zi_end(h)
+    let ignored_free: i32 = zi_free(resp)
+    term.ret value:loop_wait_rc_timeout()
+  end
+
+  block fail_open(resp:ptr)
+    let ignored_free: i32 = zi_free(resp)
+    term.ret value:loop_wait_rc_open_failed()
+  end
+end
+
+fn loop_wait_readable_until(handle:i32, timeout_ms:i32) -> i32
+  return loop_wait_events_until(handle, loop_watch_ev_readable(), timeout_ms, 50:i32)
+end
+
+fn loop_wait_writable_until(handle:i32, timeout_ms:i32) -> i32
+  return loop_wait_events_until(handle, loop_watch_ev_writable(), timeout_ms, 50:i32)
+end
+
 fn loop_sleep_ms(ms:i32) -> i32
   ;; MVP "sleep" implemented via sys/loop timers.
   block entry
