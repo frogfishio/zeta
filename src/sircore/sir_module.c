@@ -2018,7 +2018,6 @@ static int32_t exec_call_extern(const sir_module_t* m, sem_guest_mem_t* mem, sir
     if (ll < 0 || ll > 0x7FFFFFFFll) return ZI_E_INVALID;
     const int32_t rc = host.v.zi_write(host.user, (zi_handle_t)h.u.i32, pp, (zi_size32_t)ll);
     if (sink && sink->on_hostcall) sink->on_hostcall(sink->user, m, fid, ip, nm, rc);
-    if (rc < 0) return rc;
     if (inst->result_count == 1) {
       vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = rc};
     }
@@ -2034,7 +2033,6 @@ static int32_t exec_call_extern(const sir_module_t* m, sem_guest_mem_t* mem, sir
     if (h.kind != SIR_VAL_I32) return ZI_E_INVALID;
     const int32_t rc = host.v.zi_end(host.user, (zi_handle_t)h.u.i32);
     if (sink && sink->on_hostcall) sink->on_hostcall(sink->user, m, fid, ip, nm, rc);
-    if (rc < 0) return rc;
     if (inst->result_count == 1) {
       vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = rc};
     }
@@ -2057,7 +2055,6 @@ static int32_t exec_call_extern(const sir_module_t* m, sem_guest_mem_t* mem, sir
     if (ll < 0 || ll > 0x7FFFFFFFll) return ZI_E_INVALID;
     const int32_t rc = host.v.zi_read(host.user, (zi_handle_t)h.u.i32, pp, (zi_size32_t)ll);
     if (sink && sink->on_hostcall) sink->on_hostcall(sink->user, m, fid, ip, nm, rc);
-    if (rc < 0) return rc;
     if (inst->result_count == 1) {
       vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = rc};
     }
@@ -2089,7 +2086,6 @@ static int32_t exec_call_extern(const sir_module_t* m, sem_guest_mem_t* mem, sir
     if (p.kind != SIR_VAL_PTR) return ZI_E_INVALID;
     const int32_t rc = host.v.zi_free(host.user, p.u.ptr);
     if (sink && sink->on_hostcall) sink->on_hostcall(sink->user, m, fid, ip, nm, rc);
-    if (rc < 0) return rc;
     if (inst->result_count == 1) {
       vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = rc};
     }
@@ -2112,7 +2108,6 @@ static int32_t exec_call_extern(const sir_module_t* m, sem_guest_mem_t* mem, sir
     if (tl.kind != SIR_VAL_I32 || ml.kind != SIR_VAL_I32) return ZI_E_INVALID;
     const int32_t rc = host.v.zi_telemetry(host.user, tpp, (zi_size32_t)tl.u.i32, mpp, (zi_size32_t)ml.u.i32);
     if (sink && sink->on_hostcall) sink->on_hostcall(sink->user, m, fid, ip, nm, rc);
-    if (rc < 0) return rc;
     if (inst->result_count == 1) {
       vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = rc};
     }
@@ -2154,7 +2149,6 @@ static int32_t exec_call_extern(const sir_module_t* m, sem_guest_mem_t* mem, sir
 
     const int32_t rc = host.v.zi_ctl(host.user, req_ptr, (zi_size32_t)req_len64, resp_ptr, (zi_size32_t)resp_cap64);
     if (sink && sink->on_hostcall) sink->on_hostcall(sink->user, m, fid, ip, nm, rc);
-    if (rc < 0) return rc;
     if (inst->result_count == 1) {
       vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = rc};
     }
@@ -2166,7 +2160,6 @@ static int32_t exec_call_extern(const sir_module_t* m, sem_guest_mem_t* mem, sir
     if (n != 0) return ZI_E_INVALID;
     const int32_t rc = host.v.zi_cap_count(host.user);
     if (sink && sink->on_hostcall) sink->on_hostcall(sink->user, m, fid, ip, nm, rc);
-    if (rc < 0) return rc;
     if (inst->result_count == 1) {
       vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = rc};
     }
@@ -2182,7 +2175,6 @@ static int32_t exec_call_extern(const sir_module_t* m, sem_guest_mem_t* mem, sir
     if (idx.kind != SIR_VAL_I32) return ZI_E_INVALID;
     const int32_t rc = host.v.zi_cap_get_size(host.user, idx.u.i32);
     if (sink && sink->on_hostcall) sink->on_hostcall(sink->user, m, fid, ip, nm, rc);
-    if (rc < 0) return rc;
     if (inst->result_count == 1) {
       vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = rc};
     }
@@ -2205,7 +2197,6 @@ static int32_t exec_call_extern(const sir_module_t* m, sem_guest_mem_t* mem, sir
     if (out_cap64 < 0 || out_cap64 > 0x7FFFFFFFll) return ZI_E_INVALID;
     const int32_t rc = host.v.zi_cap_get(host.user, idx.u.i32, out_ptr, (zi_size32_t)out_cap64);
     if (sink && sink->on_hostcall) sink->on_hostcall(sink->user, m, fid, ip, nm, rc);
-    if (rc < 0) return rc;
     if (inst->result_count == 1) {
       vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = rc};
     }
@@ -2222,7 +2213,6 @@ static int32_t exec_call_extern(const sir_module_t* m, sem_guest_mem_t* mem, sir
     if (rp.kind != SIR_VAL_PTR && rp.kind != SIR_VAL_I64) return ZI_E_INVALID;
     const zi_handle_t h = host.v.zi_cap_open(host.user, req_ptr);
     if (sink && sink->on_hostcall) sink->on_hostcall(sink->user, m, fid, ip, nm, (int32_t)h);
-    if (h < 0) return (int32_t)h;
     if (inst->result_count == 1) {
       vals[r0] = (sir_value_t){.kind = SIR_VAL_I32, .u.i32 = (int32_t)h};
     }

@@ -1,0 +1,148 @@
+unit tcp_loopback_echo_demo target host
+@mod main
+
+@include "../tcp/tcp.sir"
+@include "../std/zabi.sir"
+
+fn main() -> i32 public
+  ;; Self-contained loopback test:
+  ;; 1) open listener on 127.0.0.1:0 and read bound port
+  ;; 2) open client connection to that port
+  ;; 3) accept server-side connection
+  ;; 4) client writes 4 bytes, server reads + echoes, client reads + verifies
+  block entry
+    let out_port: ptr = zi_alloc(4:i32)
+    let _: i32 = zcl1_write_u32le(out_port, 0:i32)
+
+    let host: ptr = "127.0.0.1"
+    let l: i32 = tcp_listen(host, 9:i32, 0:i32, tcp_open_nodelay(), 128:i32, out_port)
+    let ok_l: bool = i32.cmp.sge(l, 3:i32)
+    term.cbr cond:ok_l,
+      then:open_client args:[out_port, l],
+      else:fail_open args:[out_port]
+  end
+
+  block fail_open(out_port:ptr)
+    let _: i32 = zi_free(out_port)
+    term.ret value:1:i32
+  end
+
+  block open_client(out_port:ptr, l:i32)
+    let port: i32 = zcl1_read_u32le(out_port)
+    let c: i32 = tcp_connect("127.0.0.1", 9:i32, port, tcp_open_nodelay())
+    let ok_c: bool = i32.cmp.sge(c, 3:i32)
+    term.cbr cond:ok_c,
+      then:accept args:[out_port, l, c],
+      else:fail_client args:[out_port, l]
+  end
+
+  block fail_client(out_port:ptr, l:i32)
+    let _: i32 = zi_end(l)
+    let _: i32 = zi_free(out_port)
+    term.ret value:2:i32
+  end
+
+  block accept(out_port:ptr, l:i32, c:i32)
+    let out_conn: ptr = zi_alloc(4:i32)
+    let out_peer_port: ptr = zi_alloc(4:i32)
+    let out_peer_addr: ptr = zi_alloc(16:i32)
+    let out_local_port: ptr = zi_alloc(4:i32)
+
+    let rc: i32 = tcp_accept_one(l, 2000:i32, out_conn, out_peer_port, out_peer_addr, out_local_port)
+    let ok: bool = i32.cmp.eq(rc, 0:i32)
+    term.cbr cond:ok,
+      then:send args:[out_port, l, c, out_conn, out_peer_port, out_peer_addr, out_local_port],
+      else:fail_accept args:[out_port, l, c, out_conn, out_peer_port, out_peer_addr, out_local_port]
+  end
+
+  block fail_accept(out_port:ptr, l:i32, c:i32, out_conn:ptr, out_peer_port:ptr, out_peer_addr:ptr, out_local_port:ptr)
+    let _: i32 = zi_end(c)
+    let _: i32 = zi_end(l)
+    let _: i32 = zi_free(out_port)
+    let _: i32 = zi_free(out_conn)
+    let _: i32 = zi_free(out_peer_port)
+    let _: i32 = zi_free(out_peer_addr)
+    let _: i32 = zi_free(out_local_port)
+    term.ret value:3:i32
+  end
+
+  block send(out_port:ptr, l:i32, c:i32, out_conn:ptr, out_peer_port:ptr, out_peer_addr:ptr, out_local_port:ptr)
+    let s: i32 = zcl1_read_u32le(out_conn)
+
+    let msg: ptr = "PING"
+    let rcw: i32 = tcp_write_all_until(c, msg, 4:i32, 2000:i32)
+    let okw: bool = i32.cmp.eq(rcw, 0:i32)
+    term.cbr cond:okw,
+      then:recv args:[out_port, l, c, s, out_conn, out_peer_port, out_peer_addr, out_local_port],
+      else:fail_io args:[out_port, l, c, s, out_conn, out_peer_port, out_peer_addr, out_local_port]
+  end
+
+  block recv(out_port:ptr, l:i32, c:i32, s:i32, out_conn:ptr, out_peer_port:ptr, out_peer_addr:ptr, out_local_port:ptr)
+    let buf: ptr = zi_alloc(4:i32)
+    let rcr: i32 = tcp_read_exact_until(s, buf, 4:i32, 2000:i32)
+    let okr: bool = i32.cmp.eq(rcr, 0:i32)
+    term.cbr cond:okr,
+      then:echo args:[out_port, l, c, s, out_conn, out_peer_port, out_peer_addr, out_local_port, buf],
+      else:fail_recv args:[out_port, l, c, s, out_conn, out_peer_port, out_peer_addr, out_local_port, buf]
+  end
+
+  block echo(out_port:ptr, l:i32, c:i32, s:i32, out_conn:ptr, out_peer_port:ptr, out_peer_addr:ptr, out_local_port:ptr, buf:ptr)
+    let rcw2: i32 = tcp_write_all_until(s, buf, 4:i32, 2000:i32)
+    let ok: bool = i32.cmp.eq(rcw2, 0:i32)
+    term.cbr cond:ok,
+      then:client_recv args:[out_port, l, c, s, out_conn, out_peer_port, out_peer_addr, out_local_port, buf],
+      else:fail_recv args:[out_port, l, c, s, out_conn, out_peer_port, out_peer_addr, out_local_port, buf]
+  end
+
+  block client_recv(out_port:ptr, l:i32, c:i32, s:i32, out_conn:ptr, out_peer_port:ptr, out_peer_addr:ptr, out_local_port:ptr, buf:ptr)
+    let buf2: ptr = zi_alloc(4:i32)
+    let rcr2: i32 = tcp_read_exact_until(c, buf2, 4:i32, 2000:i32)
+    let okr2: bool = i32.cmp.eq(rcr2, 0:i32)
+    term.cbr cond:okr2,
+      then:check args:[out_port, l, c, s, out_conn, out_peer_port, out_peer_addr, out_local_port, buf, buf2],
+      else:fail_client_recv args:[out_port, l, c, s, out_conn, out_peer_port, out_peer_addr, out_local_port, buf, buf2]
+  end
+
+  block check(out_port:ptr, l:i32, c:i32, s:i32, out_conn:ptr, out_peer_port:ptr, out_peer_addr:ptr, out_local_port:ptr, buf:ptr, buf2:ptr)
+    let exp: ptr = "PING"
+    let ok_bytes: bool = zabi_bytes_eq(buf2, exp, 4:i32)
+
+    let _: i32 = zi_free(buf)
+    let _: i32 = zi_free(buf2)
+
+    let _: i32 = zi_end(c)
+    let _: i32 = zi_end(s)
+    let _: i32 = zi_end(l)
+
+    let _: i32 = zi_free(out_port)
+    let _: i32 = zi_free(out_conn)
+    let _: i32 = zi_free(out_peer_port)
+    let _: i32 = zi_free(out_peer_addr)
+    let _: i32 = zi_free(out_local_port)
+
+    term.ret value:select(i32, ok_bytes, 0:i32, 4:i32)
+  end
+
+  block fail_io(out_port:ptr, l:i32, c:i32, s:i32, out_conn:ptr, out_peer_port:ptr, out_peer_addr:ptr, out_local_port:ptr)
+    let _: i32 = zi_end(c)
+    let _: i32 = zi_end(s)
+    let _: i32 = zi_end(l)
+    let _: i32 = zi_free(out_port)
+    let _: i32 = zi_free(out_conn)
+    let _: i32 = zi_free(out_peer_port)
+    let _: i32 = zi_free(out_peer_addr)
+    let _: i32 = zi_free(out_local_port)
+    term.ret value:5:i32
+  end
+
+  block fail_recv(out_port:ptr, l:i32, c:i32, s:i32, out_conn:ptr, out_peer_port:ptr, out_peer_addr:ptr, out_local_port:ptr, buf:ptr)
+    let _: i32 = zi_free(buf)
+    term.br to fail_io args:[out_port, l, c, s, out_conn, out_peer_port, out_peer_addr, out_local_port]
+  end
+
+  block fail_client_recv(out_port:ptr, l:i32, c:i32, s:i32, out_conn:ptr, out_peer_port:ptr, out_peer_addr:ptr, out_local_port:ptr, buf:ptr, buf2:ptr)
+    let _: i32 = zi_free(buf)
+    let _: i32 = zi_free(buf2)
+    term.br to fail_io args:[out_port, l, c, s, out_conn, out_peer_port, out_peer_addr, out_local_port]
+  end
+end

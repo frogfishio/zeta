@@ -1,0 +1,399 @@
+@mod tcp
+
+@include "../include/zabi_externs.sir"
+@include "../std/zcl1.sir"
+@include "../std/ctl.sir"
+@include "../loop/loop.sir"
+
+;; Guest-side helpers for the golden capability `net:tcp@v1`.
+;;
+;; Design goals:
+;; - DX-first wrappers for opening TCP streams and listeners via `zi_cap_open`.
+;; - Nonblocking read/write helpers that integrate with `sys:loop`.
+;; - Listener accept record parsing.
+;;
+;; Notes:
+;; - All socket I/O is nonblocking; would-block returns `ZI_E_AGAIN`.
+;; - Readiness waiting uses `sys:loop` (via `loop_wait_readable_until` / `loop_wait_writable_until`).
+
+fn tcp_zi_e_again() -> i32
+  ;; From zi_sysabi25.h
+  return -6:i32
+end
+
+fn tcp_zi_e_nosys() -> i32
+  ;; From zi_sysabi25.h
+  return -7:i32
+end
+
+fn tcp_rc_eof() -> i32
+  ;; Guestlib-specific: read hit EOF before expected bytes.
+  return -100:i32
+end
+
+fn tcp_rc_timeout() -> i32
+  ;; Guestlib-specific: loop wait timed out.
+  return -101:i32
+end
+
+;; --- small helpers ---
+
+fn tcp_write_u64le(p:ptr, v:i64) -> i32
+  store.i64(p, v) +align=1
+  return 8:i32
+end
+
+fn tcp_cstr_len(p:ptr) -> i32
+  ;; Returns length in bytes, not including trailing NUL.
+  block entry
+    term.br to loop args:[0:i32]
+  end
+
+  block loop(i:i32)
+    let c: i8 = load.i8(ptr.offset(i8, p, i))
+    let z: bool = i32.cmp.eq(i32.zext.i8(c), 0:i32)
+    term.cbr cond:z,
+      then:done args:[i],
+      else:cont args:[i]
+  end
+
+  block cont(i:i32)
+    term.br to loop args:[i32.add(i, 1:i32)]
+  end
+
+  block done(n:i32)
+    term.ret value:n
+  end
+end
+
+;; --- net/tcp open flags (zi_net_tcp25.h) ---
+
+fn tcp_open_listen() -> i32
+  return 1:i32
+end
+
+fn tcp_open_reuseaddr() -> i32
+  return 2:i32
+end
+
+fn tcp_open_reuseport() -> i32
+  return 4:i32
+end
+
+fn tcp_open_ipv6only() -> i32
+  return 8:i32
+end
+
+fn tcp_open_nodelay() -> i32
+  return 16:i32
+end
+
+fn tcp_open_keepalive() -> i32
+  return 32:i32
+end
+
+;; --- cap open ---
+
+fn tcp_cap_open(params_ptr:ptr, params_len:i32) -> i32
+  ;; Open request layout (40 bytes), little-endian:
+  ;;   u64 kind_ptr; u32 kind_len;
+  ;;   u64 name_ptr; u32 name_len;
+  ;;   u32 mode; u64 params_ptr; u32 params_len
+
+  let kind: ptr = "net"
+  let name: ptr = "tcp"
+
+  let req: ptr = zi_alloc(40:i32)
+
+  let kind_i64: i64 = ptr.to_i64(kind)
+  let name_i64: i64 = ptr.to_i64(name)
+
+  let _: i32 = tcp_write_u64le(ptr.offset(i8, req, 0:i64), kind_i64)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, req, 8:i64), 3:i32)
+  let _: i32 = tcp_write_u64le(ptr.offset(i8, req, 12:i64), name_i64)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, req, 20:i64), 3:i32)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, req, 24:i64), 0:i32)
+  let _: i32 = tcp_write_u64le(ptr.offset(i8, req, 28:i64), ptr.to_i64(params_ptr))
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, req, 36:i64), params_len)
+
+  let h: i32 = zi_cap_open(req)
+  let ignored_free: i32 = zi_free(req)
+  return h
+end
+
+fn tcp_connect(host_ptr:ptr, host_len:i32, port:i32, open_flags:i32) -> i32
+  ;; Params (20 bytes): u64 host_ptr, u32 host_len, u32 port, u32 flags
+  let params: ptr = zi_alloc(20:i32)
+  let _: i32 = tcp_write_u64le(ptr.offset(i8, params, 0:i64), ptr.to_i64(host_ptr))
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, params, 8:i64), host_len)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, params, 12:i64), port)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, params, 16:i64), open_flags)
+
+  let h: i32 = tcp_cap_open(params, 20:i32)
+  let ignored_free: i32 = zi_free(params)
+  return h
+end
+
+fn tcp_connect_cstr(host_cstr:ptr, port:i32, open_flags:i32) -> i32
+  let host_len: i32 = tcp_cstr_len(host_cstr)
+  return tcp_connect(host_cstr, host_len, port, open_flags)
+end
+
+fn tcp_listen(host_ptr:ptr, host_len:i32, port:i32, open_flags:i32, backlog:i32, out_port_ptr:ptr) -> i32
+  ;; Params (>=20): u64 host_ptr, u32 host_len, u32 port, u32 flags,
+  ;;               u32 backlog [optional], u64 out_port_ptr [optional]
+  ;;
+  ;; We always pass 32 bytes for listeners so callers can request port=0
+  ;; and receive the bound port via out_port_ptr.
+  let params: ptr = zi_alloc(32:i32)
+  let flags2: i32 = i32.or(open_flags, tcp_open_listen())
+
+  let _: i32 = tcp_write_u64le(ptr.offset(i8, params, 0:i64), ptr.to_i64(host_ptr))
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, params, 8:i64), host_len)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, params, 12:i64), port)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, params, 16:i64), flags2)
+  let _: i32 = zcl1_write_u32le(ptr.offset(i8, params, 20:i64), backlog)
+  let _: i32 = tcp_write_u64le(ptr.offset(i8, params, 24:i64), ptr.to_i64(out_port_ptr))
+
+  let h: i32 = tcp_cap_open(params, 32:i32)
+  let ignored_free: i32 = zi_free(params)
+  return h
+end
+
+fn tcp_listen_cstr(host_cstr:ptr, port:i32, open_flags:i32, backlog:i32, out_port_ptr:ptr) -> i32
+  let host_len: i32 = tcp_cstr_len(host_cstr)
+  return tcp_listen(host_cstr, host_len, port, open_flags, backlog, out_port_ptr)
+end
+
+;; --- accept records ---
+
+fn tcp_accept_record_size() -> i32
+  return 32:i32
+end
+
+fn tcp_accept_parse(rec:ptr, out_conn_handle:ptr, out_peer_port:ptr, out_peer_addr16:ptr, out_local_port:ptr) -> i32
+  ;; Accept record (32 bytes):
+  ;;  0: u32 conn_handle
+  ;;  4: u32 peer_port
+  ;;  8: u8[16] peer_addr (IPv4-mapped-IPv6)
+  ;; 24: u32 local_port
+  ;; 28: u32 reserved
+  let ch: i32 = zcl1_read_u32le(ptr.offset(i8, rec, 0:i64))
+  let pp: i32 = zcl1_read_u32le(ptr.offset(i8, rec, 4:i64))
+  let lp: i32 = zcl1_read_u32le(ptr.offset(i8, rec, 24:i64))
+
+  let _: i32 = zcl1_write_u32le(out_conn_handle, ch)
+  let _: i32 = zcl1_write_u32le(out_peer_port, pp)
+  let _: i32 = zcl1_write_u32le(out_local_port, lp)
+
+  mem.copy(out_peer_addr16, ptr.offset(i8, rec, 8:i64), 16:i32) +align=1
+  return 0:i32
+end
+
+fn tcp_accept_one(listener_h:i32, timeout_ms:i32, out_conn_handle:ptr, out_peer_port:ptr, out_peer_addr16:ptr, out_local_port:ptr) -> i32
+  ;; Attempts to accept one connection.
+  ;; Returns 0 on success, tcp_rc_timeout() on timeout, or a negative error.
+  block entry
+    let rec: ptr = zi_alloc(32:i32)
+    term.br to loop args:[rec]
+  end
+
+  block loop(rec:ptr)
+    let r: i32 = zi_read(listener_h, rec, 32:i32)
+    let again: bool = i32.cmp.eq(r, tcp_zi_e_again())
+    term.cbr cond:again,
+      then:wait args:[rec],
+      else:check args:[rec, r]
+  end
+
+  block wait(rec:ptr)
+    let w: i32 = loop_wait_readable_until(listener_h, timeout_ms)
+    let ready: bool = i32.cmp.eq(w, loop_wait_rc_ready())
+    term.cbr cond:ready,
+      then:loop args:[rec],
+      else:wait_done args:[rec, w]
+  end
+
+  block wait_done(rec:ptr, w:i32)
+    let is_timeout: bool = i32.cmp.eq(w, loop_wait_rc_timeout())
+    let _: i32 = zi_free(rec)
+    term.ret value:select(i32, is_timeout, tcp_rc_timeout(), -1:i32)
+  end
+
+  block check(rec:ptr, r:i32)
+    let ok: bool = i32.cmp.sge(r, 32:i32)
+    term.cbr cond:ok,
+      then:parse args:[rec],
+      else:err args:[rec, r]
+  end
+
+  block parse(rec:ptr)
+    let _: i32 = tcp_accept_parse(rec, out_conn_handle, out_peer_port, out_peer_addr16, out_local_port)
+    let _: i32 = zi_free(rec)
+    term.ret value:0:i32
+  end
+
+  block err(rec:ptr, r:i32)
+    let _: i32 = zi_free(rec)
+    term.ret value:select(i32, i32.cmp.eq(r, 0:i32), tcp_rc_eof(), r)
+  end
+end
+
+;; --- nonblocking I/O helpers ---
+
+fn tcp_write_all_until(h:i32, src:ptr, len:i32, timeout_ms:i32) -> i32
+  block entry
+    term.br to loop args:[0:i32]
+  end
+
+  block loop(off:i32)
+    let done: bool = i32.cmp.sge(off, len)
+    term.cbr cond:done,
+      then:ok,
+      else:step args:[off]
+  end
+
+  block step(off:i32)
+    let rem: i32 = i32.sub(len, off)
+    let p: ptr = ptr.offset(i8, src, off)
+    let w: i32 = zi_write(h, p, rem)
+
+    let again: bool = i32.cmp.eq(w, tcp_zi_e_again())
+    term.cbr cond:again,
+      then:wait args:[off],
+      else:check args:[off, w]
+  end
+
+  block wait(off:i32)
+    let w: i32 = loop_wait_writable_until(h, timeout_ms)
+    let ready: bool = i32.cmp.eq(w, loop_wait_rc_ready())
+    term.cbr cond:ready,
+      then:loop args:[off],
+      else:wait_done args:[w]
+  end
+
+  block wait_done(w:i32)
+    let is_timeout: bool = i32.cmp.eq(w, loop_wait_rc_timeout())
+    term.ret value:select(i32, is_timeout, tcp_rc_timeout(), -1:i32)
+  end
+
+  block check(off:i32, w:i32)
+    let bad: bool = i32.cmp.sle(w, 0:i32)
+    term.cbr cond:bad,
+      then:err args:[w],
+      else:cont args:[off, w]
+  end
+
+  block cont(off:i32, w:i32)
+    term.br to loop args:[i32.add(off, w)]
+  end
+
+  block ok
+    term.ret value:0:i32
+  end
+
+  block err(w:i32)
+    term.ret value:w
+  end
+end
+
+fn tcp_read_exact_until(h:i32, dst:ptr, nbytes:i32, timeout_ms:i32) -> i32
+  block entry
+    term.br to loop args:[0:i32]
+  end
+
+  block loop(off:i32)
+    let done: bool = i32.cmp.sge(off, nbytes)
+    term.cbr cond:done,
+      then:ok,
+      else:step args:[off]
+  end
+
+  block step(off:i32)
+    let rem: i32 = i32.sub(nbytes, off)
+    let p: ptr = ptr.offset(i8, dst, off)
+    let r: i32 = zi_read(h, p, rem)
+
+    let again: bool = i32.cmp.eq(r, tcp_zi_e_again())
+    term.cbr cond:again,
+      then:wait args:[off],
+      else:check args:[off, r]
+  end
+
+  block wait(off:i32)
+    let w: i32 = loop_wait_readable_until(h, timeout_ms)
+    let ready: bool = i32.cmp.eq(w, loop_wait_rc_ready())
+    term.cbr cond:ready,
+      then:loop args:[off],
+      else:wait_done args:[w]
+  end
+
+  block wait_done(w:i32)
+    let is_timeout: bool = i32.cmp.eq(w, loop_wait_rc_timeout())
+    term.ret value:select(i32, is_timeout, tcp_rc_timeout(), -1:i32)
+  end
+
+  block check(off:i32, r:i32)
+    let eof: bool = i32.cmp.eq(r, 0:i32)
+    term.cbr cond:eof,
+      then:ret_eof,
+      else:check2 args:[off, r]
+  end
+
+  block check2(off:i32, r:i32)
+    let bad: bool = i32.cmp.slt(r, 0:i32)
+    term.cbr cond:bad,
+      then:err args:[r],
+      else:cont args:[off, r]
+  end
+
+  block cont(off:i32, r:i32)
+    term.br to loop args:[i32.add(off, r)]
+  end
+
+  block ok
+    term.ret value:0:i32
+  end
+
+  block ret_eof
+    term.ret value:tcp_rc_eof()
+  end
+
+  block err(r:i32)
+    term.ret value:r
+  end
+end
+
+;; --- half-close (shutdown write) ---
+
+fn tcp_ctl_op_handle_op() -> i32
+  ;; From zi_sysabi25.h
+  return 4:i32
+end
+
+fn tcp_handle_op_shut_wr() -> i32
+  ;; From zi_sysabi25.h
+  return 1:i32
+end
+
+fn tcp_shutdown_write(h:i32) -> i32
+  ;; Best-effort: ask runtime to shutdown(SHUT_WR) the underlying socket.
+  ;; Returns 0 on OK ZCL1 response, otherwise negative.
+  block entry
+    let payload: ptr = zi_alloc(16:i32)
+    let resp: ptr = zi_alloc(128:i32)
+
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, payload, 0:i64), 1:i32) ;; version
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, payload, 4:i64), h)     ;; handle
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, payload, 8:i64), tcp_handle_op_shut_wr())
+    let _: i32 = zcl1_write_u32le(ptr.offset(i8, payload, 12:i64), 0:i32)
+
+    let n: i32 = ctl_call(tcp_ctl_op_handle_op(), 1:i32, payload, 16:i32, resp, 128:i32)
+    let ok: bool = ctl_resp_ok(resp, n, tcp_ctl_op_handle_op(), 1:i32)
+
+    let _: i32 = zi_free(payload)
+    let _: i32 = zi_free(resp)
+
+    term.ret value:select(i32, ok, 0:i32, -1:i32)
+  end
+end
