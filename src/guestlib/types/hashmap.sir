@@ -279,68 +279,68 @@ fn hashmap_get(m:ptr, key_ptr:ptr, key_len:i32, out_val_ptr:ptr) -> i32
     let h: i32 = hashmap_hash_bytes(key_ptr, key_len)
     let mask: i32 = i32.sub(cap, 1:i32)
     let idx0: i32 = i32.and(h, mask)
-    term.br to loop args:[idx0, 0:i32, cap, table, mask, h]
+    term.br to loop args:[idx0, 0:i32, cap, table, mask, h, key_ptr, key_len, out_val_ptr]
   end
 
-  block loop(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32)
+  block loop(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, key_ptr:ptr, key_len:i32, out_val_ptr:ptr)
     let done: bool = i32.cmp.sge(probe, cap)
     term.cbr cond:done,
-      then:not_found,
-      else:step args:[idx, probe, cap, table, mask, h]
+      then:not_found args:[out_val_ptr],
+      else:step args:[idx, probe, cap, table, mask, h, key_ptr, key_len, out_val_ptr]
   end
 
-  block step(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32)
+  block step(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, key_ptr:ptr, key_len:i32, out_val_ptr:ptr)
     let e: ptr = hashmap_entry_ptr(table, idx)
     let st: i32 = i32.zext.i8(load.i8(ptr.offset(i8, e, 0:i64)))
     let empty: bool = i32.cmp.eq(st, 0:i32)
     term.cbr cond:empty,
-      then:not_found,
-      else:maybe_full args:[idx, probe, cap, table, mask, h, e, st]
+      then:not_found args:[out_val_ptr],
+      else:maybe_full args:[idx, probe, cap, table, mask, h, key_ptr, key_len, out_val_ptr, e, st]
   end
 
-  block maybe_full(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, e:ptr, st:i32)
+  block maybe_full(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, key_ptr:ptr, key_len:i32, out_val_ptr:ptr, e:ptr, st:i32)
     let full: bool = i32.cmp.eq(st, 1:i32)
     term.cbr cond:full,
-      then:check_hash args:[idx, probe, cap, table, mask, h, e],
-      else:next args:[idx, probe, cap, table, mask, h]
+      then:check_hash args:[idx, probe, cap, table, mask, h, key_ptr, key_len, out_val_ptr, e],
+      else:next args:[idx, probe, cap, table, mask, h, key_ptr, key_len, out_val_ptr]
   end
 
-  block check_hash(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, e:ptr)
+  block check_hash(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, key_ptr:ptr, key_len:i32, out_val_ptr:ptr, e:ptr)
     let eh: i32 = load.i32(ptr.offset(i8, e, 4:i64))
     let hmatch: bool = i32.cmp.eq(eh, h)
     term.cbr cond:hmatch,
-      then:check_len args:[idx, probe, cap, table, mask, h, e],
-      else:next args:[idx, probe, cap, table, mask, h]
+      then:check_len args:[idx, probe, cap, table, mask, h, key_ptr, key_len, out_val_ptr, e],
+      else:next args:[idx, probe, cap, table, mask, h, key_ptr, key_len, out_val_ptr]
   end
 
-  block check_len(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, e:ptr)
+  block check_len(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, key_ptr:ptr, key_len:i32, out_val_ptr:ptr, e:ptr)
     let eklen: i32 = load.i32(ptr.offset(i8, e, 16:i64))
     let lmatch: bool = i32.cmp.eq(eklen, key_len)
     term.cbr cond:lmatch,
-      then:check_bytes args:[idx, probe, cap, table, mask, h, e],
-      else:next args:[idx, probe, cap, table, mask, h]
+      then:check_bytes args:[idx, probe, cap, table, mask, h, key_ptr, key_len, out_val_ptr, e],
+      else:next args:[idx, probe, cap, table, mask, h, key_ptr, key_len, out_val_ptr]
   end
 
-  block check_bytes(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, e:ptr)
+  block check_bytes(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, key_ptr:ptr, key_len:i32, out_val_ptr:ptr, e:ptr)
     let ekptr: ptr = ptr.from_i64(load.i64(ptr.offset(i8, e, 8:i64)) +align=1)
     let eq: bool = hashmap_bytes_eq(ekptr, key_ptr, key_len)
     term.cbr cond:eq,
-      then:found args:[e],
-      else:next args:[idx, probe, cap, table, mask, h]
+      then:found args:[e, out_val_ptr],
+      else:next args:[idx, probe, cap, table, mask, h, key_ptr, key_len, out_val_ptr]
   end
 
-  block found(e:ptr)
+  block found(e:ptr, out_val_ptr:ptr)
     let vptr: ptr = ptr.from_i64(load.i64(ptr.offset(i8, e, 24:i64)) +align=1)
     let _: i32 = hashmap_store_ptr(out_val_ptr, vptr)
     term.ret value:1:i32
   end
 
-  block next(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32)
+  block next(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, key_ptr:ptr, key_len:i32, out_val_ptr:ptr)
     let idx2: i32 = i32.and(i32.add(idx, 1:i32), mask)
-    term.br to loop args:[idx2, i32.add(probe, 1:i32), cap, table, mask, h]
+    term.br to loop args:[idx2, i32.add(probe, 1:i32), cap, table, mask, h, key_ptr, key_len, out_val_ptr]
   end
 
-  block not_found
+  block not_found(out_val_ptr:ptr)
     let _: i32 = hashmap_store_ptr(out_val_ptr, ptr.from_i64(0:i64))
     term.ret value:0:i32
   end
@@ -351,42 +351,42 @@ fn hashmap_put(m:ptr, key_ptr:ptr, key_len:i32, val_ptr:ptr) -> i32
   block entry
     let grow: bool = hashmap_should_grow(m)
     term.cbr cond:grow,
-      then:grow,
-      else:go
+      then:grow args:[m, key_ptr, key_len, val_ptr],
+      else:go args:[m, key_ptr, key_len, val_ptr]
   end
 
-  block grow
+  block grow(m:ptr, key_ptr:ptr, key_len:i32, val_ptr:ptr)
     let _: i32 = hashmap_rehash(m, i32.mul(hashmap_cap(m), 2:i32))
-    term.br to go
+    term.br to go args:[m, key_ptr, key_len, val_ptr]
   end
 
-  block go
+  block go(m:ptr, key_ptr:ptr, key_len:i32, val_ptr:ptr)
     let cap: i32 = hashmap_cap(m)
     let table: ptr = hashmap_table(m)
     let h: i32 = hashmap_hash_bytes(key_ptr, key_len)
     let mask: i32 = i32.sub(cap, 1:i32)
     let idx0: i32 = i32.and(h, mask)
-    term.br to loop args:[idx0, 0:i32, -1:i32, cap, table, mask, h]
+    term.br to loop args:[idx0, 0:i32, -1:i32, cap, table, mask, h, m, key_ptr, key_len, val_ptr]
   end
 
-  block loop(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32)
+  block loop(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32, m:ptr, key_ptr:ptr, key_len:i32, val_ptr:ptr)
     let done: bool = i32.cmp.sge(probe, cap)
     term.cbr cond:done,
       then:fail,
-      else:step args:[idx, probe, first_tomb, cap, table, mask, h]
+      else:step args:[idx, probe, first_tomb, cap, table, mask, h, m, key_ptr, key_len, val_ptr]
   end
 
-  block step(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32)
+  block step(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32, m:ptr, key_ptr:ptr, key_len:i32, val_ptr:ptr)
     let e: ptr = hashmap_entry_ptr(table, idx)
     let st: i32 = i32.zext.i8(load.i8(ptr.offset(i8, e, 0:i64)))
 
     let empty: bool = i32.cmp.eq(st, 0:i32)
     term.cbr cond:empty,
-      then:insert args:[idx, first_tomb, table, h],
-      else:check_tomb args:[idx, probe, first_tomb, cap, table, mask, h, e, st]
+      then:insert args:[idx, first_tomb, table, h, m, key_ptr, key_len, val_ptr],
+      else:check_tomb args:[idx, probe, first_tomb, cap, table, mask, h, m, key_ptr, key_len, val_ptr, e, st]
   end
 
-  block insert(idx:i32, first_tomb:i32, table:ptr, h:i32)
+  block insert(idx:i32, first_tomb:i32, table:ptr, h:i32, m:ptr, key_ptr:ptr, key_len:i32, val_ptr:ptr)
     let use_tomb: bool = i32.cmp.sge(first_tomb, 0:i32)
     let dst_idx: i32 = select(i32, use_tomb, first_tomb, idx)
     let dst: ptr = hashmap_entry_ptr(table, dst_idx)
@@ -405,58 +405,58 @@ fn hashmap_put(m:ptr, key_ptr:ptr, key_len:i32, val_ptr:ptr) -> i32
     term.ret value:0:i32
   end
 
-  block check_tomb(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32, e:ptr, st:i32)
+  block check_tomb(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32, m:ptr, key_ptr:ptr, key_len:i32, val_ptr:ptr, e:ptr, st:i32)
     let is_tomb: bool = i32.cmp.eq(st, 2:i32)
     term.cbr cond:is_tomb,
-      then:set_tomb args:[idx, probe, first_tomb, cap, table, mask, h],
-      else:maybe_full args:[idx, probe, first_tomb, cap, table, mask, h, e, st]
+      then:set_tomb args:[idx, probe, first_tomb, cap, table, mask, h, m, key_ptr, key_len, val_ptr],
+      else:maybe_full args:[idx, probe, first_tomb, cap, table, mask, h, m, key_ptr, key_len, val_ptr, e, st]
   end
 
-  block set_tomb(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32)
+  block set_tomb(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32, m:ptr, key_ptr:ptr, key_len:i32, val_ptr:ptr)
     let no_tomb: bool = i32.cmp.slt(first_tomb, 0:i32)
     let first2: i32 = select(i32, no_tomb, idx, first_tomb)
-    term.br to next args:[idx, probe, first2, cap, table, mask, h]
+    term.br to next args:[idx, probe, first2, cap, table, mask, h, m, key_ptr, key_len, val_ptr]
   end
 
-  block maybe_full(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32, e:ptr, st:i32)
+  block maybe_full(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32, m:ptr, key_ptr:ptr, key_len:i32, val_ptr:ptr, e:ptr, st:i32)
     let full: bool = i32.cmp.eq(st, 1:i32)
     term.cbr cond:full,
-      then:check_hash args:[idx, probe, first_tomb, cap, table, mask, h, e],
-      else:next args:[idx, probe, first_tomb, cap, table, mask, h]
+      then:check_hash args:[idx, probe, first_tomb, cap, table, mask, h, m, key_ptr, key_len, val_ptr, e],
+      else:next args:[idx, probe, first_tomb, cap, table, mask, h, m, key_ptr, key_len, val_ptr]
   end
 
-  block check_hash(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32, e:ptr)
+  block check_hash(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32, m:ptr, key_ptr:ptr, key_len:i32, val_ptr:ptr, e:ptr)
     let eh: i32 = load.i32(ptr.offset(i8, e, 4:i64))
     let hmatch: bool = i32.cmp.eq(eh, h)
     term.cbr cond:hmatch,
-      then:check_len args:[idx, probe, first_tomb, cap, table, mask, h, e],
-      else:next args:[idx, probe, first_tomb, cap, table, mask, h]
+      then:check_len args:[idx, probe, first_tomb, cap, table, mask, h, m, key_ptr, key_len, val_ptr, e],
+      else:next args:[idx, probe, first_tomb, cap, table, mask, h, m, key_ptr, key_len, val_ptr]
   end
 
-  block check_len(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32, e:ptr)
+  block check_len(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32, m:ptr, key_ptr:ptr, key_len:i32, val_ptr:ptr, e:ptr)
     let eklen: i32 = load.i32(ptr.offset(i8, e, 16:i64))
     let lmatch: bool = i32.cmp.eq(eklen, key_len)
     term.cbr cond:lmatch,
-      then:check_bytes args:[idx, probe, first_tomb, cap, table, mask, h, e],
-      else:next args:[idx, probe, first_tomb, cap, table, mask, h]
+      then:check_bytes args:[idx, probe, first_tomb, cap, table, mask, h, m, key_ptr, key_len, val_ptr, e],
+      else:next args:[idx, probe, first_tomb, cap, table, mask, h, m, key_ptr, key_len, val_ptr]
   end
 
-  block check_bytes(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32, e:ptr)
+  block check_bytes(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32, m:ptr, key_ptr:ptr, key_len:i32, val_ptr:ptr, e:ptr)
     let ekptr: ptr = ptr.from_i64(load.i64(ptr.offset(i8, e, 8:i64)) +align=1)
     let eq: bool = hashmap_bytes_eq(ekptr, key_ptr, key_len)
     term.cbr cond:eq,
-      then:update args:[e],
-      else:next args:[idx, probe, first_tomb, cap, table, mask, h]
+      then:update args:[e, val_ptr],
+      else:next args:[idx, probe, first_tomb, cap, table, mask, h, m, key_ptr, key_len, val_ptr]
   end
 
-  block update(e:ptr)
+  block update(e:ptr, val_ptr:ptr)
     store.i64(ptr.offset(i8, e, 24:i64), ptr.to_i64(val_ptr)) +align=1
     term.ret value:1:i32
   end
 
-  block next(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32)
+  block next(idx:i32, probe:i32, first_tomb:i32, cap:i32, table:ptr, mask:i32, h:i32, m:ptr, key_ptr:ptr, key_len:i32, val_ptr:ptr)
     let idx2: i32 = i32.and(i32.add(idx, 1:i32), mask)
-    term.br to loop args:[idx2, i32.add(probe, 1:i32), first_tomb, cap, table, mask, h]
+    term.br to loop args:[idx2, i32.add(probe, 1:i32), first_tomb, cap, table, mask, h, m, key_ptr, key_len, val_ptr]
   end
 
   block fail
@@ -473,15 +473,15 @@ fn hashmap_put_copy_key(m:ptr, key_ptr:ptr, key_len:i32, val_ptr:ptr) -> i32
     let _: i32 = zi_free(out)
     let is_found: bool = i32.cmp.eq(found, 1:i32)
     term.cbr cond:is_found,
-      then:update,
-      else:insert
+      then:update args:[m, key_ptr, key_len, val_ptr],
+      else:insert args:[m, key_ptr, key_len, val_ptr]
   end
 
-  block update
+  block update(m:ptr, key_ptr:ptr, key_len:i32, val_ptr:ptr)
     term.ret value:hashmap_put(m, key_ptr, key_len, val_ptr)
   end
 
-  block insert
+  block insert(m:ptr, key_ptr:ptr, key_len:i32, val_ptr:ptr)
     let kcopy: ptr = zi_alloc(key_len)
     mem.copy(kcopy, key_ptr, key_len) +alignDst=1 +alignSrc=1 +overlap=disallow
     term.ret value:hashmap_put(m, kcopy, key_len, val_ptr)
@@ -495,57 +495,57 @@ fn hashmap_del(m:ptr, key_ptr:ptr, key_len:i32) -> i32
     let h: i32 = hashmap_hash_bytes(key_ptr, key_len)
     let mask: i32 = i32.sub(cap, 1:i32)
     let idx0: i32 = i32.and(h, mask)
-    term.br to loop args:[idx0, 0:i32, cap, table, mask, h]
+    term.br to loop args:[idx0, 0:i32, cap, table, mask, h, m, key_ptr, key_len]
   end
 
-  block loop(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32)
+  block loop(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, m:ptr, key_ptr:ptr, key_len:i32)
     let done: bool = i32.cmp.sge(probe, cap)
     term.cbr cond:done,
       then:not_found,
-      else:step args:[idx, probe, cap, table, mask, h]
+      else:step args:[idx, probe, cap, table, mask, h, m, key_ptr, key_len]
   end
 
-  block step(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32)
+  block step(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, m:ptr, key_ptr:ptr, key_len:i32)
     let e: ptr = hashmap_entry_ptr(table, idx)
     let st: i32 = i32.zext.i8(load.i8(ptr.offset(i8, e, 0:i64)))
     let empty: bool = i32.cmp.eq(st, 0:i32)
     term.cbr cond:empty,
       then:not_found,
-      else:maybe_full args:[idx, probe, cap, table, mask, h, e, st]
+      else:maybe_full args:[idx, probe, cap, table, mask, h, m, key_ptr, key_len, e, st]
   end
 
-  block maybe_full(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, e:ptr, st:i32)
+  block maybe_full(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, m:ptr, key_ptr:ptr, key_len:i32, e:ptr, st:i32)
     let full: bool = i32.cmp.eq(st, 1:i32)
     term.cbr cond:full,
-      then:check_hash args:[idx, probe, cap, table, mask, h, e],
-      else:next args:[idx, probe, cap, table, mask, h]
+      then:check_hash args:[idx, probe, cap, table, mask, h, m, key_ptr, key_len, e],
+      else:next args:[idx, probe, cap, table, mask, h, m, key_ptr, key_len]
   end
 
-  block check_hash(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, e:ptr)
+  block check_hash(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, m:ptr, key_ptr:ptr, key_len:i32, e:ptr)
     let eh: i32 = load.i32(ptr.offset(i8, e, 4:i64))
     let hmatch: bool = i32.cmp.eq(eh, h)
     term.cbr cond:hmatch,
-      then:check_len args:[idx, probe, cap, table, mask, h, e],
-      else:next args:[idx, probe, cap, table, mask, h]
+      then:check_len args:[idx, probe, cap, table, mask, h, m, key_ptr, key_len, e],
+      else:next args:[idx, probe, cap, table, mask, h, m, key_ptr, key_len]
   end
 
-  block check_len(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, e:ptr)
+  block check_len(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, m:ptr, key_ptr:ptr, key_len:i32, e:ptr)
     let eklen: i32 = load.i32(ptr.offset(i8, e, 16:i64))
     let lmatch: bool = i32.cmp.eq(eklen, key_len)
     term.cbr cond:lmatch,
-      then:check_bytes args:[idx, probe, cap, table, mask, h, e],
-      else:next args:[idx, probe, cap, table, mask, h]
+      then:check_bytes args:[idx, probe, cap, table, mask, h, m, key_ptr, key_len, e],
+      else:next args:[idx, probe, cap, table, mask, h, m, key_ptr, key_len]
   end
 
-  block check_bytes(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, e:ptr)
+  block check_bytes(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, m:ptr, key_ptr:ptr, key_len:i32, e:ptr)
     let ekptr: ptr = ptr.from_i64(load.i64(ptr.offset(i8, e, 8:i64)) +align=1)
     let eq: bool = hashmap_bytes_eq(ekptr, key_ptr, key_len)
     term.cbr cond:eq,
-      then:del args:[e],
-      else:next args:[idx, probe, cap, table, mask, h]
+      then:del args:[e, m],
+      else:next args:[idx, probe, cap, table, mask, h, m, key_ptr, key_len]
   end
 
-  block del(e:ptr)
+  block del(e:ptr, m:ptr)
     store.i8(ptr.offset(i8, e, 0:i64), 2:i8)
     let sz: i32 = hashmap_size(m)
     let _: i32 = hashmap_set_size(m, i32.sub(sz, 1:i32))
@@ -554,9 +554,9 @@ fn hashmap_del(m:ptr, key_ptr:ptr, key_len:i32) -> i32
     term.ret value:1:i32
   end
 
-  block next(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32)
+  block next(idx:i32, probe:i32, cap:i32, table:ptr, mask:i32, h:i32, m:ptr, key_ptr:ptr, key_len:i32)
     let idx2: i32 = i32.and(i32.add(idx, 1:i32), mask)
-    term.br to loop args:[idx2, i32.add(probe, 1:i32), cap, table, mask, h]
+    term.br to loop args:[idx2, i32.add(probe, 1:i32), cap, table, mask, h, m, key_ptr, key_len]
   end
 
   block not_found
@@ -568,26 +568,26 @@ fn hashmap_iter_next(m:ptr, start_idx:i32, out_next_idx:ptr, out_key_ptr:ptr, ou
   block entry
     let cap: i32 = hashmap_cap(m)
     let table: ptr = hashmap_table(m)
-    term.br to loop args:[start_idx, cap, table]
+    term.br to loop args:[start_idx, cap, table, out_next_idx, out_key_ptr, out_key_len, out_val_ptr]
   end
 
-  block loop(i:i32, cap:i32, table:ptr)
+  block loop(i:i32, cap:i32, table:ptr, out_next_idx:ptr, out_key_ptr:ptr, out_key_len:ptr, out_val_ptr:ptr)
     let done: bool = i32.cmp.sge(i, cap)
     term.cbr cond:done,
       then:done,
-      else:step args:[i, cap, table]
+      else:step args:[i, cap, table, out_next_idx, out_key_ptr, out_key_len, out_val_ptr]
   end
 
-  block step(i:i32, cap:i32, table:ptr)
+  block step(i:i32, cap:i32, table:ptr, out_next_idx:ptr, out_key_ptr:ptr, out_key_len:ptr, out_val_ptr:ptr)
     let e: ptr = hashmap_entry_ptr(table, i)
     let st: i32 = i32.zext.i8(load.i8(ptr.offset(i8, e, 0:i64)))
     let full: bool = i32.cmp.eq(st, 1:i32)
     term.cbr cond:full,
-      then:emit args:[i, e],
-      else:cont args:[i, cap, table]
+      then:emit args:[i, e, out_next_idx, out_key_ptr, out_key_len, out_val_ptr],
+      else:cont args:[i, cap, table, out_next_idx, out_key_ptr, out_key_len, out_val_ptr]
   end
 
-  block emit(i:i32, e:ptr)
+  block emit(i:i32, e:ptr, out_next_idx:ptr, out_key_ptr:ptr, out_key_len:ptr, out_val_ptr:ptr)
     let kptr: ptr = ptr.from_i64(load.i64(ptr.offset(i8, e, 8:i64)) +align=1)
     let klen: i32 = load.i32(ptr.offset(i8, e, 16:i64))
     let vptr: ptr = ptr.from_i64(load.i64(ptr.offset(i8, e, 24:i64)) +align=1)
@@ -599,8 +599,8 @@ fn hashmap_iter_next(m:ptr, start_idx:i32, out_next_idx:ptr, out_key_ptr:ptr, ou
     term.ret value:1:i32
   end
 
-  block cont(i:i32, cap:i32, table:ptr)
-    term.br to loop args:[i32.add(i, 1:i32), cap, table]
+  block cont(i:i32, cap:i32, table:ptr, out_next_idx:ptr, out_key_ptr:ptr, out_key_len:ptr, out_val_ptr:ptr)
+    term.br to loop args:[i32.add(i, 1:i32), cap, table, out_next_idx, out_key_ptr, out_key_len, out_val_ptr]
   end
 
   block done

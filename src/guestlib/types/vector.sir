@@ -80,8 +80,9 @@ fn vector_free(v:ptr) -> i32
 end
 
 fn vector_get_ptr(v:ptr, idx:i32) -> ptr
-  let data: ptr = vector_data(v)
-  let esz: i32 = vector_elem_size(v)
+  ;; Inline loads to avoid extra calls (helps sem diagnostics too).
+  let data: ptr = ptr.from_i64(load.i64(ptr.offset(i8, v, 16:i64)) +align=1)
+  let esz: i32 = load.i32(ptr.offset(i8, v, 8:i64))
   let off: i32 = i32.mul(idx, esz)
   return ptr.offset(i8, data, off)
 end

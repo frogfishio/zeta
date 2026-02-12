@@ -1,0 +1,1558 @@
+@mod json
+
+@include "../include/zabi_externs.sir"
+@include "../types/vector.sir"
+@include "../types/hashmap.sir"
+
+;; Minimal JSON parser + serializer.
+;;
+;; JSON value layout (32 bytes):
+;;  0: i32 tag
+;;  4: i32 aux      (for bool: 0/1)
+;;  8: i32 len      (for str/num)
+;; 12: i32 reserved
+;; 16: i64 ptr0     (for str/num: bytes; for arr: vector ptr; for obj: hashmap ptr)
+;; 24: i64 reserved
+
+fn json_store_ptr(dst:ptr, v:ptr) -> i32
+  store.i64(dst, ptr.to_i64(v)) +align=1
+  return 0:i32
+end
+
+fn json_load_ptr(src:ptr) -> ptr
+  let v: i64 = load.i64(src) +align=1
+  return ptr.from_i64(v)
+end
+
+fn json_tag_null() -> i32
+  return 0:i32
+end
+
+fn json_tag_bool() -> i32
+  return 1:i32
+end
+
+fn json_tag_num() -> i32
+  return 2:i32
+end
+
+fn json_tag_str() -> i32
+  return 3:i32
+end
+
+fn json_tag_arr() -> i32
+  return 4:i32
+end
+
+fn json_tag_obj() -> i32
+  return 5:i32
+end
+
+fn json_val_new(tag:i32) -> ptr
+  let v: ptr = zi_alloc(32:i32)
+  mem.fill(v, 0:i8, 32:i32) +align=1
+  store.i32(ptr.offset(i8, v, 0:i64), tag)
+  return v
+end
+
+fn json_val_tag(v:ptr) -> i32
+  return load.i32(ptr.offset(i8, v, 0:i64))
+end
+
+fn json_val_aux(v:ptr) -> i32
+  return load.i32(ptr.offset(i8, v, 4:i64))
+end
+
+fn json_val_len(v:ptr) -> i32
+  return load.i32(ptr.offset(i8, v, 8:i64))
+end
+
+fn json_val_ptr0(v:ptr) -> ptr
+  return ptr.from_i64(load.i64(ptr.offset(i8, v, 16:i64)) +align=1)
+end
+
+fn json_val_set_aux(v:ptr, aux:i32) -> i32
+  store.i32(ptr.offset(i8, v, 4:i64), aux)
+  return 0:i32
+end
+
+fn json_val_set_len(v:ptr, len:i32) -> i32
+  store.i32(ptr.offset(i8, v, 8:i64), len)
+  return 0:i32
+end
+
+fn json_val_set_ptr0(v:ptr, p:ptr) -> i32
+  store.i64(ptr.offset(i8, v, 16:i64), ptr.to_i64(p)) +align=1
+  return 0:i32
+end
+
+fn json_vec_ptr_push(vec:ptr, p:ptr) -> i32
+  let outp: ptr = zi_alloc(8:i32)
+  let _: i32 = vector_push_zeroed(vec, outp)
+  let slot: ptr = json_load_ptr(outp)
+  store.i64(slot, ptr.to_i64(p)) +align=1
+  let _: i32 = zi_free(outp)
+  return 0:i32
+end
+
+fn json_vec_ptr_get(vec:ptr, idx:i32) -> ptr
+  let slot: ptr = vector_get_ptr(vec, idx)
+  let v: i64 = load.i64(slot) +align=1
+  return ptr.from_i64(v)
+end
+
+fn json_vec_ptr_pop(vec:ptr, out_p:ptr) -> i32
+  ;; Pops last element from a ptr vector (elem_size=8) into out_p (8 bytes).
+  block entry
+    let len: i32 = vector_len(vec)
+    let empty: bool = i32.cmp.eq(len, 0:i32)
+    term.cbr cond:empty,
+      then:bad,
+      else:pop args:[len]
+  end
+
+  block pop(len:i32)
+    let idx: i32 = i32.sub(len, 1:i32)
+    let slot: ptr = vector_get_ptr(vec, idx)
+    let v: i64 = load.i64(slot) +align=1
+    store.i64(out_p, v) +align=1
+    let _: i32 = vector_set_len(vec, idx)
+    term.ret value:0:i32
+  end
+
+  block bad
+    term.ret value:-1:i32
+  end
+end
+
+fn json_vec_u8_push(vec:ptr, b:i8) -> i32
+  let outp: ptr = zi_alloc(8:i32)
+  let _: i32 = vector_push_zeroed(vec, outp)
+  let slot: ptr = json_load_ptr(outp)
+  store.i8(slot, b)
+  let _: i32 = zi_free(outp)
+  return 0:i32
+end
+
+fn json_i32_to_i8(x:i32) -> i8
+  ;; sem subset doesn't support i8.trunc.i32; narrow via memory.
+  block entry
+    let p: ptr = alloca.i32()
+    store.i32(p, x)
+    term.ret value:load.i8(p)
+  end
+end
+
+fn json_vec_u8_push_str(vec:ptr, s:ptr, n:i32) -> i32
+  block entry
+    term.br to loop args:[0:i32]
+  end
+
+  block loop(i:i32)
+    let done: bool = i32.cmp.sge(i, n)
+    term.cbr cond:done,
+      then:ok,
+      else:step args:[i]
+  end
+
+  block step(i:i32)
+    let b: i8 = load.i8(ptr.offset(i8, s, i))
+    let _: i32 = json_vec_u8_push(vec, b)
+    term.br to loop args:[i32.add(i, 1:i32)]
+  end
+
+  block ok
+    term.ret value:0:i32
+  end
+end
+
+fn json_bytes_alloc_copy(src:ptr, n:i32) -> ptr
+  let dst: ptr = zi_alloc(n)
+  mem.copy(dst, src, n) +alignDst=1 +alignSrc=1 +overlap=disallow
+  return dst
+end
+
+fn json_free(v:ptr) -> i32
+  ;; Iterative free (recursion is not supported by sirc here).
+  block entry
+    let stack: ptr = vector_new(8:i32, 16:i32)
+    let tmp: ptr = zi_alloc(8:i32)
+    let _: i32 = json_vec_ptr_push(stack, v)
+    term.br to loop args:[stack, tmp]
+  end
+
+  block loop(stack:ptr, tmp:ptr)
+    let len: i32 = vector_len(stack)
+    let done: bool = i32.cmp.eq(len, 0:i32)
+    term.cbr cond:done,
+      then:finish args:[stack, tmp],
+      else:pop args:[stack, tmp]
+  end
+
+  block pop(stack:ptr, tmp:ptr)
+    let _: i32 = json_vec_ptr_pop(stack, tmp)
+    let node: ptr = json_load_ptr(tmp)
+    let tag: i32 = json_val_tag(node)
+    term.cbr cond:i32.cmp.eq(tag, json_tag_str()),
+      then:free_bytes args:[stack, tmp],
+      else:check_num args:[stack, tmp, node, tag]
+  end
+
+  block check_num(stack:ptr, tmp:ptr, node:ptr, tag:i32)
+    term.cbr cond:i32.cmp.eq(tag, json_tag_num()),
+      then:free_bytes2 args:[stack, tmp, node],
+      else:check_arr args:[stack, tmp, node, tag]
+  end
+
+  block check_arr(stack:ptr, tmp:ptr, node:ptr, tag:i32)
+    term.cbr cond:i32.cmp.eq(tag, json_tag_arr()),
+      then:free_arr args:[stack, tmp, node],
+      else:check_obj args:[stack, tmp, node, tag]
+  end
+
+  block check_obj(stack:ptr, tmp:ptr, node:ptr, tag:i32)
+    term.cbr cond:i32.cmp.eq(tag, json_tag_obj()),
+      then:free_obj args:[stack, tmp, node],
+      else:free_self args:[stack, tmp, node]
+  end
+
+  block free_bytes(stack:ptr, tmp:ptr)
+    ;; node is v from original; reload from tmp
+    let node: ptr = json_load_ptr(tmp)
+    let p: ptr = json_val_ptr0(node)
+    let _: i32 = zi_free(p)
+    let _: i32 = zi_free(node)
+    term.br to loop args:[stack, tmp]
+  end
+
+  block free_bytes2(stack:ptr, tmp:ptr, node:ptr)
+    let p: ptr = json_val_ptr0(node)
+    let _: i32 = zi_free(p)
+    let _: i32 = zi_free(node)
+    term.br to loop args:[stack, tmp]
+  end
+
+  block free_arr(stack:ptr, tmp:ptr, node:ptr)
+    let vec: ptr = json_val_ptr0(node)
+    term.br to arr_loop args:[0:i32, vector_len(vec), vec, stack, tmp, node]
+  end
+
+  block arr_loop(i:i32, n:i32, vec:ptr, stack:ptr, tmp:ptr, node:ptr)
+    let done: bool = i32.cmp.sge(i, n)
+    term.cbr cond:done,
+      then:arr_done args:[vec, stack, tmp, node],
+      else:arr_step args:[i, n, vec, stack, tmp, node]
+  end
+
+  block arr_step(i:i32, n:i32, vec:ptr, stack:ptr, tmp:ptr, node:ptr)
+    let child: ptr = json_vec_ptr_get(vec, i)
+    let _: i32 = json_vec_ptr_push(stack, child)
+    term.br to arr_loop args:[i32.add(i, 1:i32), n, vec, stack, tmp, node]
+  end
+
+  block arr_done(vec:ptr, stack:ptr, tmp:ptr, node:ptr)
+    let _: i32 = vector_free(vec)
+    let _: i32 = zi_free(node)
+    term.br to loop args:[stack, tmp]
+  end
+
+  block free_obj(stack:ptr, tmp:ptr, node:ptr)
+    let map: ptr = json_val_ptr0(node)
+    let next_idx: ptr = zi_alloc(4:i32)
+    let out_kptr: ptr = zi_alloc(8:i32)
+    let out_klen: ptr = zi_alloc(4:i32)
+    let out_vptr: ptr = zi_alloc(8:i32)
+    store.i32(next_idx, 0:i32)
+    term.br to obj_loop args:[0:i32, map, next_idx, out_kptr, out_klen, out_vptr, stack, tmp, node]
+  end
+
+  block obj_loop(idx:i32, map:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, stack:ptr, tmp:ptr, node:ptr)
+    let found: i32 = hashmap_iter_next(map, idx, next_idx, out_kptr, out_klen, out_vptr)
+    let done: bool = i32.cmp.eq(found, 0:i32)
+    term.cbr cond:done,
+      then:obj_done args:[map, next_idx, out_kptr, out_klen, out_vptr, stack, tmp, node],
+      else:obj_step args:[map, next_idx, out_kptr, out_klen, out_vptr, stack, tmp, node]
+  end
+
+  block obj_step(map:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, stack:ptr, tmp:ptr, node:ptr)
+    let kptr: ptr = json_load_ptr(out_kptr)
+    let vptr: ptr = json_load_ptr(out_vptr)
+    let _: i32 = zi_free(kptr)
+    let _: i32 = json_vec_ptr_push(stack, vptr)
+    let idx2: i32 = load.i32(next_idx)
+    term.br to obj_loop args:[idx2, map, next_idx, out_kptr, out_klen, out_vptr, stack, tmp, node]
+  end
+
+  block obj_done(map:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, stack:ptr, tmp:ptr, node:ptr)
+    let _: i32 = zi_free(next_idx)
+    let _: i32 = zi_free(out_kptr)
+    let _: i32 = zi_free(out_klen)
+    let _: i32 = zi_free(out_vptr)
+    let _: i32 = hashmap_free(map)
+    let _: i32 = zi_free(node)
+    term.br to loop args:[stack, tmp]
+  end
+
+  block free_self(stack:ptr, tmp:ptr, node:ptr)
+    let _: i32 = zi_free(node)
+    term.br to loop args:[stack, tmp]
+  end
+
+  block finish(stack:ptr, tmp:ptr)
+    let _: i32 = zi_free(tmp)
+    let _: i32 = vector_free(stack)
+    term.ret value:0:i32
+  end
+end
+
+;; ----------------- parsing -----------------
+
+fn json_rc_ok() -> i32
+  return 0:i32
+end
+
+fn json_rc_err() -> i32
+  return -1:i32
+end
+
+fn json_is_ws(c:i32) -> bool
+  let sp: bool = i32.cmp.eq(c, 32:i32)
+  let nl: bool = i32.cmp.eq(c, 10:i32)
+  let cr: bool = i32.cmp.eq(c, 13:i32)
+  let tab: bool = i32.cmp.eq(c, 9:i32)
+  return bool.or(sp, bool.or(nl, bool.or(cr, tab)))
+end
+
+fn json_peek(src:ptr, n:i32, i:i32) -> i32
+  let inb: bool = i32.cmp.slt(i, n)
+  let b: i8 = select(i8, inb, load.i8(ptr.offset(i8, src, i)), 0:i8)
+  return i32.zext.i8(b)
+end
+
+fn json_skip_ws(src:ptr, n:i32, i:i32) -> i32
+  block entry
+    term.br to loop args:[i]
+  end
+
+  block loop(i:i32)
+    let cont: bool = i32.cmp.slt(i, n)
+    term.cbr cond:cont,
+      then:check args:[i],
+      else:done args:[i]
+  end
+
+  block check(i:i32)
+    let c: i32 = json_peek(src, n, i)
+    let ws: bool = json_is_ws(c)
+    term.cbr cond:ws,
+      then:cont args:[i],
+      else:done args:[i]
+  end
+
+  block cont(i:i32)
+    term.br to loop args:[i32.add(i, 1:i32)]
+  end
+
+  block done(i:i32)
+    term.ret value:i
+  end
+end
+
+fn json_expect_byte(src:ptr, n:i32, i:i32, b:i32, out_i2:ptr) -> i32
+  let c: i32 = json_peek(src, n, i)
+  let ok: bool = i32.cmp.eq(c, b)
+  store.i32(out_i2, select(i32, ok, i32.add(i, 1:i32), i))
+  return select(i32, ok, 0:i32, json_rc_err())
+end
+
+fn json_hex_val(c:i32) -> i32
+  ;; Returns 0..15 or -1.
+  let is0: bool = bool.and(i32.cmp.sge(c, 48:i32), i32.cmp.sle(c, 57:i32))
+  let isA: bool = bool.and(i32.cmp.sge(c, 65:i32), i32.cmp.sle(c, 70:i32))
+  let isa: bool = bool.and(i32.cmp.sge(c, 97:i32), i32.cmp.sle(c, 102:i32))
+  let v0: i32 = select(i32, is0, i32.sub(c, 48:i32), -1:i32)
+  let vA: i32 = select(i32, isA, i32.add(10:i32, i32.sub(c, 65:i32)), -1:i32)
+  let va: i32 = select(i32, isa, i32.add(10:i32, i32.sub(c, 97:i32)), -1:i32)
+  let v1: i32 = select(i32, i32.cmp.sge(v0, 0:i32), v0, vA)
+  return select(i32, i32.cmp.sge(v1, 0:i32), v1, va)
+end
+
+fn json_parse_string_raw(src:ptr, n:i32, i0:i32, out_s_ptr:ptr, out_s_len:ptr, out_i2:ptr) -> i32
+  ;; Parses a JSON string starting at i0 (must point at '"').
+  ;; Returns owned bytes in out_s_ptr/out_s_len.
+  block entry
+    let i: i32 = i0
+    let c0: i32 = json_peek(src, n, i)
+    let okq: bool = i32.cmp.eq(c0, 34:i32)
+    term.cbr cond:okq,
+      then:init,
+      else:bad
+  end
+
+  block init
+    let vec: ptr = vector_new(1:i32, 16:i32)
+    term.br to loop args:[i32.add(i0, 1:i32), vec]
+  end
+
+  block loop(i:i32, vec:ptr)
+    let inb: bool = i32.cmp.slt(i, n)
+    term.cbr cond:inb,
+      then:step args:[i, vec],
+      else:eof args:[vec]
+  end
+
+  block step(i:i32, vec:ptr)
+    let c: i32 = json_peek(src, n, i)
+    let is_quote: bool = i32.cmp.eq(c, 34:i32)
+    term.cbr cond:is_quote,
+      then:finish args:[i, vec],
+      else:check_escape args:[i, vec, c]
+  end
+
+  block check_escape(i:i32, vec:ptr, c:i32)
+    let is_bslash: bool = i32.cmp.eq(c, 92:i32)
+    term.cbr cond:is_bslash,
+      then:esc0 args:[i, vec],
+      else:plain args:[i, vec, c]
+  end
+
+  block plain(i:i32, vec:ptr, c:i32)
+    let _: i32 = json_vec_u8_push(vec, json_i32_to_i8(c))
+    term.br to loop args:[i32.add(i, 1:i32), vec]
+  end
+
+  block esc0(i:i32, vec:ptr)
+    let i1: i32 = i32.add(i, 1:i32)
+    let inb: bool = i32.cmp.slt(i1, n)
+    term.cbr cond:inb,
+      then:esc1 args:[i1, vec],
+      else:eof args:[vec]
+  end
+
+  block esc1(i:i32, vec:ptr)
+    let c: i32 = json_peek(src, n, i)
+    ;; common escapes
+    term.cbr cond:i32.cmp.eq(c, 34:i32),
+      then:push_byte args:[i, vec, 34:i32],
+      else:esc_bs args:[i, vec, c]
+  end
+
+  block esc_bs(i:i32, vec:ptr, c:i32)
+    term.cbr cond:i32.cmp.eq(c, 92:i32),
+      then:push_byte args:[i, vec, 92:i32],
+      else:esc_slash args:[i, vec, c]
+  end
+
+  block esc_slash(i:i32, vec:ptr, c:i32)
+    term.cbr cond:i32.cmp.eq(c, 47:i32),
+      then:push_byte args:[i, vec, 47:i32],
+      else:esc_b args:[i, vec, c]
+  end
+
+  block esc_b(i:i32, vec:ptr, c:i32)
+    term.cbr cond:i32.cmp.eq(c, 98:i32),
+      then:push_byte args:[i, vec, 8:i32],
+      else:esc_f args:[i, vec, c]
+  end
+
+  block esc_f(i:i32, vec:ptr, c:i32)
+    term.cbr cond:i32.cmp.eq(c, 102:i32),
+      then:push_byte args:[i, vec, 12:i32],
+      else:esc_n args:[i, vec, c]
+  end
+
+  block esc_n(i:i32, vec:ptr, c:i32)
+    term.cbr cond:i32.cmp.eq(c, 110:i32),
+      then:push_byte args:[i, vec, 10:i32],
+      else:esc_r args:[i, vec, c]
+  end
+
+  block esc_r(i:i32, vec:ptr, c:i32)
+    term.cbr cond:i32.cmp.eq(c, 114:i32),
+      then:push_byte args:[i, vec, 13:i32],
+      else:esc_t args:[i, vec, c]
+  end
+
+  block esc_t(i:i32, vec:ptr, c:i32)
+    term.cbr cond:i32.cmp.eq(c, 116:i32),
+      then:push_byte args:[i, vec, 9:i32],
+      else:esc_u args:[i, vec, c]
+  end
+
+  block esc_u(i:i32, vec:ptr, c:i32)
+    term.cbr cond:i32.cmp.eq(c, 117:i32),
+      then:uni0 args:[i, vec],
+      else:bad_vec args:[vec]
+  end
+
+  block push_byte(i:i32, vec:ptr, b:i32)
+    let _: i32 = json_vec_u8_push(vec, json_i32_to_i8(b))
+    term.br to loop args:[i32.add(i, 1:i32), vec]
+  end
+
+  block uni0(i:i32, vec:ptr)
+    ;; parse 4 hex digits starting at i+1
+    let i1: i32 = i32.add(i, 1:i32)
+    let ok1: bool = i32.cmp.slt(i32.add(i1, 3:i32), n)
+    term.cbr cond:ok1,
+      then:uni1 args:[i1, vec],
+      else:eof args:[vec]
+  end
+
+  block uni1(i:i32, vec:ptr)
+    let c0: i32 = json_peek(src, n, i)
+    let c1: i32 = json_peek(src, n, i32.add(i, 1:i32))
+    let c2: i32 = json_peek(src, n, i32.add(i, 2:i32))
+    let c3: i32 = json_peek(src, n, i32.add(i, 3:i32))
+    let v0: i32 = json_hex_val(c0)
+    let v1: i32 = json_hex_val(c1)
+    let v2: i32 = json_hex_val(c2)
+    let v3: i32 = json_hex_val(c3)
+    let ok: bool = bool.and(i32.cmp.sge(v0, 0:i32), bool.and(i32.cmp.sge(v1, 0:i32), bool.and(i32.cmp.sge(v2, 0:i32), i32.cmp.sge(v3, 0:i32))))
+    term.cbr cond:ok,
+      then:uni_emit args:[i, vec, v0, v1, v2, v3],
+      else:bad_vec args:[vec]
+  end
+
+  block uni_emit(i:i32, vec:ptr, v0:i32, v1:i32, v2:i32, v3:i32)
+    let cp: i32 = i32.add(i32.mul(v0, 4096:i32), i32.add(i32.mul(v1, 256:i32), i32.add(i32.mul(v2, 16:i32), v3)))
+    ;; Reject surrogate range for now (D800-DFFF)
+    let is_sur: bool = bool.and(i32.cmp.sge(cp, 55296:i32), i32.cmp.sle(cp, 57343:i32))
+    term.cbr cond:is_sur,
+      then:bad_vec args:[vec],
+      else:uni_utf8 args:[i, vec, cp]
+  end
+
+  block uni_utf8(i:i32, vec:ptr, cp:i32)
+    let le7: bool = i32.cmp.sle(cp, 127:i32)
+    term.cbr cond:le7,
+      then:uni1b args:[i, vec, cp],
+      else:uni_more args:[i, vec, cp]
+  end
+
+  block uni_more(i:i32, vec:ptr, cp:i32)
+    let le11: bool = i32.cmp.sle(cp, 2047:i32)
+    term.cbr cond:le11,
+      then:uni2b args:[i, vec, cp],
+      else:uni3b args:[i, vec, cp]
+  end
+
+  block uni1b(i:i32, vec:ptr, cp:i32)
+    let _: i32 = json_vec_u8_push(vec, json_i32_to_i8(cp))
+    term.br to loop args:[i32.add(i, 4:i32), vec]
+  end
+
+  block uni2b(i:i32, vec:ptr, cp:i32)
+    let b0: i32 = i32.or(192:i32, i32.shr.u(cp, 6:i32))
+    let b1: i32 = i32.or(128:i32, i32.and(cp, 63:i32))
+    let _: i32 = json_vec_u8_push(vec, json_i32_to_i8(b0))
+    let _: i32 = json_vec_u8_push(vec, json_i32_to_i8(b1))
+    term.br to loop args:[i32.add(i, 4:i32), vec]
+  end
+
+  block uni3b(i:i32, vec:ptr, cp:i32)
+    let b0: i32 = i32.or(224:i32, i32.shr.u(cp, 12:i32))
+    let b1: i32 = i32.or(128:i32, i32.and(i32.shr.u(cp, 6:i32), 63:i32))
+    let b2: i32 = i32.or(128:i32, i32.and(cp, 63:i32))
+    let _: i32 = json_vec_u8_push(vec, json_i32_to_i8(b0))
+    let _: i32 = json_vec_u8_push(vec, json_i32_to_i8(b1))
+    let _: i32 = json_vec_u8_push(vec, json_i32_to_i8(b2))
+    term.br to loop args:[i32.add(i, 4:i32), vec]
+  end
+
+  block finish(i:i32, vec:ptr)
+    let len: i32 = vector_len(vec)
+    let data: ptr = vector_data(vec)
+    let outp: ptr = json_bytes_alloc_copy(data, len)
+    let _: i32 = vector_free(vec)
+    let _: i32 = json_store_ptr(out_s_ptr, outp)
+    store.i32(out_s_len, len)
+    store.i32(out_i2, i32.add(i, 1:i32))
+    term.ret value:0:i32
+  end
+
+  block bad
+    term.ret value:json_rc_err()
+  end
+
+  block eof(vec:ptr)
+    let _: i32 = vector_free(vec)
+    term.ret value:json_rc_err()
+  end
+
+  block bad_vec(vec:ptr)
+    let _: i32 = vector_free(vec)
+    term.ret value:json_rc_err()
+  end
+end
+
+fn json_parse_lit(src:ptr, n:i32, i0:i32, pat:ptr, pat_len:i32, out_i2:ptr) -> i32
+  block entry
+    term.br to loop args:[0:i32]
+  end
+
+  block loop(j:i32)
+    let done: bool = i32.cmp.sge(j, pat_len)
+    term.cbr cond:done,
+      then:ok,
+      else:step args:[j]
+  end
+
+  block step(j:i32)
+    let i: i32 = i32.add(i0, j)
+    let inb: bool = i32.cmp.slt(i, n)
+    term.cbr cond:inb,
+      then:cmp args:[j, i],
+      else:bad
+  end
+
+  block cmp(j:i32, i:i32)
+    let a: i32 = json_peek(src, n, i)
+    let b: i32 = i32.zext.i8(load.i8(ptr.offset(i8, pat, j)))
+    let ok: bool = i32.cmp.eq(a, b)
+    term.cbr cond:ok,
+      then:cont args:[j],
+      else:bad
+  end
+
+  block cont(j:i32)
+    term.br to loop args:[i32.add(j, 1:i32)]
+  end
+
+  block ok
+    store.i32(out_i2, i32.add(i0, pat_len))
+    term.ret value:0:i32
+  end
+
+  block bad
+    term.ret value:json_rc_err()
+  end
+end
+
+fn json_parse_number_raw(src:ptr, n:i32, i0:i32, out_p:ptr, out_len:ptr, out_i2:ptr) -> i32
+  ;; Captures the number lexeme bytes without converting.
+  block entry
+    term.br to loop args:[i0]
+  end
+
+  block loop(i:i32)
+    let inb: bool = i32.cmp.slt(i, n)
+    term.cbr cond:inb,
+      then:check args:[i],
+      else:finish args:[i]
+  end
+
+  block check(i:i32)
+    let c: i32 = json_peek(src, n, i)
+    let d0: bool = bool.and(i32.cmp.sge(c, 48:i32), i32.cmp.sle(c, 57:i32))
+    let dm: bool = i32.cmp.eq(c, 45:i32)
+    let dp: bool = i32.cmp.eq(c, 46:i32)
+    let de: bool = bool.or(i32.cmp.eq(c, 101:i32), i32.cmp.eq(c, 69:i32))
+    let ds: bool = bool.or(i32.cmp.eq(c, 43:i32), i32.cmp.eq(c, 45:i32))
+    let keep: bool = bool.or(d0, bool.or(dm, bool.or(dp, bool.or(de, ds))))
+    term.cbr cond:keep,
+      then:cont args:[i],
+      else:finish args:[i]
+  end
+
+  block cont(i:i32)
+    term.br to loop args:[i32.add(i, 1:i32)]
+  end
+
+  block finish(i:i32)
+    let len: i32 = i32.sub(i, i0)
+    let ok: bool = i32.cmp.sgt(len, 0:i32)
+    term.cbr cond:ok,
+      then:emit args:[i, len],
+      else:bad
+  end
+
+  block emit(i:i32, len:i32)
+    let p: ptr = json_bytes_alloc_copy(ptr.offset(i8, src, i0), len)
+    let _: i32 = json_store_ptr(out_p, p)
+    store.i32(out_len, len)
+    store.i32(out_i2, i)
+    term.ret value:0:i32
+  end
+
+  block bad
+    term.ret value:json_rc_err()
+  end
+end
+
+fn json_parse_from(src:ptr, n:i32, i0:i32, out_val:ptr, out_i2:ptr) -> i32
+  ;; Iterative parse for a single JSON value (recursion is not supported by sirc here).
+  ;; Frame layout (48 bytes):
+  ;;  0 kind(i32): 1 arr, 2 obj
+  ;;  4 state(i32): arr 0=value/']',1=comma/']' ; obj 0=key/'}',1=':',2=value,3=comma/'}'
+  ;;  8 key_ptr(i64)
+  ;; 16 key_len(i32)
+  ;; 24 cont_ptr(i64)
+  ;; 32 val_ptr(i64)
+  block entry
+    let frames: ptr = vector_new(48:i32, 8:i32)
+    let tmp: ptr = zi_alloc(8:i32)
+    let scratch: ptr = zi_alloc(8:i32)
+    let i: i32 = json_skip_ws(src, n, i0)
+    term.br to loop args:[i, 0:i32, ptr.from_i64(0:i64), 0:i32, ptr.from_i64(0:i64), frames, tmp, scratch]
+  end
+
+  block loop(i:i32, have_val:i32, cur:ptr, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    let i2: i32 = json_skip_ws(src, n, i)
+    term.cbr cond:i32.cmp.eq(have_val, 1:i32),
+      then:assign args:[i2, cur, have_root, root, frames, tmp, scratch],
+      else:drive args:[i2, have_root, root, frames, tmp, scratch]
+  end
+
+  block assign(i:i32, cur:ptr, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    let flen: i32 = vector_len(frames)
+    let empty: bool = i32.cmp.eq(flen, 0:i32)
+    term.cbr cond:empty,
+      then:assign_root args:[i, cur, have_root, root, frames, tmp, scratch],
+      else:assign_parent args:[i, cur, have_root, root, frames, tmp, scratch, flen]
+  end
+
+  block assign_root(i:i32, cur:ptr, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    term.cbr cond:i32.cmp.eq(have_root, 0:i32),
+      then:set_root args:[i, cur, frames, tmp, scratch],
+      else:fail_all args:[frames, tmp, scratch, have_root, root, 1:i32, cur]
+  end
+
+  block set_root(i:i32, cur:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    term.br to loop args:[i, 0:i32, ptr.from_i64(0:i64), 1:i32, cur, frames, tmp, scratch]
+  end
+
+  block assign_parent(i:i32, cur:ptr, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, flen:i32)
+    let top: ptr = vector_get_ptr(frames, i32.sub(flen, 1:i32))
+    let kind: i32 = load.i32(ptr.offset(i8, top, 0:i64))
+    term.cbr cond:i32.cmp.eq(kind, 1:i32),
+      then:assign_arr args:[i, cur, have_root, root, frames, tmp, scratch, top],
+      else:assign_obj args:[i, cur, have_root, root, frames, tmp, scratch, top]
+  end
+
+  block assign_arr(i:i32, cur:ptr, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, top:ptr)
+    let state: i32 = load.i32(ptr.offset(i8, top, 4:i64))
+    let ok: bool = i32.cmp.eq(state, 0:i32)
+    term.cbr cond:ok,
+      then:arr_push args:[i, cur, have_root, root, frames, tmp, scratch, top],
+      else:fail_all args:[frames, tmp, scratch, have_root, root, 1:i32, cur]
+  end
+
+  block arr_push(i:i32, cur:ptr, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, top:ptr)
+    let arr_ptr: ptr = ptr.from_i64(load.i64(ptr.offset(i8, top, 24:i64)) +align=1)
+    let _: i32 = json_vec_ptr_push(arr_ptr, cur)
+    store.i32(ptr.offset(i8, top, 4:i64), 1:i32)
+    term.br to loop args:[i, 0:i32, ptr.from_i64(0:i64), have_root, root, frames, tmp, scratch]
+  end
+
+  block assign_obj(i:i32, cur:ptr, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, top:ptr)
+    let state: i32 = load.i32(ptr.offset(i8, top, 4:i64))
+    let ok: bool = i32.cmp.eq(state, 2:i32)
+    term.cbr cond:ok,
+      then:obj_put args:[i, cur, have_root, root, frames, tmp, scratch, top],
+      else:fail_all args:[frames, tmp, scratch, have_root, root, 1:i32, cur]
+  end
+
+  block obj_put(i:i32, cur:ptr, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, top:ptr)
+    let map: ptr = ptr.from_i64(load.i64(ptr.offset(i8, top, 24:i64)) +align=1)
+    let kptr: ptr = ptr.from_i64(load.i64(ptr.offset(i8, top, 8:i64)) +align=1)
+    let klen: i32 = load.i32(ptr.offset(i8, top, 16:i64))
+    let _: i32 = hashmap_put_copy_key(map, kptr, klen, cur)
+    let _: i32 = zi_free(kptr)
+    store.i64(ptr.offset(i8, top, 8:i64), 0:i64) +align=1
+    store.i32(ptr.offset(i8, top, 16:i64), 0:i32)
+    store.i32(ptr.offset(i8, top, 4:i64), 3:i32)
+    term.br to loop args:[i, 0:i32, ptr.from_i64(0:i64), have_root, root, frames, tmp, scratch]
+  end
+
+  block drive(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    let flen: i32 = vector_len(frames)
+    let any: bool = i32.cmp.sgt(flen, 0:i32)
+    term.cbr cond:any,
+      then:drive_frame args:[i, have_root, root, frames, tmp, scratch, flen],
+      else:drive_root args:[i, have_root, root, frames, tmp, scratch]
+  end
+
+  block drive_root(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    term.cbr cond:i32.cmp.eq(have_root, 1:i32),
+      then:done args:[i, root, frames, tmp, scratch],
+      else:parse_value args:[i, have_root, root, frames, tmp, scratch]
+  end
+
+  block drive_frame(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, flen:i32)
+    let top: ptr = vector_get_ptr(frames, i32.sub(flen, 1:i32))
+    let kind: i32 = load.i32(ptr.offset(i8, top, 0:i64))
+    let state: i32 = load.i32(ptr.offset(i8, top, 4:i64))
+    term.cbr cond:i32.cmp.eq(kind, 1:i32),
+      then:drive_arr args:[i, have_root, root, frames, tmp, scratch, top, state],
+      else:drive_obj args:[i, have_root, root, frames, tmp, scratch, top, state]
+  end
+
+  block drive_arr(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, top:ptr, state:i32)
+    let c: i32 = json_peek(src, n, i)
+    term.cbr cond:i32.cmp.eq(state, 0:i32),
+      then:arr_need_val args:[i, c, have_root, root, frames, tmp, scratch, top],
+      else:arr_need_sep args:[i, c, have_root, root, frames, tmp, scratch, top]
+  end
+
+  block arr_need_val(i:i32, c:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, top:ptr)
+    term.cbr cond:i32.cmp.eq(c, 93:i32),
+      then:close_frame args:[i32.add(i, 1:i32), have_root, root, frames, tmp, scratch],
+      else:parse_value args:[i, have_root, root, frames, tmp, scratch]
+  end
+
+  block arr_need_sep(i:i32, c:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, top:ptr)
+    term.cbr cond:i32.cmp.eq(c, 44:i32),
+      then:arr_comma args:[i, have_root, root, frames, tmp, scratch, top],
+      else:arr_maybe_end args:[i, c, have_root, root, frames, tmp, scratch]
+  end
+
+  block arr_comma(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, top:ptr)
+    store.i32(ptr.offset(i8, top, 4:i64), 0:i32)
+    term.br to loop args:[i32.add(i, 1:i32), 0:i32, ptr.from_i64(0:i64), have_root, root, frames, tmp, scratch]
+  end
+
+  block arr_maybe_end(i:i32, c:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    term.cbr cond:i32.cmp.eq(c, 93:i32),
+      then:close_frame args:[i32.add(i, 1:i32), have_root, root, frames, tmp, scratch],
+      else:fail_all args:[frames, tmp, scratch, have_root, root, 0:i32, ptr.from_i64(0:i64)]
+  end
+
+  block drive_obj(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, top:ptr, state:i32)
+    let c: i32 = json_peek(src, n, i)
+    term.cbr cond:i32.cmp.eq(state, 0:i32),
+      then:obj_need_key args:[i, c, have_root, root, frames, tmp, scratch, top],
+      else:obj_state1 args:[i, c, have_root, root, frames, tmp, scratch, top, state]
+  end
+
+  block obj_need_key(i:i32, c:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, top:ptr)
+    term.cbr cond:i32.cmp.eq(c, 125:i32),
+      then:close_frame args:[i32.add(i, 1:i32), have_root, root, frames, tmp, scratch],
+      else:obj_key args:[i, c, have_root, root, frames, tmp, scratch, top]
+  end
+
+  block obj_key(i:i32, c:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, top:ptr)
+    let isq: bool = i32.cmp.eq(c, 34:i32)
+    term.cbr cond:isq,
+      then:obj_parse_key args:[i, have_root, root, frames, tmp, scratch, top],
+      else:fail_all args:[frames, tmp, scratch, have_root, root, 0:i32, ptr.from_i64(0:i64)]
+  end
+
+  block obj_parse_key(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, top:ptr)
+    let out_kp: ptr = zi_alloc(8:i32)
+    let out_kl: ptr = zi_alloc(4:i32)
+    let i2p: ptr = zi_alloc(4:i32)
+    let rc: i32 = json_parse_string_raw(src, n, i, out_kp, out_kl, i2p)
+    let ok: bool = i32.cmp.eq(rc, 0:i32)
+    term.cbr cond:ok,
+      then:obj_key_ok args:[have_root, root, frames, tmp, scratch, top, out_kp, out_kl, i2p],
+      else:obj_key_bad args:[frames, tmp, scratch, have_root, root, out_kp, out_kl, i2p]
+  end
+
+  block obj_key_ok(have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, top:ptr, out_kp:ptr, out_kl:ptr, i2p:ptr)
+    let kptr: ptr = json_load_ptr(out_kp)
+    let klen: i32 = load.i32(out_kl)
+    store.i64(ptr.offset(i8, top, 8:i64), ptr.to_i64(kptr)) +align=1
+    store.i32(ptr.offset(i8, top, 16:i64), klen)
+    store.i32(ptr.offset(i8, top, 4:i64), 1:i32)
+    let i2: i32 = load.i32(i2p)
+    let _: i32 = zi_free(out_kp)
+    let _: i32 = zi_free(out_kl)
+    let _: i32 = zi_free(i2p)
+    term.br to loop args:[i2, 0:i32, ptr.from_i64(0:i64), have_root, root, frames, tmp, scratch]
+  end
+
+  block obj_key_bad(frames:ptr, tmp:ptr, scratch:ptr, have_root:i32, root:ptr, out_kp:ptr, out_kl:ptr, i2p:ptr)
+    let _: i32 = zi_free(out_kp)
+    let _: i32 = zi_free(out_kl)
+    let _: i32 = zi_free(i2p)
+    term.br to fail_all args:[frames, tmp, scratch, have_root, root, 0:i32, ptr.from_i64(0:i64)]
+  end
+
+  block obj_state1(i:i32, c:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, top:ptr, state:i32)
+    term.cbr cond:i32.cmp.eq(state, 1:i32),
+      then:obj_colon args:[i, c, have_root, root, frames, tmp, scratch, top],
+      else:obj_state2 args:[i, have_root, root, frames, tmp, scratch, state]
+  end
+
+  block obj_colon(i:i32, c:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, top:ptr)
+    let ok: bool = i32.cmp.eq(c, 58:i32)
+    term.cbr cond:ok,
+      then:obj_colon_ok args:[i, have_root, root, frames, tmp, scratch, top],
+      else:fail_all args:[frames, tmp, scratch, have_root, root, 0:i32, ptr.from_i64(0:i64)]
+  end
+
+  block obj_colon_ok(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, top:ptr)
+    store.i32(ptr.offset(i8, top, 4:i64), 2:i32)
+    term.br to loop args:[i32.add(i, 1:i32), 0:i32, ptr.from_i64(0:i64), have_root, root, frames, tmp, scratch]
+  end
+
+  block obj_state2(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, state:i32)
+    term.cbr cond:i32.cmp.eq(state, 2:i32),
+      then:parse_value args:[i, have_root, root, frames, tmp, scratch],
+      else:obj_sep args:[i, have_root, root, frames, tmp, scratch]
+  end
+
+  block obj_sep(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    let c: i32 = json_peek(src, n, i)
+    term.cbr cond:i32.cmp.eq(c, 44:i32),
+      then:obj_comma args:[i, have_root, root, frames, tmp, scratch],
+      else:obj_end args:[i, c, have_root, root, frames, tmp, scratch]
+  end
+
+  block obj_comma(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    ;; set state back to key
+    let flen: i32 = vector_len(frames)
+    let top: ptr = vector_get_ptr(frames, i32.sub(flen, 1:i32))
+    store.i32(ptr.offset(i8, top, 4:i64), 0:i32)
+    term.br to loop args:[i32.add(i, 1:i32), 0:i32, ptr.from_i64(0:i64), have_root, root, frames, tmp, scratch]
+  end
+
+  block obj_end(i:i32, c:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    term.cbr cond:i32.cmp.eq(c, 125:i32),
+      then:close_frame args:[i32.add(i, 1:i32), have_root, root, frames, tmp, scratch],
+      else:fail_all args:[frames, tmp, scratch, have_root, root, 0:i32, ptr.from_i64(0:i64)]
+  end
+
+  block parse_value(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    let c: i32 = json_peek(src, n, i)
+    term.cbr cond:i32.cmp.eq(c, 91:i32),
+      then:open_arr args:[i, have_root, root, frames, tmp, scratch],
+      else:val_obj_chk args:[i, c, have_root, root, frames, tmp, scratch]
+  end
+
+  block val_obj_chk(i:i32, c:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    term.cbr cond:i32.cmp.eq(c, 123:i32),
+      then:open_obj args:[i, have_root, root, frames, tmp, scratch],
+      else:val_str_chk args:[i, c, have_root, root, frames, tmp, scratch]
+  end
+
+  block val_str_chk(i:i32, c:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    term.cbr cond:i32.cmp.eq(c, 34:i32),
+      then:val_str args:[i, have_root, root, frames, tmp, scratch],
+      else:val_lit_chk args:[i, c, have_root, root, frames, tmp, scratch]
+  end
+
+  block val_lit_chk(i:i32, c:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    term.cbr cond:i32.cmp.eq(c, 110:i32),
+      then:lit_null args:[i, have_root, root, frames, tmp, scratch],
+      else:lit_true_chk args:[i, c, have_root, root, frames, tmp, scratch]
+  end
+
+  block lit_true_chk(i:i32, c:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    term.cbr cond:i32.cmp.eq(c, 116:i32),
+      then:lit_true args:[i, have_root, root, frames, tmp, scratch],
+      else:lit_false_chk args:[i, c, have_root, root, frames, tmp, scratch]
+  end
+
+  block lit_false_chk(i:i32, c:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    term.cbr cond:i32.cmp.eq(c, 102:i32),
+      then:lit_false args:[i, have_root, root, frames, tmp, scratch],
+      else:val_num args:[i, have_root, root, frames, tmp, scratch]
+  end
+
+  block lit_null(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    let i2p: ptr = zi_alloc(4:i32)
+    let rc: i32 = json_parse_lit(src, n, i, "null", 4:i32, i2p)
+    let ok: bool = i32.cmp.eq(rc, 0:i32)
+    term.cbr cond:ok,
+      then:lit_ok_null args:[load.i32(i2p), have_root, root, frames, tmp, scratch, i2p],
+      else:lit_bad args:[frames, tmp, scratch, have_root, root, i2p]
+  end
+
+  block lit_ok_null(i2:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, i2p:ptr)
+    let v: ptr = json_val_new(json_tag_null())
+    let _: i32 = zi_free(i2p)
+    term.br to loop args:[i2, 1:i32, v, have_root, root, frames, tmp, scratch]
+  end
+
+  block lit_true(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    let i2p: ptr = zi_alloc(4:i32)
+    let rc: i32 = json_parse_lit(src, n, i, "true", 4:i32, i2p)
+    let ok: bool = i32.cmp.eq(rc, 0:i32)
+    term.cbr cond:ok,
+      then:lit_ok_true args:[load.i32(i2p), have_root, root, frames, tmp, scratch, i2p],
+      else:lit_bad args:[frames, tmp, scratch, have_root, root, i2p]
+  end
+
+  block lit_ok_true(i2:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, i2p:ptr)
+    let v: ptr = json_val_new(json_tag_bool())
+    let _: i32 = json_val_set_aux(v, 1:i32)
+    let _: i32 = zi_free(i2p)
+    term.br to loop args:[i2, 1:i32, v, have_root, root, frames, tmp, scratch]
+  end
+
+  block lit_false(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    let i2p: ptr = zi_alloc(4:i32)
+    let rc: i32 = json_parse_lit(src, n, i, "false", 5:i32, i2p)
+    let ok: bool = i32.cmp.eq(rc, 0:i32)
+    term.cbr cond:ok,
+      then:lit_ok_false args:[load.i32(i2p), have_root, root, frames, tmp, scratch, i2p],
+      else:lit_bad args:[frames, tmp, scratch, have_root, root, i2p]
+  end
+
+  block lit_ok_false(i2:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, i2p:ptr)
+    let v: ptr = json_val_new(json_tag_bool())
+    let _: i32 = json_val_set_aux(v, 0:i32)
+    let _: i32 = zi_free(i2p)
+    term.br to loop args:[i2, 1:i32, v, have_root, root, frames, tmp, scratch]
+  end
+
+  block val_str(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    let out_p: ptr = zi_alloc(8:i32)
+    let out_len: ptr = zi_alloc(4:i32)
+    let i2p: ptr = zi_alloc(4:i32)
+    let rc: i32 = json_parse_string_raw(src, n, i, out_p, out_len, i2p)
+    let ok: bool = i32.cmp.eq(rc, 0:i32)
+    term.cbr cond:ok,
+      then:val_str_ok args:[have_root, root, frames, tmp, scratch, out_p, out_len, i2p],
+      else:val_str_bad args:[frames, tmp, scratch, have_root, root, out_p, out_len, i2p]
+  end
+
+  block val_str_ok(have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, out_p:ptr, out_len:ptr, i2p:ptr)
+    let v: ptr = json_val_new(json_tag_str())
+    let p: ptr = json_load_ptr(out_p)
+    let len: i32 = load.i32(out_len)
+    let _: i32 = json_val_set_ptr0(v, p)
+    let _: i32 = json_val_set_len(v, len)
+    let i2: i32 = load.i32(i2p)
+    let _: i32 = zi_free(out_p)
+    let _: i32 = zi_free(out_len)
+    let _: i32 = zi_free(i2p)
+    term.br to loop args:[i2, 1:i32, v, have_root, root, frames, tmp, scratch]
+  end
+
+  block val_str_bad(frames:ptr, tmp:ptr, scratch:ptr, have_root:i32, root:ptr, out_p:ptr, out_len:ptr, i2p:ptr)
+    let _: i32 = zi_free(out_p)
+    let _: i32 = zi_free(out_len)
+    let _: i32 = zi_free(i2p)
+    term.br to fail_all args:[frames, tmp, scratch, have_root, root, 0:i32, ptr.from_i64(0:i64)]
+  end
+
+  block val_num(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    let out_p: ptr = zi_alloc(8:i32)
+    let out_len: ptr = zi_alloc(4:i32)
+    let i2p: ptr = zi_alloc(4:i32)
+    let rc: i32 = json_parse_number_raw(src, n, i, out_p, out_len, i2p)
+    let ok: bool = i32.cmp.eq(rc, 0:i32)
+    term.cbr cond:ok,
+      then:val_num_ok args:[have_root, root, frames, tmp, scratch, out_p, out_len, i2p],
+      else:val_num_bad args:[frames, tmp, scratch, have_root, root, out_p, out_len, i2p]
+  end
+
+  block val_num_ok(have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, out_p:ptr, out_len:ptr, i2p:ptr)
+    let v: ptr = json_val_new(json_tag_num())
+    let p: ptr = json_load_ptr(out_p)
+    let len: i32 = load.i32(out_len)
+    let _: i32 = json_val_set_ptr0(v, p)
+    let _: i32 = json_val_set_len(v, len)
+    let i2: i32 = load.i32(i2p)
+    let _: i32 = zi_free(out_p)
+    let _: i32 = zi_free(out_len)
+    let _: i32 = zi_free(i2p)
+    term.br to loop args:[i2, 1:i32, v, have_root, root, frames, tmp, scratch]
+  end
+
+  block val_num_bad(frames:ptr, tmp:ptr, scratch:ptr, have_root:i32, root:ptr, out_p:ptr, out_len:ptr, i2p:ptr)
+    let _: i32 = zi_free(out_p)
+    let _: i32 = zi_free(out_len)
+    let _: i32 = zi_free(i2p)
+    term.br to fail_all args:[frames, tmp, scratch, have_root, root, 0:i32, ptr.from_i64(0:i64)]
+  end
+
+  block open_arr(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    let vec: ptr = vector_new(8:i32, 4:i32)
+    let val: ptr = json_val_new(json_tag_arr())
+    let _: i32 = json_val_set_ptr0(val, vec)
+    let _: i32 = vector_push_zeroed(frames, scratch)
+    let fp: ptr = json_load_ptr(scratch)
+    store.i32(ptr.offset(i8, fp, 0:i64), 1:i32)
+    store.i32(ptr.offset(i8, fp, 4:i64), 0:i32)
+    store.i64(ptr.offset(i8, fp, 24:i64), ptr.to_i64(vec)) +align=1
+    store.i64(ptr.offset(i8, fp, 32:i64), ptr.to_i64(val)) +align=1
+    term.br to loop args:[i32.add(i, 1:i32), 0:i32, ptr.from_i64(0:i64), have_root, root, frames, tmp, scratch]
+  end
+
+  block open_obj(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    let map: ptr = hashmap_new(8:i32)
+    let val: ptr = json_val_new(json_tag_obj())
+    let _: i32 = json_val_set_ptr0(val, map)
+    let _: i32 = vector_push_zeroed(frames, scratch)
+    let fp: ptr = json_load_ptr(scratch)
+    store.i32(ptr.offset(i8, fp, 0:i64), 2:i32)
+    store.i32(ptr.offset(i8, fp, 4:i64), 0:i32)
+    store.i64(ptr.offset(i8, fp, 8:i64), 0:i64) +align=1
+    store.i32(ptr.offset(i8, fp, 16:i64), 0:i32)
+    store.i64(ptr.offset(i8, fp, 24:i64), ptr.to_i64(map)) +align=1
+    store.i64(ptr.offset(i8, fp, 32:i64), ptr.to_i64(val)) +align=1
+    term.br to loop args:[i32.add(i, 1:i32), 0:i32, ptr.from_i64(0:i64), have_root, root, frames, tmp, scratch]
+  end
+
+  block close_frame(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    let flen: i32 = vector_len(frames)
+    let ok: bool = i32.cmp.sgt(flen, 0:i32)
+    term.cbr cond:ok,
+      then:close_do args:[i, have_root, root, frames, tmp, scratch, flen],
+      else:fail_all args:[frames, tmp, scratch, have_root, root, 0:i32, ptr.from_i64(0:i64)]
+  end
+
+  block close_do(i:i32, have_root:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr, flen:i32)
+    let top: ptr = vector_get_ptr(frames, i32.sub(flen, 1:i32))
+    let val: ptr = ptr.from_i64(load.i64(ptr.offset(i8, top, 32:i64)) +align=1)
+    let _: i32 = vector_set_len(frames, i32.sub(flen, 1:i32))
+    term.br to loop args:[i, 1:i32, val, have_root, root, frames, tmp, scratch]
+  end
+
+  block lit_bad(frames:ptr, tmp:ptr, scratch:ptr, have_root:i32, root:ptr, i2p:ptr)
+    let _: i32 = zi_free(i2p)
+    term.br to fail_all args:[frames, tmp, scratch, have_root, root, 0:i32, ptr.from_i64(0:i64)]
+  end
+
+  block done(i:i32, root:ptr, frames:ptr, tmp:ptr, scratch:ptr)
+    let _: i32 = json_store_ptr(out_val, root)
+    store.i32(out_i2, i)
+    let _: i32 = zi_free(tmp)
+    let _: i32 = zi_free(scratch)
+    let _: i32 = vector_free(frames)
+    term.ret value:0:i32
+  end
+
+  block fail_all(frames:ptr, tmp:ptr, scratch:ptr, have_root:i32, root:ptr, have_val:i32, cur:ptr)
+    term.cbr cond:i32.cmp.eq(have_val, 1:i32),
+      then:fail_free_cur args:[frames, tmp, scratch, have_root, root, cur],
+      else:fail_free_root args:[frames, tmp, scratch, have_root, root]
+  end
+
+  block fail_free_cur(frames:ptr, tmp:ptr, scratch:ptr, have_root:i32, root:ptr, cur:ptr)
+    let _: i32 = json_free(cur)
+    term.br to fail_free_root args:[frames, tmp, scratch, have_root, root]
+  end
+
+  block fail_free_root(frames:ptr, tmp:ptr, scratch:ptr, have_root:i32, root:ptr)
+    term.cbr cond:i32.cmp.eq(have_root, 1:i32),
+      then:fail_free_root2 args:[frames, tmp, scratch, root],
+      else:fail_free_frames args:[frames, tmp, scratch]
+  end
+
+  block fail_free_root2(frames:ptr, tmp:ptr, scratch:ptr, root:ptr)
+    let _: i32 = json_free(root)
+    term.br to fail_free_frames args:[frames, tmp, scratch]
+  end
+
+  block fail_free_frames(frames:ptr, tmp:ptr, scratch:ptr)
+    ;; best-effort: free any open container values
+    term.br to fail_frames_loop args:[vector_len(frames), frames, tmp, scratch]
+  end
+
+  block fail_frames_loop(flen:i32, frames:ptr, tmp:ptr, scratch:ptr)
+    let done: bool = i32.cmp.eq(flen, 0:i32)
+    term.cbr cond:done,
+      then:fail_ret args:[frames, tmp, scratch],
+      else:fail_frames_step args:[flen, frames, tmp, scratch]
+  end
+
+  block fail_frames_step(flen:i32, frames:ptr, tmp:ptr, scratch:ptr)
+    let top: ptr = vector_get_ptr(frames, i32.sub(flen, 1:i32))
+    let val: ptr = ptr.from_i64(load.i64(ptr.offset(i8, top, 32:i64)) +align=1)
+    let _: i32 = vector_set_len(frames, i32.sub(flen, 1:i32))
+    let _: i32 = json_free(val)
+    term.br to fail_frames_loop args:[i32.sub(flen, 1:i32), frames, tmp, scratch]
+  end
+
+  block fail_ret(frames:ptr, tmp:ptr, scratch:ptr)
+    let _: i32 = zi_free(tmp)
+    let _: i32 = zi_free(scratch)
+    let _: i32 = vector_free(frames)
+    term.ret value:json_rc_err()
+  end
+end
+
+fn json_parse_value(src:ptr, n:i32, i0:i32, out_val:ptr, out_i2:ptr) -> i32
+  return json_parse_from(src, n, i0, out_val, out_i2)
+end
+
+fn json_parse(src:ptr, n:i32, out_val:ptr) -> i32
+  block entry
+    let out_i2: ptr = zi_alloc(4:i32)
+    let rc: i32 = json_parse_from(src, n, 0:i32, out_val, out_i2)
+    let ok: bool = i32.cmp.eq(rc, 0:i32)
+    term.cbr cond:ok,
+      then:check_end args:[out_i2],
+      else:bad args:[out_i2]
+  end
+
+  block check_end(out_i2:ptr)
+    let i2: i32 = json_skip_ws(src, n, load.i32(out_i2))
+    let done: bool = i32.cmp.eq(i2, n)
+    let _: i32 = zi_free(out_i2)
+    term.cbr cond:done,
+      then:ok_ret,
+      else:trailing
+  end
+
+  block ok_ret
+    term.ret value:0:i32
+  end
+
+  block trailing
+    let v: ptr = json_load_ptr(out_val)
+    let _: i32 = json_free(v)
+    term.ret value:json_rc_err()
+  end
+
+  block bad(out_i2:ptr)
+    let _: i32 = zi_free(out_i2)
+    term.ret value:json_rc_err()
+  end
+end
+
+;; ----------------- serialization -----------------
+
+fn json_hex_digit(x:i32) -> i8
+  let digits: ptr = "0123456789abcdef"
+  return load.i8(ptr.offset(i8, digits, x))
+end
+
+fn json_emit_u8(vec:ptr, b:i32) -> i32
+  return json_vec_u8_push(vec, json_i32_to_i8(b))
+end
+
+fn json_emit_str(vec:ptr, s:ptr, n:i32) -> i32
+  return json_vec_u8_push_str(vec, s, n)
+end
+
+fn json_emit_string(vec:ptr, s:ptr, n:i32) -> i32
+  ;; Emits a JSON string with escaping.
+  block entry
+    let _: i32 = json_emit_u8(vec, 34:i32)
+    term.br to loop args:[0:i32]
+  end
+
+  block loop(i:i32)
+    let done: bool = i32.cmp.sge(i, n)
+    term.cbr cond:done,
+      then:tail,
+      else:step args:[i]
+  end
+
+  block step(i:i32)
+    let b: i32 = i32.zext.i8(load.i8(ptr.offset(i8, s, i)))
+    term.cbr cond:i32.cmp.eq(b, 34:i32),
+      then:esc_q args:[i],
+      else:esc_bs args:[i, b]
+  end
+
+  block esc_q(i:i32)
+    let _: i32 = json_emit_str(vec, "\\\"", 2:i32)
+    term.br to loop args:[i32.add(i, 1:i32)]
+  end
+
+  block esc_bs(i:i32, b:i32)
+    term.cbr cond:i32.cmp.eq(b, 92:i32),
+      then:esc_bs2 args:[i],
+      else:esc_ctl args:[i, b]
+  end
+
+  block esc_bs2(i:i32)
+    let _: i32 = json_emit_str(vec, "\\\\", 2:i32)
+    term.br to loop args:[i32.add(i, 1:i32)]
+  end
+
+  block esc_ctl(i:i32, b:i32)
+    let is_ctl: bool = i32.cmp.slt(b, 32:i32)
+    term.cbr cond:is_ctl,
+      then:emit_u args:[i, b],
+      else:plain args:[i, b]
+  end
+
+  block emit_u(i:i32, b:i32)
+    ;; \u00XX
+    let _: i32 = json_emit_str(vec, "\\u00", 4:i32)
+    let hi: i32 = i32.and(i32.shr.u(b, 4:i32), 15:i32)
+    let lo: i32 = i32.and(b, 15:i32)
+    let _: i32 = json_vec_u8_push(vec, json_hex_digit(hi))
+    let _: i32 = json_vec_u8_push(vec, json_hex_digit(lo))
+    term.br to loop args:[i32.add(i, 1:i32)]
+  end
+
+  block plain(i:i32, b:i32)
+    let _: i32 = json_emit_u8(vec, b)
+    term.br to loop args:[i32.add(i, 1:i32)]
+  end
+
+  block tail
+    let _: i32 = json_emit_u8(vec, 34:i32)
+    term.ret value:0:i32
+  end
+end
+
+fn json_emit_value(vec:ptr, v:ptr) -> i32
+  ;; Iterative serializer (recursion is not supported by sirc here).
+  ;; Frame layout (32 bytes):
+  ;;  0 kind(i32): 0 value, 1 arr, 2 obj
+  ;;  4 idx(i32)
+  ;;  8 n(i32)
+  ;; 12 any(i32)
+  ;; 16 node_ptr(i64)
+  ;; 24 cont_ptr(i64)
+  block entry
+    let stack: ptr = vector_new(32:i32, 16:i32)
+    let scratch: ptr = zi_alloc(8:i32)
+    let outp: ptr = zi_alloc(8:i32)
+    let next_idx: ptr = zi_alloc(4:i32)
+    let out_kptr: ptr = zi_alloc(8:i32)
+    let out_klen: ptr = zi_alloc(4:i32)
+    let out_vptr: ptr = zi_alloc(8:i32)
+
+    ;; push root value frame
+    let _: i32 = vector_push_zeroed(stack, scratch)
+    let fp: ptr = json_load_ptr(scratch)
+    store.i32(ptr.offset(i8, fp, 0:i64), 0:i32)
+    store.i32(ptr.offset(i8, fp, 4:i64), 0:i32)
+    store.i32(ptr.offset(i8, fp, 8:i64), 0:i32)
+    store.i32(ptr.offset(i8, fp, 12:i64), 0:i32)
+    store.i64(ptr.offset(i8, fp, 16:i64), ptr.to_i64(v)) +align=1
+    store.i64(ptr.offset(i8, fp, 24:i64), 0:i64) +align=1
+
+    term.br to loop args:[vec, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr]
+  end
+
+  block loop(vec:ptr, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr)
+    let len: i32 = vector_len(stack)
+    let done: bool = i32.cmp.eq(len, 0:i32)
+    term.cbr cond:done,
+      then:finish args:[stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr],
+      else:step args:[vec, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr]
+  end
+
+  block step(vec:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr)
+    let top: ptr = vector_get_ptr(stack, i32.sub(len, 1:i32))
+    let kind: i32 = load.i32(ptr.offset(i8, top, 0:i64))
+    term.cbr cond:i32.cmp.eq(kind, 0:i32),
+      then:emit_value args:[vec, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, top],
+      else:emit_cont args:[vec, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, top, kind]
+  end
+
+  block emit_value(vec:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, top:ptr)
+    let node: ptr = ptr.from_i64(load.i64(ptr.offset(i8, top, 16:i64)) +align=1)
+    let tag: i32 = json_val_tag(node)
+    term.cbr cond:i32.cmp.eq(tag, json_tag_null()),
+      then:emit_null args:[vec, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr],
+      else:emit_bool_chk args:[vec, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, node, tag]
+  end
+
+  block emit_null(vec:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr)
+    let _: i32 = json_emit_str(vec, "null", 4:i32)
+    let _: i32 = vector_set_len(stack, i32.sub(len, 1:i32))
+    term.br to loop args:[vec, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr]
+  end
+
+  block emit_bool_chk(vec:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, node:ptr, tag:i32)
+    term.cbr cond:i32.cmp.eq(tag, json_tag_bool()),
+      then:emit_bool args:[vec, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, node],
+      else:emit_num_chk args:[vec, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, node, tag]
+  end
+
+  block emit_bool(vec:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, node:ptr)
+    let b: i32 = json_val_aux(node)
+    let is_false: bool = i32.cmp.eq(b, 0:i32)
+    term.cbr cond:is_false,
+      then:emit_bool_false args:[vec, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr],
+      else:emit_bool_true args:[vec, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr]
+  end
+
+  block emit_bool_false(vec:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr)
+    let _: i32 = json_emit_str(vec, "false", 5:i32)
+    let _: i32 = vector_set_len(stack, i32.sub(len, 1:i32))
+    term.br to loop args:[vec, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr]
+  end
+
+  block emit_bool_true(vec:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr)
+    let _: i32 = json_emit_str(vec, "true", 4:i32)
+    let _: i32 = vector_set_len(stack, i32.sub(len, 1:i32))
+    term.br to loop args:[vec, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr]
+  end
+
+  block emit_num_chk(vec:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, node:ptr, tag:i32)
+    term.cbr cond:i32.cmp.eq(tag, json_tag_num()),
+      then:emit_num args:[vec, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, node],
+      else:emit_str_chk args:[vec, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, node, tag]
+  end
+
+  block emit_num(vec:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, node:ptr)
+    let p: ptr = json_val_ptr0(node)
+    let n: i32 = json_val_len(node)
+    let _: i32 = json_emit_str(vec, p, n)
+    let _: i32 = vector_set_len(stack, i32.sub(len, 1:i32))
+    term.br to loop args:[vec, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr]
+  end
+
+  block emit_str_chk(vec:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, node:ptr, tag:i32)
+    term.cbr cond:i32.cmp.eq(tag, json_tag_str()),
+      then:emit_str args:[vec, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, node],
+      else:emit_arr_chk args:[vec, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, node, tag]
+  end
+
+  block emit_str(vec:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, node:ptr)
+    let p: ptr = json_val_ptr0(node)
+    let n: i32 = json_val_len(node)
+    let _: i32 = json_emit_string(vec, p, n)
+    let _: i32 = vector_set_len(stack, i32.sub(len, 1:i32))
+    term.br to loop args:[vec, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr]
+  end
+
+  block emit_arr_chk(vec:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, node:ptr, tag:i32)
+    term.cbr cond:i32.cmp.eq(tag, json_tag_arr()),
+      then:open_arr args:[vec, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, node, len],
+      else:open_obj args:[vec, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, node, len]
+  end
+
+  block open_arr(vec:ptr, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, node:ptr, len:i32)
+    let arr: ptr = json_val_ptr0(node)
+    let n: i32 = vector_len(arr)
+    let _: i32 = json_emit_u8(vec, 91:i32)
+    term.cbr cond:i32.cmp.eq(n, 0:i32),
+      then:open_arr_empty args:[vec, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, len],
+      else:open_arr_mut args:[vec, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, arr, n]
+  end
+
+  block open_arr_empty(vec:ptr, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, len:i32)
+    let _: i32 = json_emit_u8(vec, 93:i32)
+    let _: i32 = vector_set_len(stack, i32.sub(len, 1:i32))
+    term.br to loop args:[vec, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr]
+  end
+
+  block open_arr_mut(vec:ptr, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, arr:ptr, n:i32)
+    let top: ptr = vector_get_ptr(stack, i32.sub(vector_len(stack), 1:i32))
+    store.i32(ptr.offset(i8, top, 0:i64), 1:i32)
+    store.i32(ptr.offset(i8, top, 4:i64), 0:i32)
+    store.i32(ptr.offset(i8, top, 8:i64), n)
+    store.i32(ptr.offset(i8, top, 12:i64), 0:i32)
+    store.i64(ptr.offset(i8, top, 24:i64), ptr.to_i64(arr)) +align=1
+    term.br to loop args:[vec, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr]
+  end
+
+  block open_obj(vec:ptr, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, node:ptr, len:i32)
+    let map: ptr = json_val_ptr0(node)
+    let _: i32 = json_emit_u8(vec, 123:i32)
+    let top: ptr = vector_get_ptr(stack, i32.sub(len, 1:i32))
+    store.i32(ptr.offset(i8, top, 0:i64), 2:i32)
+    store.i32(ptr.offset(i8, top, 4:i64), 0:i32)
+    store.i32(ptr.offset(i8, top, 12:i64), 0:i32)
+    store.i64(ptr.offset(i8, top, 24:i64), ptr.to_i64(map)) +align=1
+    term.br to loop args:[vec, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr]
+  end
+
+  block emit_cont(vec:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, top:ptr, kind:i32)
+    term.cbr cond:i32.cmp.eq(kind, 1:i32),
+      then:emit_arr_frame args:[vec, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, top],
+      else:emit_obj_frame args:[vec, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, top]
+  end
+
+  block emit_arr_frame(vec:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, top:ptr)
+    let idx: i32 = load.i32(ptr.offset(i8, top, 4:i64))
+    let n: i32 = load.i32(ptr.offset(i8, top, 8:i64))
+    let any: i32 = load.i32(ptr.offset(i8, top, 12:i64))
+    let arr: ptr = ptr.from_i64(load.i64(ptr.offset(i8, top, 24:i64)) +align=1)
+    let done: bool = i32.cmp.eq(idx, n)
+    term.cbr cond:done,
+      then:arr_close args:[vec, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr],
+      else:arr_emit args:[vec, idx, n, any, arr, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, top]
+  end
+
+  block arr_close(vec:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr)
+    let _: i32 = json_emit_u8(vec, 93:i32)
+    let _: i32 = vector_set_len(stack, i32.sub(len, 1:i32))
+    term.br to loop args:[vec, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr]
+  end
+
+  block arr_emit(vec:ptr, idx:i32, n:i32, any:i32, arr:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, top:ptr)
+    let need_comma: bool = i32.cmp.ne(any, 0:i32)
+    term.cbr cond:need_comma,
+      then:arr_emit_comma args:[vec, idx, n, any, arr, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, top],
+      else:arr_emit_body args:[vec, idx, n, any, arr, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, top]
+  end
+
+  block arr_emit_comma(vec:ptr, idx:i32, n:i32, any:i32, arr:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, top:ptr)
+    let _: i32 = json_emit_u8(vec, 44:i32)
+    term.br to arr_emit_body args:[vec, idx, n, any, arr, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, top]
+  end
+
+  block arr_emit_body(vec:ptr, idx:i32, n:i32, any:i32, arr:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, top:ptr)
+    let child: ptr = json_vec_ptr_get(arr, idx)
+    store.i32(ptr.offset(i8, top, 4:i64), i32.add(idx, 1:i32))
+    store.i32(ptr.offset(i8, top, 12:i64), 1:i32)
+    let _: i32 = vector_push_zeroed(stack, scratch)
+    let fp: ptr = json_load_ptr(scratch)
+    store.i32(ptr.offset(i8, fp, 0:i64), 0:i32)
+    store.i64(ptr.offset(i8, fp, 16:i64), ptr.to_i64(child)) +align=1
+    term.br to loop args:[vec, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr]
+  end
+
+  block emit_obj_frame(vec:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, top:ptr)
+    let idx: i32 = load.i32(ptr.offset(i8, top, 4:i64))
+    let any: i32 = load.i32(ptr.offset(i8, top, 12:i64))
+    let map: ptr = ptr.from_i64(load.i64(ptr.offset(i8, top, 24:i64)) +align=1)
+    let found: i32 = hashmap_iter_next(map, idx, next_idx, out_kptr, out_klen, out_vptr)
+    let done: bool = i32.cmp.eq(found, 0:i32)
+    term.cbr cond:done,
+      then:obj_close args:[vec, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr],
+      else:obj_emit args:[vec, any, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, top]
+  end
+
+  block obj_close(vec:ptr, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr)
+    let _: i32 = json_emit_u8(vec, 125:i32)
+    let _: i32 = vector_set_len(stack, i32.sub(len, 1:i32))
+    term.br to loop args:[vec, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr]
+  end
+
+  block obj_emit(vec:ptr, any:i32, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, top:ptr)
+    let need_comma: bool = i32.cmp.ne(any, 0:i32)
+    term.cbr cond:need_comma,
+      then:obj_emit_comma args:[vec, any, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, top],
+      else:obj_emit_body args:[vec, any, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, top]
+  end
+
+  block obj_emit_comma(vec:ptr, any:i32, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, top:ptr)
+    let _: i32 = json_emit_u8(vec, 44:i32)
+    term.br to obj_emit_body args:[vec, any, len, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr, top]
+  end
+
+  block obj_emit_body(vec:ptr, any:i32, len:i32, stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr, top:ptr)
+    let kptr: ptr = json_load_ptr(out_kptr)
+    let klen: i32 = load.i32(out_klen)
+    let vptr: ptr = json_load_ptr(out_vptr)
+    let _: i32 = json_emit_string(vec, kptr, klen)
+    let _: i32 = json_emit_u8(vec, 58:i32)
+    store.i32(ptr.offset(i8, top, 4:i64), load.i32(next_idx))
+    store.i32(ptr.offset(i8, top, 12:i64), 1:i32)
+    let _: i32 = vector_push_zeroed(stack, scratch)
+    let fp: ptr = json_load_ptr(scratch)
+    store.i32(ptr.offset(i8, fp, 0:i64), 0:i32)
+    store.i64(ptr.offset(i8, fp, 16:i64), ptr.to_i64(vptr)) +align=1
+    term.br to loop args:[vec, stack, scratch, outp, next_idx, out_kptr, out_klen, out_vptr]
+  end
+
+  block finish(stack:ptr, scratch:ptr, outp:ptr, next_idx:ptr, out_kptr:ptr, out_klen:ptr, out_vptr:ptr)
+    let _: i32 = zi_free(scratch)
+    let _: i32 = zi_free(outp)
+    let _: i32 = zi_free(next_idx)
+    let _: i32 = zi_free(out_kptr)
+    let _: i32 = zi_free(out_klen)
+    let _: i32 = zi_free(out_vptr)
+    let _: i32 = vector_free(stack)
+    term.ret value:0:i32
+  end
+end
+
+fn json_serialize_alloc(v:ptr, out_p:ptr, out_len:ptr) -> i32
+  let vec: ptr = vector_new(1:i32, 64:i32)
+  let _: i32 = json_emit_value(vec, v)
+  let n: i32 = vector_len(vec)
+  let data: ptr = vector_data(vec)
+  let p: ptr = json_bytes_alloc_copy(data, n)
+  let _: i32 = vector_free(vec)
+  let _: i32 = json_store_ptr(out_p, p)
+  store.i32(out_len, n)
+  return 0:i32
+end

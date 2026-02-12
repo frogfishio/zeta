@@ -1,0 +1,140 @@
+unit json_parse_serialize_demo target host
+@mod main
+
+@include "../json/json.sir"
+@include "../std/stdout.sir"
+
+fn bytes_eq(a:ptr, b:ptr, n:i32) -> bool
+  block entry
+    term.br to loop args:[0:i32, true]
+  end
+
+  block loop(i:i32, ok:bool)
+    let i_lt: bool = i32.cmp.slt(i, n)
+    let cont: bool = bool.and(ok, i_lt)
+    term.cbr cond:cont,
+      then:body args:[i],
+      else:done args:[ok]
+  end
+
+  block body(i:i32)
+    let av: i8 = load.i8(ptr.offset(i8, a, i))
+    let bv: i8 = load.i8(ptr.offset(i8, b, i))
+    let ok2: bool = i32.cmp.eq(i32.zext.i8(av), i32.zext.i8(bv))
+    term.br to loop args:[i32.add(i, 1:i32), ok2]
+  end
+
+  block done(ok:bool)
+    term.ret value:ok
+  end
+end
+
+fn bytes_first_diff(a:ptr, b:ptr, n:i32) -> i32
+  ;; Returns -1 if equal, else the index of the first differing byte.
+  block entry
+    term.br to loop args:[0:i32]
+  end
+
+  block loop(i:i32)
+    let done: bool = i32.cmp.sge(i, n)
+    term.cbr cond:done,
+      then:eq,
+      else:step args:[i]
+  end
+
+  block step(i:i32)
+    let av: i8 = load.i8(ptr.offset(i8, a, i))
+    let bv: i8 = load.i8(ptr.offset(i8, b, i))
+    let same: bool = i32.cmp.eq(i32.zext.i8(av), i32.zext.i8(bv))
+    term.cbr cond:same,
+      then:cont args:[i],
+      else:diff args:[i]
+  end
+
+  block cont(i:i32)
+    term.br to loop args:[i32.add(i, 1:i32)]
+  end
+
+  block diff(i:i32)
+    term.ret value:i
+  end
+
+  block eq
+    term.ret value:-1:i32
+  end
+end
+
+fn load_ptr(src:ptr) -> ptr
+  let v: i64 = load.i64(src) +align=1
+  return ptr.from_i64(v)
+end
+
+fn main() -> i32 public
+  block entry
+    ;; Round-trip parse -> serialize -> byte-compare.
+    ;; Keep input already normalized (serializer emits without whitespace).
+    let input: ptr = "[true,null,\"hi\",123]"
+    let input_len: i32 = 20:i32
+
+    let out_val: ptr = zi_alloc(8:i32)
+    let rc: i32 = json_parse(input, input_len, out_val)
+    let ok: bool = i32.cmp.eq(rc, 0:i32)
+    term.cbr cond:ok,
+      then:ser args:[out_val, input, input_len],
+      else:fail args:[out_val]
+  end
+
+  block fail(out_val:ptr)
+    let _: i32 = zi_free(out_val)
+    term.ret value:1:i32
+  end
+
+  block ser(out_val:ptr, input:ptr, input_len:i32)
+    let v: ptr = load_ptr(out_val)
+    let out_p: ptr = zi_alloc(8:i32)
+    let out_n: ptr = zi_alloc(4:i32)
+    let _: i32 = json_serialize_alloc(v, out_p, out_n)
+    let p: ptr = load_ptr(out_p)
+    let n: i32 = load.i32(out_n)
+
+    let exp: ptr = input
+    let ok_len: bool = i32.cmp.eq(n, input_len)
+
+    ;; Exit codes:
+    ;;  0 = ok
+    ;; 100+n = length mismatch (n is actual length, saturated by caller expectations)
+    ;; 50+idx = first differing byte index (idx < 200)
+    let diff: i32 = select(i32, ok_len, bytes_first_diff(p, exp, n), 0:i32)
+    let ok_bytes: bool = i32.cmp.eq(diff, -1:i32)
+
+    let rc_len: i32 = i32.add(100:i32, n)
+    let rc_mismatch: i32 = select(i32, ok_len, i32.add(50:i32, diff), rc_len)
+    term.cbr cond:ok_bytes,
+      then:ser_ok args:[p, out_p, out_n, out_val, v],
+      else:ser_bad args:[p, n, exp, input_len, out_p, out_n, out_val, v, rc_mismatch]
+  end
+
+  block ser_ok(p:ptr, out_p:ptr, out_n:ptr, out_val:ptr, v:ptr)
+    let _: i32 = zi_free(p)
+    let _: i32 = zi_free(out_p)
+    let _: i32 = zi_free(out_n)
+    let _: i32 = zi_free(out_val)
+    let _: i32 = json_free(v)
+    term.ret value:0:i32
+  end
+
+  block ser_bad(p:ptr, n:i32, exp:ptr, exp_len:i32, out_p:ptr, out_n:ptr, out_val:ptr, v:ptr, rc:i32)
+    let _0: i32 = stderr_write("EXP:", 4:i32)
+    let _1: i32 = stderr_write(exp, exp_len)
+    let _2: i32 = stderr_write("\nACT:", 5:i32)
+    let _3: i32 = stderr_write(p, n)
+    let _4: i32 = stderr_write("\n", 1:i32)
+
+    let _: i32 = zi_free(p)
+    let _: i32 = zi_free(out_p)
+    let _: i32 = zi_free(out_n)
+    let _: i32 = zi_free(out_val)
+    let _: i32 = json_free(v)
+    term.ret value:rc
+  end
+end
