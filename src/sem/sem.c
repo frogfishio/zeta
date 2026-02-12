@@ -86,7 +86,7 @@ static void sem_print_help(FILE* out) {
           "\n"
           "  --enable WHAT\n"
           "      Convenience enablement. Supported WHAT values:\n"
-          "        file:fs | async:default | sys:info | env | argv\n"
+          "        file:fs | proc:env | proc:argv | async:default | sys:info | env | argv\n"
           "\n"
           "  --inherit-env    Snapshot host env into zi_ctl env ops (enables env)\n"
           "  --clear-env      Clear env snapshot (enables env, empty)\n"
@@ -596,26 +596,11 @@ static bool sem_parse_caps_list_payload(const uint8_t* payload, uint32_t payload
     const uint32_t flags = zcl1_read_u32le(payload + off);
     off += 4;
 
-    if (off + 4 > payload_len) return false;
-    const uint32_t meta_len = zcl1_read_u32le(payload + off);
-    off += 4;
-    if (off + meta_len > payload_len) return false;
-    const uint8_t* meta = payload + off;
-    off += meta_len;
-
     if (json) {
       if (i) printf(",");
-      printf("{\"kind\":\"%.*s\",\"name\":\"%.*s\",\"flags\":%u", (int)kind_len, kind, (int)name_len, name, flags);
-      if (meta_len) {
-        printf(",\"meta_len\":%u", meta_len);
-      }
-      printf("}");
+      printf("{\"kind\":\"%.*s\",\"name\":\"%.*s\",\"flags\":%u}", (int)kind_len, kind, (int)name_len, name, flags);
     } else {
       printf("  - %.*s:%.*s flags=0x%08x\n", (int)kind_len, kind, (int)name_len, name, flags);
-      if (meta_len) {
-        printf("    meta_len=%u\n", meta_len);
-        (void)meta;
-      }
     }
   }
 
@@ -1155,6 +1140,14 @@ int main(int argc, char** argv) {
         argv_enabled = true;
         continue;
       }
+      if (strcmp(what, "proc:env") == 0) {
+        env_enabled = true;
+        continue;
+      }
+      if (strcmp(what, "proc:argv") == 0) {
+        argv_enabled = true;
+        continue;
+      }
       if (strcmp(what, "file:fs") == 0) {
         if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "file:fs:open,block")) {
           fprintf(stderr, "sem: failed to add cap\n");
@@ -1393,6 +1386,26 @@ int main(int argc, char** argv) {
   if (fs_root && fs_root[0] != '\0' && !sem_has_cap(dyn_caps, dyn_n, "file", "fs")) {
     if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "file:fs:open,block")) {
       fprintf(stderr, "sem: failed to add file/fs cap\n");
+      sem_free_caps(dyn_caps, dyn_n);
+      sem_free_argv(guest_argv, guest_argc);
+      sem_free_env(env_buf, env_n);
+      return 2;
+    }
+  }
+
+  // If argv/env snapshots are enabled, expose them via standard proc/* caps.
+  if (argv_enabled && !sem_has_cap(dyn_caps, dyn_n, "proc", "argv")) {
+    if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "proc:argv:open,pure")) {
+      fprintf(stderr, "sem: failed to add proc/argv cap\n");
+      sem_free_caps(dyn_caps, dyn_n);
+      sem_free_argv(guest_argv, guest_argc);
+      sem_free_env(env_buf, env_n);
+      return 2;
+    }
+  }
+  if (env_enabled && !sem_has_cap(dyn_caps, dyn_n, "proc", "env")) {
+    if (!sem_add_cap(dyn_caps, &dyn_n, (uint32_t)(sizeof(dyn_caps) / sizeof(dyn_caps[0])), "proc:env:open,pure")) {
+      fprintf(stderr, "sem: failed to add proc/env cap\n");
       sem_free_caps(dyn_caps, dyn_n);
       sem_free_argv(guest_argv, guest_argc);
       sem_free_env(env_buf, env_n);

@@ -48,8 +48,7 @@ int32_t sir_zi_cap_get_size(sir_hosted_zabi_t* rt, int32_t index) {
   if (!c || !c->kind || !c->name) return ZI_E_NOENT;
   const uint32_t kind_len = u32_len(c->kind);
   const uint32_t name_len = u32_len(c->name);
-  const uint32_t meta_len = (c->meta && c->meta_len) ? c->meta_len : 0;
-  const uint64_t need = 4ull + kind_len + 4ull + name_len + 4ull + 4ull + meta_len;
+  const uint64_t need = 4ull + kind_len + 4ull + name_len + 4ull;
   if (need > 0x7FFFFFFFull) return ZI_E_INTERNAL;
   return (int32_t)need;
 }
@@ -69,7 +68,6 @@ int32_t sir_zi_cap_get(sir_hosted_zabi_t* rt, int32_t index, zi_ptr_t out_ptr, z
   uint32_t off = 0;
   const uint32_t kind_len = u32_len(c->kind);
   const uint32_t name_len = u32_len(c->name);
-  const uint32_t meta_len = (c->meta && c->meta_len) ? c->meta_len : 0;
 
   zcl1_write_u32le(out + off, kind_len);
   off += 4;
@@ -81,10 +79,6 @@ int32_t sir_zi_cap_get(sir_hosted_zabi_t* rt, int32_t index, zi_ptr_t out_ptr, z
   off += name_len;
   zcl1_write_u32le(out + off, c->flags);
   off += 4;
-  zcl1_write_u32le(out + off, meta_len);
-  off += 4;
-  if (meta_len) memcpy(out + off, c->meta, meta_len);
-  off += meta_len;
 
   if (off != need) return ZI_E_INTERNAL;
   return (int32_t)need;
@@ -138,6 +132,43 @@ static const sem_handle_ops_t stdio_ops = {
     .end = stdio_end,
 };
 
+typedef struct sir_blob_stream {
+  uint8_t* buf;
+  uint32_t len;
+  uint32_t off;
+} sir_blob_stream_t;
+
+static int32_t blob_read(void* ctx, sem_guest_mem_t* mem, zi_ptr_t dst_ptr, zi_size32_t cap) {
+  sir_blob_stream_t* s = (sir_blob_stream_t*)ctx;
+  if (!s || (!s->buf && s->len)) return ZI_E_INTERNAL;
+  if (cap == 0) return 0;
+  if (s->off >= s->len) return 0;
+
+  uint8_t* dst = NULL;
+  if (!sem_guest_mem_map_rw(mem, dst_ptr, cap, &dst) || !dst) return ZI_E_BOUNDS;
+
+  const uint32_t remain = s->len - s->off;
+  const uint32_t n = (cap < remain) ? cap : remain;
+  memcpy(dst, s->buf + s->off, n);
+  s->off += n;
+  return (int32_t)n;
+}
+
+static int32_t blob_end(void* ctx, sem_guest_mem_t* mem) {
+  (void)mem;
+  sir_blob_stream_t* s = (sir_blob_stream_t*)ctx;
+  if (!s) return 0;
+  free(s->buf);
+  free(s);
+  return 0;
+}
+
+static const sem_handle_ops_t blob_ops = {
+    .read = blob_read,
+    .write = NULL,
+    .end = blob_end,
+};
+
 static bool str_eq_bytes(const char* s, const uint8_t* b, uint32_t n) {
   if (!s || !b) return false;
   const size_t sl = strlen(s);
@@ -166,10 +197,18 @@ bool sir_hosted_zabi_init(sir_hosted_zabi_t* rt, sir_hosted_zabi_cfg_t cfg) {
 void sir_hosted_zabi_dispose(sir_hosted_zabi_t* rt) {
   if (!rt) return;
 
-  sem_handle_entry_t e;
-  if (sem_handle_lookup(&rt->handles, 0, &e)) free(e.ctx);
-  if (sem_handle_lookup(&rt->handles, 1, &e)) free(e.ctx);
-  if (sem_handle_lookup(&rt->handles, 2, &e)) free(e.ctx);
+  // Best-effort close of any outstanding handles.
+  for (zi_handle_t h = 0; h < (zi_handle_t)rt->handles.cap; h++) {
+    sem_handle_entry_t e;
+    if (!sem_handle_lookup(&rt->handles, h, &e)) continue;
+    if (e.ops && e.ops->end) (void)e.ops->end(e.ctx, rt->mem);
+    if (h == 0 || h == 1 || h == 2) {
+      free(e.ctx);
+    } else {
+      if (!e.ops || !e.ops->end) free(e.ctx);
+      (void)sem_handle_release(&rt->handles, h);
+    }
+  }
 
   sem_handles_dispose(&rt->handles);
   if (rt->owns_mem && rt->mem) {
@@ -282,6 +321,118 @@ zi_handle_t sir_zi_cap_open(sir_hosted_zabi_t* rt, zi_ptr_t req_ptr) {
     sir_hosted_file_fs_t fs;
     sir_hosted_file_fs_init(&fs, (sir_hosted_file_fs_cfg_t){.fs_root = rt->fs_root});
     return sir_hosted_file_fs_open_from_params(&fs, &rt->handles, rt->mem, (zi_ptr_t)params_ptr, (zi_size32_t)params_len);
+  }
+
+  if (strcmp(found->kind, "proc") == 0 && strcmp(found->name, "argv") == 0) {
+    if (!rt->ctl_host.cfg.argv_enabled) return (zi_handle_t)ZI_E_DENIED;
+    if (params_len != 0) return (zi_handle_t)ZI_E_INVALID;
+
+    const uint32_t argc = rt->ctl_host.cfg.argv_count;
+    uint64_t need = 8;
+    for (uint32_t i = 0; i < argc; i++) {
+      const char* s = rt->ctl_host.cfg.argv ? rt->ctl_host.cfg.argv[i] : NULL;
+      const uint32_t n = s ? u32_len(s) : 0;
+      need += 4ull + n;
+    }
+    if (need > 0x7FFFFFFFull) return (zi_handle_t)ZI_E_INTERNAL;
+
+    sir_blob_stream_t* bs = (sir_blob_stream_t*)calloc(1, sizeof(*bs));
+    if (!bs) return (zi_handle_t)ZI_E_OOM;
+    bs->buf = (uint8_t*)calloc(1, (size_t)need);
+    if (!bs->buf) {
+      free(bs);
+      return (zi_handle_t)ZI_E_OOM;
+    }
+    bs->len = (uint32_t)need;
+
+    uint32_t off = 0;
+    zcl1_write_u32le(bs->buf + off, 1);
+    off += 4;
+    zcl1_write_u32le(bs->buf + off, argc);
+    off += 4;
+    for (uint32_t i = 0; i < argc; i++) {
+      const char* s = rt->ctl_host.cfg.argv ? rt->ctl_host.cfg.argv[i] : NULL;
+      const uint32_t n = s ? u32_len(s) : 0;
+      zcl1_write_u32le(bs->buf + off, n);
+      off += 4;
+      if (n) memcpy(bs->buf + off, s, n);
+      off += n;
+    }
+    if (off != bs->len) {
+      free(bs->buf);
+      free(bs);
+      return (zi_handle_t)ZI_E_INTERNAL;
+    }
+
+    const zi_handle_t h = sem_handle_alloc(&rt->handles,
+                                           (sem_handle_entry_t){.ops = &blob_ops, .ctx = bs, .hflags = ZI_H_READABLE | ZI_H_ENDABLE});
+    if (h < 3) {
+      free(bs->buf);
+      free(bs);
+      return h;
+    }
+    return h;
+  }
+
+  if (strcmp(found->kind, "proc") == 0 && strcmp(found->name, "env") == 0) {
+    if (!rt->ctl_host.cfg.env_enabled) return (zi_handle_t)ZI_E_DENIED;
+    if (params_len != 0) return (zi_handle_t)ZI_E_INVALID;
+
+    const uint32_t envc = rt->ctl_host.cfg.env_count;
+    uint64_t need = 8;
+    for (uint32_t i = 0; i < envc; i++) {
+      const sem_env_kv_t* kv = rt->ctl_host.cfg.env ? &rt->ctl_host.cfg.env[i] : NULL;
+      const uint32_t klen = (kv && kv->key) ? u32_len(kv->key) : 0;
+      const uint32_t vlen = (kv && kv->val) ? u32_len(kv->val) : 0;
+      const uint64_t entry_len = (uint64_t)klen + 1ull + (uint64_t)vlen;
+      if (entry_len > 0xFFFFFFFFull) return (zi_handle_t)ZI_E_INTERNAL;
+      need += 4ull + entry_len;
+    }
+    if (need > 0x7FFFFFFFull) return (zi_handle_t)ZI_E_INTERNAL;
+
+    sir_blob_stream_t* bs = (sir_blob_stream_t*)calloc(1, sizeof(*bs));
+    if (!bs) return (zi_handle_t)ZI_E_OOM;
+    bs->buf = (uint8_t*)calloc(1, (size_t)need);
+    if (!bs->buf) {
+      free(bs);
+      return (zi_handle_t)ZI_E_OOM;
+    }
+    bs->len = (uint32_t)need;
+
+    uint32_t off = 0;
+    zcl1_write_u32le(bs->buf + off, 1);
+    off += 4;
+    zcl1_write_u32le(bs->buf + off, envc);
+    off += 4;
+    for (uint32_t i = 0; i < envc; i++) {
+      const sem_env_kv_t* kv = rt->ctl_host.cfg.env ? &rt->ctl_host.cfg.env[i] : NULL;
+      const char* k = (kv && kv->key) ? kv->key : "";
+      const char* v = (kv && kv->val) ? kv->val : "";
+      const uint32_t klen = u32_len(k);
+      const uint32_t vlen = u32_len(v);
+      const uint32_t n = klen + 1u + vlen;
+      zcl1_write_u32le(bs->buf + off, n);
+      off += 4;
+      if (klen) memcpy(bs->buf + off, k, klen);
+      off += klen;
+      bs->buf[off++] = (uint8_t)'=';
+      if (vlen) memcpy(bs->buf + off, v, vlen);
+      off += vlen;
+    }
+    if (off != bs->len) {
+      free(bs->buf);
+      free(bs);
+      return (zi_handle_t)ZI_E_INTERNAL;
+    }
+
+    const zi_handle_t h = sem_handle_alloc(&rt->handles,
+                                           (sem_handle_entry_t){.ops = &blob_ops, .ctx = bs, .hflags = ZI_H_READABLE | ZI_H_ENDABLE});
+    if (h < 3) {
+      free(bs->buf);
+      free(bs);
+      return h;
+    }
+    return h;
   }
 
   (void)params_ptr;

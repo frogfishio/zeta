@@ -49,10 +49,12 @@ In this build, `--fs-root` adds the cap entry `file:fs:open,block` if it wasn’
 Recognized values in this build:
 
 - `--enable file:fs`  (adds `file:fs:open,block`)
-- `--enable async:default` (adds `async:default:open,block`)
-- `--enable sys:info` (adds `sys:info:pure`)
-- `--enable env` (enables `zi_ctl` env ops; see “Not caps: env/argv”)
-- `--enable argv` (enables `zi_ctl` argv ops; see “Not caps: env/argv”)
+- `--enable proc:env` (enables an openable `proc:env` stream cap)
+- `--enable proc:argv` (enables an openable `proc:argv` stream cap)
+- `--enable async:default` (adds `async:default:open,block`) *(legacy/experimental)*
+- `--enable sys:info` (adds `sys:info:pure`) *(legacy/experimental)*
+- `--enable env` (alias for `--enable proc:env`)
+- `--enable argv` (alias for `--enable proc:argv`)
 
 ### 3) Explicit cap entries: `--cap`
 
@@ -98,19 +100,24 @@ This section lists the cap *names* the `sem` CLI knows about (can be added to CA
 - Enable with `--enable sys:info` / `--cap-sys-info` / `--cap sys:info:pure`
 - `zi_cap_open` support: **not yet** (will be listed but open will be denied)
 
-## Not caps: `env` and `argv`
+## `proc:env` and `proc:argv`
 
-`env` and `argv` are not `zi_cap_open` capabilities in this build.
+This build exposes environment and argv via standard zABI 2.5 proc caps:
 
-They control whether `zi_ctl` exposes these host protocol ops:
+- `proc:env` (openable) yields a read-only stream containing:
+  - `u32 version` (currently 1)
+  - `u32 envc`
+  - repeated `envc` times: `u32 len`, then `len` raw bytes (typically `KEY=VALUE`)
 
-- `SEM_ARGV_COUNT`, `SEM_ARGV_GET`
-- `SEM_ENV_COUNT`, `SEM_ENV_GET`
+- `proc:argv` (openable) yields a read-only stream containing:
+  - `u32 version` (currently 1)
+  - `u32 argc`
+  - repeated `argc` times: `u32 len`, then `len` raw bytes
 
 Enable them via either:
 
-- `--enable argv` and/or `--params ARG` (adds argv entries)
-- `--enable env` and/or `--inherit-env` / `--env KEY=VAL` / `--clear-env`
+- `--enable proc:env` and/or `--inherit-env` / `--env KEY=VAL` / `--clear-env`
+- `--enable proc:argv` and/or `--params ARG`
 
 ## Quick recipes
 

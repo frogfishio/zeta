@@ -88,6 +88,23 @@ target_compile_options(sem_unit_semrt_file_fs PRIVATE
 
 add_test(NAME sem_semrt_file_fs COMMAND sem_unit_semrt_file_fs)
 
+add_executable(sem_unit_semrt_proc_env_argv
+  tests/test_semrt_proc_env_argv.c
+)
+
+target_compile_definitions(sem_unit_semrt_proc_env_argv PRIVATE SIR_VERSION="${SIR_VERSION}")
+target_include_directories(sem_unit_semrt_proc_env_argv PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src/sircore)
+target_link_libraries(sem_unit_semrt_proc_env_argv PRIVATE sircore_hosted_zabi)
+
+target_compile_options(sem_unit_semrt_proc_env_argv PRIVATE
+  -Wall
+  -Wextra
+  -Wpedantic
+  -Werror
+)
+
+add_test(NAME sem_semrt_proc_env_argv COMMAND sem_unit_semrt_proc_env_argv)
+
 add_test(
   NAME sem_run_hello_zabi25_write
   COMMAND $<TARGET_FILE:sem> --run ${CMAKE_SOURCE_DIR}/src/sircc/examples/hello_zabi25_write.sir.jsonl

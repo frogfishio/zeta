@@ -25,8 +25,7 @@ static bool sem_caps_list_payload(const sem_host_t* h, uint8_t* out, uint32_t ca
     const sem_cap_t* c = &h->cfg.caps[i];
     const uint32_t kind_len = c->kind ? (uint32_t)strlen(c->kind) : 0;
     const uint32_t name_len = c->name ? (uint32_t)strlen(c->name) : 0;
-    const uint32_t meta_len = (c->meta && c->meta_len) ? c->meta_len : 0;
-    const uint64_t need = 4ull + kind_len + 4ull + name_len + 4ull + 4ull + meta_len;
+    const uint64_t need = 4ull + kind_len + 4ull + name_len + 4ull;
     if ((uint64_t)off + need > (uint64_t)cap) return false;
     zcl1_write_u32le(out + off, kind_len);
     off += 4;
@@ -38,10 +37,6 @@ static bool sem_caps_list_payload(const sem_host_t* h, uint8_t* out, uint32_t ca
     off += name_len;
     zcl1_write_u32le(out + off, c->flags);
     off += 4;
-    zcl1_write_u32le(out + off, meta_len);
-    off += 4;
-    if (meta_len) memcpy(out + off, c->meta, meta_len);
-    off += meta_len;
   }
 
   *out_len = off;
