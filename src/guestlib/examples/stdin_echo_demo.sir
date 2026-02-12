@@ -1,0 +1,30 @@
+unit stdin_echo_demo target host
+@mod main
+
+@include "../std/stdin.sir"
+@include "../std/stdout.sir"
+
+;; Reads exactly 5 bytes from stdin and echoes them.
+;; Test harness feeds stdin from a file.
+fn main() -> i32 public
+  block entry
+    let buf: ptr = zi_alloc(5:i32)
+    let n: i32 = stdin_read(buf, 5:i32)
+    let ok: bool = i32.cmp.eq(n, 5:i32)
+    term.cbr cond:ok,
+      then:echo args:[buf],
+      else:fail args:[buf]
+  end
+
+  block echo(buf:ptr)
+    let _1: i32 = stdout_write(buf, 5:i32)
+    let _2: i32 = stdout_nl()
+    let ignored_free: i32 = zi_free(buf)
+    term.ret value:0:i32
+  end
+
+  block fail(buf:ptr)
+    let ignored_free: i32 = zi_free(buf)
+    term.ret value:1:i32
+  end
+end

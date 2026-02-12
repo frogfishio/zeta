@@ -16,6 +16,11 @@ if(NOT DEFINED SEM_ARGS)
   set(SEM_ARGS "")
 endif()
 
+# Optional: file to redirect to `sem --run` stdin.
+if(NOT DEFINED SEM_STDIN_FILE)
+  set(SEM_STDIN_FILE "")
+endif()
+
 file(REMOVE "${OUT}")
 
 execute_process(
@@ -31,12 +36,22 @@ if(NOT rc EQUAL 0)
   message(FATAL_ERROR "sirc failed with rc=${rc}")
 endif()
 
-execute_process(
-  COMMAND ${SEM} --run ${OUT} ${SEM_ARGS}
-  RESULT_VARIABLE rc2
-  OUTPUT_VARIABLE out2
-  ERROR_VARIABLE err2
-)
+if(SEM_STDIN_FILE STREQUAL "")
+  execute_process(
+    COMMAND ${SEM} --run ${OUT} ${SEM_ARGS}
+    RESULT_VARIABLE rc2
+    OUTPUT_VARIABLE out2
+    ERROR_VARIABLE err2
+  )
+else()
+  execute_process(
+    COMMAND ${SEM} --run ${OUT} ${SEM_ARGS}
+    INPUT_FILE ${SEM_STDIN_FILE}
+    RESULT_VARIABLE rc2
+    OUTPUT_VARIABLE out2
+    ERROR_VARIABLE err2
+  )
+endif()
 
 if(NOT rc2 EQUAL 0)
   message(STATUS "stdout:\n${out2}")

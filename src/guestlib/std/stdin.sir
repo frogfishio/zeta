@@ -1,0 +1,45 @@
+@mod stdin
+
+@include "../include/zabi_externs.sir"
+
+;; Minimal stdin helpers.
+;; Hosted zABI installs stdio handles: 0=stdin, 1=stdout, 2=stderr.
+;;
+;; Usage (preferred / “golden” entrypoints):
+;;   - stdin_read(buf, len)
+;;       Read raw bytes from stdin into guest memory.
+;;       Returns >=0 byte-count, or <0 error.
+;;
+;; Convenience helpers (not “golden”, may allocate):
+;;   - stdin_getc() reads a single byte (allocates 1 byte internally).
+
+fn stdin_handle() -> i32
+  return 0:i32
+end
+
+fn stdin_read(buf:ptr, len:i32) -> i32
+  return zi_read(stdin_handle(), buf, len)
+end
+
+fn stdin_getc() -> i32
+  block entry
+    let p: ptr = zi_alloc(1:i32)
+    let n: i32 = stdin_read(p, 1:i32)
+    let ok: bool = i32.cmp.eq(n, 1:i32)
+    term.cbr cond:ok,
+      then:read_byte args:[p],
+      else:done args:[p, n]
+  end
+
+  block read_byte(p:ptr)
+    let b: i8 = load.i8(p)
+    let x: i32 = i32.zext.i8(b)
+    let ignored_free: i32 = zi_free(p)
+    term.ret value:x
+  end
+
+  block done(p:ptr, n:i32)
+    let ignored_free: i32 = zi_free(p)
+    term.ret value:n
+  end
+end
