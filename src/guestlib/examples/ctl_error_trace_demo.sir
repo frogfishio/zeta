@@ -1,0 +1,22 @@
+unit ctl_error_trace_demo target host
+@mod main
+
+@include "../std/ctl.sir"
+
+fn main() -> i32 public
+  let resp: ptr = zi_alloc(2048:i32)
+
+  ;; Call a deny-by-default SEM op without enabling it.
+  let rid: i32 = 7:i32
+  let dummy: ptr = zi_alloc(1:i32)
+  let rc: i32 = ctl_call(ctl_op_sem_argv_count(), rid, dummy, 0:i32, resp, 2048:i32)
+
+  let ok_transport: bool = i32.cmp.sgt(rc, 0:i32)
+  let trace: ptr = "sem.zi_ctl.denied"
+  let ok_trace: bool = bool.and(ok_transport, ctl_resp_err_trace_is(resp, rc, ctl_op_sem_argv_count(), rid, trace, 17:i32))
+
+  ;; Return 0 on success, else 1/2 depending on failure mode.
+  let c2: i32 = select(i32, ok_trace, 0:i32, 2:i32)
+  let c1: i32 = select(i32, ok_transport, c2, 1:i32)
+  return c1
+end

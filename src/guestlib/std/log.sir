@@ -1,0 +1,9 @@
+@mod log
+
+@include "../include/zabi_externs.sir"
+
+;; Telemetry helpers.
+
+fn log_emit(topic:ptr, topic_len:i32, msg:ptr, msg_len:i32) -> i32
+  return zi_telemetry(topic, topic_len, msg, msg_len)
+end

@@ -1,0 +1,19 @@
+unit stdout_ctrl_demo target host
+@mod main
+
+@include "../std/stdout.sir"
+
+fn main() -> i32 public
+  let a: ptr = "A"
+  let b: ptr = "B"
+  let c: ptr = "C"
+
+  let _1: i32 = stdout_puts(a, 1:i32)
+  let _2: i32 = stdout_tab()
+  let _3: i32 = stdout_puts(b, 1:i32)
+  let _4: i32 = stdout_tab()
+  let _5: i32 = stdout_puts(c, 1:i32)
+  let _6: i32 = stdout_nl()
+
+  return 0:i32
+end
