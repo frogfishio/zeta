@@ -42,6 +42,42 @@
             },
             {
               "k": "Var",
+              "name": {"k": "tok", "text": "xf64"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "f64"}},
+              "init": {"k": "F64FromI32S", "expr": {"k": "Name", "id": {"k": "tok", "text": "x"}}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "xback"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
+              "init": {"k": "TruncSatI32FromF64S", "expr": {"k": "Name", "id": {"k": "tok", "text": "xf64"}}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "xf32"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "f32"}},
+              "init": {"k": "F32FromI32S", "expr": {"k": "Name", "id": {"k": "tok", "text": "x"}}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "xback32"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
+              "init": {"k": "TruncSatI32FromF32S", "expr": {"k": "Name", "id": {"k": "tok", "text": "xf32"}}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "p"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "ptr"}},
+              "init": {"k": "PtrFromI64", "expr": {"k": "Name", "id": {"k": "tok", "text": "y"}}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "paddr"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i64"}},
+              "init": {"k": "I64FromPtr", "expr": {"k": "Name", "id": {"k": "tok", "text": "p"}}}
+            },
+            {
+              "k": "Var",
               "name": {"k": "tok", "text": "z"},
               "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
               "init": {"k": "TruncI32FromI64", "expr": {"k": "Name", "id": {"k": "tok", "text": "y"}}}

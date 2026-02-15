@@ -214,6 +214,12 @@ static void print_allowed_node_keys(FILE *out, sem2sir_intrinsic_id kid) {
   case SEM2SIR_INTRINSIC_ZExtI64FromI32:
   case SEM2SIR_INTRINSIC_SExtI64FromI32:
   case SEM2SIR_INTRINSIC_TruncI32FromI64:
+  case SEM2SIR_INTRINSIC_F64FromI32S:
+  case SEM2SIR_INTRINSIC_F32FromI32S:
+  case SEM2SIR_INTRINSIC_TruncSatI32FromF64S:
+  case SEM2SIR_INTRINSIC_TruncSatI32FromF32S:
+  case SEM2SIR_INTRINSIC_PtrFromI64:
+  case SEM2SIR_INTRINSIC_I64FromPtr:
     fprintf(out, ", expr");
     break;
   case SEM2SIR_INTRINSIC_True:
@@ -301,6 +307,12 @@ static void print_expected_schema(FILE *out, sem2sir_intrinsic_id kid) {
   case SEM2SIR_INTRINSIC_ZExtI64FromI32:
   case SEM2SIR_INTRINSIC_SExtI64FromI32:
   case SEM2SIR_INTRINSIC_TruncI32FromI64:
+  case SEM2SIR_INTRINSIC_F64FromI32S:
+  case SEM2SIR_INTRINSIC_F32FromI32S:
+  case SEM2SIR_INTRINSIC_TruncSatI32FromF64S:
+  case SEM2SIR_INTRINSIC_TruncSatI32FromF32S:
+  case SEM2SIR_INTRINSIC_PtrFromI64:
+  case SEM2SIR_INTRINSIC_I64FromPtr:
     fprintf(out, "%s expects: expr: node", sem2sir_intrinsic_to_string(kid));
     break;
   case SEM2SIR_INTRINSIC_Paren:
@@ -655,6 +667,12 @@ static bool is_allowed_node_key(sem2sir_intrinsic_id kid, const char *key) {
   case SEM2SIR_INTRINSIC_ZExtI64FromI32:
   case SEM2SIR_INTRINSIC_SExtI64FromI32:
   case SEM2SIR_INTRINSIC_TruncI32FromI64:
+  case SEM2SIR_INTRINSIC_F64FromI32S:
+  case SEM2SIR_INTRINSIC_F32FromI32S:
+  case SEM2SIR_INTRINSIC_TruncSatI32FromF64S:
+  case SEM2SIR_INTRINSIC_TruncSatI32FromF32S:
+  case SEM2SIR_INTRINSIC_PtrFromI64:
+  case SEM2SIR_INTRINSIC_I64FromPtr:
     return strcmp(key, "expr") == 0;
   case SEM2SIR_INTRINSIC_True:
   case SEM2SIR_INTRINSIC_False:
@@ -1327,8 +1345,11 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
         free(k_str);
         return false;
       }
-      if ((kid == SEM2SIR_INTRINSIC_ZExtI64FromI32 || kid == SEM2SIR_INTRINSIC_SExtI64FromI32 ||
-           kid == SEM2SIR_INTRINSIC_TruncI32FromI64) &&
+       if ((kid == SEM2SIR_INTRINSIC_ZExtI64FromI32 || kid == SEM2SIR_INTRINSIC_SExtI64FromI32 ||
+         kid == SEM2SIR_INTRINSIC_TruncI32FromI64 || kid == SEM2SIR_INTRINSIC_F64FromI32S ||
+         kid == SEM2SIR_INTRINSIC_F32FromI32S || kid == SEM2SIR_INTRINSIC_TruncSatI32FromF64S ||
+           kid == SEM2SIR_INTRINSIC_TruncSatI32FromF32S || kid == SEM2SIR_INTRINSIC_PtrFromI64 ||
+           kid == SEM2SIR_INTRINSIC_I64FromPtr) &&
           !seen_expr) {
         char msg[128];
         snprintf(msg, sizeof(msg), "%s requires field: expr", k_str);

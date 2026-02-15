@@ -204,6 +204,12 @@ static const entry INTRINSIC_TABLE[] = {
     {"ZExtI64FromI32", 14, SEM2SIR_INTRINSIC_ZExtI64FromI32},
     {"SExtI64FromI32", 14, SEM2SIR_INTRINSIC_SExtI64FromI32},
     {"TruncI32FromI64", 15, SEM2SIR_INTRINSIC_TruncI32FromI64},
+    {"F64FromI32S", 11, SEM2SIR_INTRINSIC_F64FromI32S},
+    {"F32FromI32S", 11, SEM2SIR_INTRINSIC_F32FromI32S},
+    {"TruncSatI32FromF64S", 19, SEM2SIR_INTRINSIC_TruncSatI32FromF64S},
+    {"TruncSatI32FromF32S", 19, SEM2SIR_INTRINSIC_TruncSatI32FromF32S},
+    {"PtrFromI64", 10, SEM2SIR_INTRINSIC_PtrFromI64},
+    {"I64FromPtr", 10, SEM2SIR_INTRINSIC_I64FromPtr},
     {"True", 4, SEM2SIR_INTRINSIC_True},
     {"False", 5, SEM2SIR_INTRINSIC_False},
     {"Nil", 3, SEM2SIR_INTRINSIC_Nil},
@@ -301,6 +307,18 @@ const char *sem2sir_intrinsic_to_string(sem2sir_intrinsic_id k) {
     return "SExtI64FromI32";
   case SEM2SIR_INTRINSIC_TruncI32FromI64:
     return "TruncI32FromI64";
+  case SEM2SIR_INTRINSIC_F64FromI32S:
+    return "F64FromI32S";
+  case SEM2SIR_INTRINSIC_F32FromI32S:
+    return "F32FromI32S";
+  case SEM2SIR_INTRINSIC_TruncSatI32FromF64S:
+    return "TruncSatI32FromF64S";
+  case SEM2SIR_INTRINSIC_TruncSatI32FromF32S:
+    return "TruncSatI32FromF32S";
+  case SEM2SIR_INTRINSIC_PtrFromI64:
+    return "PtrFromI64";
+  case SEM2SIR_INTRINSIC_I64FromPtr:
+    return "I64FromPtr";
   case SEM2SIR_INTRINSIC_True:
     return "True";
   case SEM2SIR_INTRINSIC_False:

@@ -54,6 +54,30 @@ bool parse_expr(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirEx
     free(k);
     return parse_expr_trunc_i32_from_i64(c, ctx, expected, out);
   }
+  if (strcmp(k, "F64FromI32S") == 0) {
+    free(k);
+    return parse_expr_f64_from_i32_s(c, ctx, expected, out);
+  }
+  if (strcmp(k, "F32FromI32S") == 0) {
+    free(k);
+    return parse_expr_f32_from_i32_s(c, ctx, expected, out);
+  }
+  if (strcmp(k, "TruncSatI32FromF64S") == 0) {
+    free(k);
+    return parse_expr_trunc_sat_i32_from_f64_s(c, ctx, expected, out);
+  }
+  if (strcmp(k, "TruncSatI32FromF32S") == 0) {
+    free(k);
+    return parse_expr_trunc_sat_i32_from_f32_s(c, ctx, expected, out);
+  }
+  if (strcmp(k, "PtrFromI64") == 0) {
+    free(k);
+    return parse_expr_ptr_from_i64(c, ctx, expected, out);
+  }
+  if (strcmp(k, "I64FromPtr") == 0) {
+    free(k);
+    return parse_expr_i64_from_ptr(c, ctx, expected, out);
+  }
   if (strcmp(k, "Name") == 0) {
     free(k);
     return parse_expr_name(c, ctx, expected, out);

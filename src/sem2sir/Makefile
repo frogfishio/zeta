@@ -148,6 +148,12 @@ test: $(BIN)
 	grep -q '"tag":"const.f32"' tests/out_real_unit_casts.sir.jsonl
 	grep -q '"tag":"i64.sext.i32"' tests/out_real_unit_casts.sir.jsonl
 	grep -q '"tag":"i32.trunc.i64"' tests/out_real_unit_casts.sir.jsonl
+	grep -q '"tag":"f64.from_i32.s"' tests/out_real_unit_casts.sir.jsonl
+	grep -q '"tag":"f32.from_i32.s"' tests/out_real_unit_casts.sir.jsonl
+	grep -q '"tag":"i32.trunc_sat_f64.s"' tests/out_real_unit_casts.sir.jsonl
+	grep -q '"tag":"i32.trunc_sat_f32.s"' tests/out_real_unit_casts.sir.jsonl
+	grep -q '"tag":"ptr.from_i64"' tests/out_real_unit_casts.sir.jsonl
+	grep -q '"tag":"ptr.to_i64"' tests/out_real_unit_casts.sir.jsonl
 	@echo OK_sem2sir_emit_sir_real_unit_casts
 	./$(BIN) --emit-sir tests/good_loop_break.jsonl --out tests/out_loop_break.sir.jsonl >/dev/null
 	$(SIRCC) --verify-strict --verify-only tests/out_loop_break.sir.jsonl >/dev/null
@@ -263,6 +269,30 @@ test: $(BIN)
 	fi
 	! ./$(BIN) --emit-sir tests/bad_deref_pointee_mismatch_i64_as_i32.jsonl --out tests/out_fail.sir.jsonl >/dev/null 2>&1
 	@echo OK_sem2sir_emit_rejects_deref_pointee_mismatch
+	! ./$(BIN) --emit-sir tests/bad_f64_from_i32_expected_i32.jsonl --out tests/out_fail.sir.jsonl >/dev/null 2>&1
+	@echo OK_sem2sir_emit_rejects_f64_from_i32_expected_i32
+	! ./$(BIN) --emit-sir tests/bad_f32_from_i32_expected_i32.jsonl --out tests/out_fail.sir.jsonl >/dev/null 2>&1
+	@echo OK_sem2sir_emit_rejects_f32_from_i32_expected_i32
+	! ./$(BIN) --emit-sir tests/bad_trunc_sat_i32_from_f64_expected_f64.jsonl --out tests/out_fail.sir.jsonl >/dev/null 2>&1
+	@echo OK_sem2sir_emit_rejects_trunc_sat_i32_from_f64_expected_f64
+	! ./$(BIN) --emit-sir tests/bad_trunc_sat_i32_from_f32_expected_f32.jsonl --out tests/out_fail.sir.jsonl >/dev/null 2>&1
+	@echo OK_sem2sir_emit_rejects_trunc_sat_i32_from_f32_expected_f32
+	! ./$(BIN) --emit-sir tests/bad_f64_from_i32_arg_i64.jsonl --out tests/out_fail.sir.jsonl >/dev/null 2>&1
+	@echo OK_sem2sir_emit_rejects_f64_from_i32_arg_i64
+	! ./$(BIN) --emit-sir tests/bad_f32_from_i32_arg_i64.jsonl --out tests/out_fail.sir.jsonl >/dev/null 2>&1
+	@echo OK_sem2sir_emit_rejects_f32_from_i32_arg_i64
+	! ./$(BIN) --emit-sir tests/bad_trunc_sat_i32_from_f64_arg_f32.jsonl --out tests/out_fail.sir.jsonl >/dev/null 2>&1
+	@echo OK_sem2sir_emit_rejects_trunc_sat_i32_from_f64_arg_f32
+	! ./$(BIN) --emit-sir tests/bad_trunc_sat_i32_from_f32_arg_f64.jsonl --out tests/out_fail.sir.jsonl >/dev/null 2>&1
+	@echo OK_sem2sir_emit_rejects_trunc_sat_i32_from_f32_arg_f64
+	! ./$(BIN) --emit-sir tests/bad_ptr_from_i64_expected_i64.jsonl --out tests/out_fail.sir.jsonl >/dev/null 2>&1
+	@echo OK_sem2sir_emit_rejects_ptr_from_i64_expected_i64
+	! ./$(BIN) --emit-sir tests/bad_i64_from_ptr_expected_ptr.jsonl --out tests/out_fail.sir.jsonl >/dev/null 2>&1
+	@echo OK_sem2sir_emit_rejects_i64_from_ptr_expected_ptr
+	! ./$(BIN) --emit-sir tests/bad_ptr_from_i64_arg_ptr.jsonl --out tests/out_fail.sir.jsonl >/dev/null 2>&1
+	@echo OK_sem2sir_emit_rejects_ptr_from_i64_arg_ptr
+	! ./$(BIN) --emit-sir tests/bad_i64_from_ptr_arg_i64.jsonl --out tests/out_fail.sir.jsonl >/dev/null 2>&1
+	@echo OK_sem2sir_emit_rejects_i64_from_ptr_arg_i64
 	! ./$(BIN) --emit-sir tests/bad_cmp_untyped.jsonl --out tests/out_fail.sir.jsonl >/dev/null 2>&1
 	@echo OK_sem2sir_emit_rejects_untyped_cmp
 
