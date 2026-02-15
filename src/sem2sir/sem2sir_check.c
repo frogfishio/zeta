@@ -104,7 +104,7 @@ static void print_allowed_ops(FILE *out) {
 
 static void print_allowed_types(FILE *out) {
   bool first = true;
-  for (int t = 1; t <= (int)SEM2SIR_TYPE_STRING_UTF8; t++) {
+  for (int t = 1; t <= (int)SEM2SIR_TYPE_CSTR; t++) {
     const char *s = sem2sir_type_to_string((sem2sir_type_id)t);
     if (!s)
       continue;
@@ -199,6 +199,23 @@ static void print_allowed_node_keys(FILE *out, sem2sir_intrinsic_id kid) {
   case SEM2SIR_INTRINSIC_Int:
     fprintf(out, ", lit");
     break;
+  case SEM2SIR_INTRINSIC_F32:
+  case SEM2SIR_INTRINSIC_F64:
+    fprintf(out, ", bits");
+    break;
+  case SEM2SIR_INTRINSIC_UnitVal:
+    break;
+  case SEM2SIR_INTRINSIC_Bytes:
+  case SEM2SIR_INTRINSIC_StringUtf8:
+  case SEM2SIR_INTRINSIC_CStr:
+  case SEM2SIR_INTRINSIC_Char:
+    fprintf(out, ", lit");
+    break;
+  case SEM2SIR_INTRINSIC_ZExtI64FromI32:
+  case SEM2SIR_INTRINSIC_SExtI64FromI32:
+  case SEM2SIR_INTRINSIC_TruncI32FromI64:
+    fprintf(out, ", expr");
+    break;
   case SEM2SIR_INTRINSIC_True:
   case SEM2SIR_INTRINSIC_False:
   case SEM2SIR_INTRINSIC_Nil:
@@ -273,6 +290,18 @@ static void print_expected_schema(FILE *out, sem2sir_intrinsic_id kid) {
     break;
   case SEM2SIR_INTRINSIC_Int:
     fprintf(out, "Int expects: lit: tok");
+    break;
+  case SEM2SIR_INTRINSIC_F32:
+  case SEM2SIR_INTRINSIC_F64:
+    fprintf(out, "%s expects: bits: tok", sem2sir_intrinsic_to_string(kid));
+    break;
+  case SEM2SIR_INTRINSIC_UnitVal:
+    fprintf(out, "UnitVal expects: (no fields)");
+    break;
+  case SEM2SIR_INTRINSIC_ZExtI64FromI32:
+  case SEM2SIR_INTRINSIC_SExtI64FromI32:
+  case SEM2SIR_INTRINSIC_TruncI32FromI64:
+    fprintf(out, "%s expects: expr: node", sem2sir_intrinsic_to_string(kid));
     break;
   case SEM2SIR_INTRINSIC_Paren:
   case SEM2SIR_INTRINSIC_Not:
@@ -613,6 +642,20 @@ static bool is_allowed_node_key(sem2sir_intrinsic_id kid, const char *key) {
     return strcmp(key, "name") == 0;
   case SEM2SIR_INTRINSIC_Int:
     return strcmp(key, "lit") == 0;
+  case SEM2SIR_INTRINSIC_F32:
+  case SEM2SIR_INTRINSIC_F64:
+    return strcmp(key, "bits") == 0;
+  case SEM2SIR_INTRINSIC_UnitVal:
+    return false; // no additional fields
+  case SEM2SIR_INTRINSIC_Bytes:
+  case SEM2SIR_INTRINSIC_StringUtf8:
+  case SEM2SIR_INTRINSIC_CStr:
+  case SEM2SIR_INTRINSIC_Char:
+    return strcmp(key, "lit") == 0;
+  case SEM2SIR_INTRINSIC_ZExtI64FromI32:
+  case SEM2SIR_INTRINSIC_SExtI64FromI32:
+  case SEM2SIR_INTRINSIC_TruncI32FromI64:
+    return strcmp(key, "expr") == 0;
   case SEM2SIR_INTRINSIC_True:
   case SEM2SIR_INTRINSIC_False:
   case SEM2SIR_INTRINSIC_Nil:
@@ -746,6 +789,7 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
     bool seen_lit = false;
     bool seen_name = false;
     bool seen_expr = false;
+    bool seen_bits = false;
     bool seen_callee = false;
     bool seen_args = false;
     bool seen_type = false;
@@ -809,6 +853,10 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
             (kid == SEM2SIR_INTRINSIC_PatBind && strcmp(key, "name") == 0) ||
             (kid == SEM2SIR_INTRINSIC_Name && strcmp(key, "id") == 0) ||
             (kid == SEM2SIR_INTRINSIC_Int && strcmp(key, "lit") == 0) ||
+            ((kid == SEM2SIR_INTRINSIC_F32 || kid == SEM2SIR_INTRINSIC_F64) && strcmp(key, "bits") == 0) ||
+            ((kid == SEM2SIR_INTRINSIC_Bytes || kid == SEM2SIR_INTRINSIC_StringUtf8 || kid == SEM2SIR_INTRINSIC_CStr ||
+              kid == SEM2SIR_INTRINSIC_Char) &&
+             strcmp(key, "lit") == 0) ||
             (kid == SEM2SIR_INTRINSIC_PatInt && strcmp(key, "lit") == 0) ||
             (kid == SEM2SIR_INTRINSIC_Bin && strcmp(key, "op_tok") == 0) ||
             (kid == SEM2SIR_INTRINSIC_Unit && strcmp(key, "name") == 0)) {
@@ -817,6 +865,7 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
           if (strcmp(key, "link_name") == 0) seen_link_name = true;
           if (strcmp(key, "id") == 0) seen_id = true;
           if (strcmp(key, "lit") == 0) seen_lit = true;
+          if (strcmp(key, "bits") == 0) seen_bits = true;
 
           char field_buf[64];
           snprintf(field_buf, sizeof(field_buf), "%s.%s", k_str, key);
@@ -862,6 +911,7 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
         if (strcmp(key, "lit") == 0) seen_lit = true;
         if (strcmp(key, "name") == 0) seen_name = true;
         if (strcmp(key, "expr") == 0) seen_expr = true;
+        if (strcmp(key, "bits") == 0) seen_bits = true;
         if (strcmp(key, "callee") == 0) seen_callee = true;
         if (strcmp(key, "args") == 0) seen_args = true;
         if (strcmp(key, "type") == 0) seen_type = true;
@@ -1258,6 +1308,31 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
         fprintf(stderr, "  expected: ");
         print_expected_schema(stderr, kid);
         fputc('\n', stderr);
+        free(k_str);
+        return false;
+      }
+      if ((kid == SEM2SIR_INTRINSIC_F32 || kid == SEM2SIR_INTRINSIC_F64) && !seen_bits) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "%s requires field: bits", k_str);
+        print_err_at(path, &obj_start, msg);
+        free(k_str);
+        return false;
+      }
+      if ((kid == SEM2SIR_INTRINSIC_Bytes || kid == SEM2SIR_INTRINSIC_StringUtf8 || kid == SEM2SIR_INTRINSIC_CStr ||
+           kid == SEM2SIR_INTRINSIC_Char) &&
+          !seen_lit) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "%s requires field: lit", k_str);
+        print_err_at(path, &obj_start, msg);
+        free(k_str);
+        return false;
+      }
+      if ((kid == SEM2SIR_INTRINSIC_ZExtI64FromI32 || kid == SEM2SIR_INTRINSIC_SExtI64FromI32 ||
+           kid == SEM2SIR_INTRINSIC_TruncI32FromI64) &&
+          !seen_expr) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "%s requires field: expr", k_str);
+        print_err_at(path, &obj_start, msg);
         free(k_str);
         return false;
       }

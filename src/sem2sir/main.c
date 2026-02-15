@@ -16,7 +16,7 @@ static void usage(const char *argv0) {
 static int dump_profile(void) {
   // Keep this simple: dump the full dictionary and assert roundtrips.
 
-  for (int t = 1; t <= (int)SEM2SIR_TYPE_STRING_UTF8; t++) {
+    for (int t = 1; t <= (int)SEM2SIR_TYPE_CSTR; t++) {
     sem2sir_type_id tid = (sem2sir_type_id)t;
     const char *s = sem2sir_type_to_string(tid);
     if (!s)

@@ -35,9 +35,14 @@ int sem2sir_emit_sir_file(const char *in_stage4_jsonl_path, const char *out_sir_
   ctx.out_path = out_sir_jsonl_path;
   ctx.out = out;
   ctx.next_node = 1;
+  ctx.next_sym = 1;
+  ctx.next_anon_type = 1;
   ctx.fn_ret = SEM2SIR_TYPE_INVALID;
   ctx.default_int = SEM2SIR_TYPE_INVALID;
   ctx.default_ptr_pointee = SEM2SIR_TYPE_INVALID;
+
+  // SIR is the lowering target. Emit data:v1 canonical types and literals.
+  ctx.meta_data_v1 = true;
 
   bool ok = true;
 
@@ -68,10 +73,31 @@ int sem2sir_emit_sir_file(const char *in_stage4_jsonl_path, const char *out_sir_
   // Emit meta first.
   fprintf(out, "{\"ir\":\"sir-v1.0\",\"k\":\"meta\",\"producer\":\"sem2sir\",\"unit\":");
   emit_json_string(out, "main");
-  if (ctx.meta_sem_v1) {
-    fprintf(out, ",\"ext\":{\"features\":[\"sem:v1\"]}");
+  if (ctx.meta_sem_v1 || ctx.meta_data_v1) {
+    fprintf(out, ",\"ext\":{\"features\":[");
+    bool first = true;
+    if (ctx.meta_sem_v1) {
+      fprintf(out, "%s\"sem:v1\"", first ? "" : ",");
+      first = false;
+    }
+    if (ctx.meta_data_v1) {
+      fprintf(out, "%s\"data:v1\"", first ? "" : ",");
+      first = false;
+    }
+    fprintf(out, "]}");
   }
   fprintf(out, "}\n\n");
+
+  // data:v1 pack validation requires these canonical named types to exist.
+  if (ctx.meta_data_v1) {
+    if (!emit_type_if_needed(&ctx, SEM2SIR_TYPE_BYTES) || !emit_type_if_needed(&ctx, SEM2SIR_TYPE_STRING_UTF8) ||
+        !emit_type_if_needed(&ctx, SEM2SIR_TYPE_CSTR)) {
+      err(in_stage4_jsonl_path, "failed to emit data:v1 canonical types");
+      ok = false;
+      goto done;
+    }
+    fprintf(out, "\n");
+  }
 
   GritJsonCursor c = grit_json_cursor(buf, len);
 

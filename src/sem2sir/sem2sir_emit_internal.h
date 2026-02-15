@@ -60,7 +60,7 @@ typedef struct {
   size_t continue_to;
 } LoopTargets;
 
-#define SEM2SIR_TYPE_COUNT (SEM2SIR_TYPE_STRING_UTF8 + 1)
+#define SEM2SIR_TYPE_COUNT (SEM2SIR_TYPE_CSTR + 1)
 
 typedef struct ProcInfo ProcInfo;
 
@@ -69,6 +69,8 @@ typedef struct {
   const char *out_path;
   FILE *out;
   uint32_t next_node;
+  uint32_t next_sym;
+  uint32_t next_anon_type;
 
   ProcInfo *procs;
   size_t proc_count;
@@ -85,17 +87,23 @@ typedef struct {
   sem2sir_type_id default_int;
   sem2sir_type_id default_ptr_pointee;
   bool meta_sem_v1;
+  bool meta_data_v1;
+  bool emitted_i8;
   bool emitted_i32;
   bool emitted_i64;
   bool emitted_bool;
   bool emitted_u8;
   bool emitted_u32;
   bool emitted_u64;
+  bool emitted_f32;
   bool emitted_f64;
   bool emitted_ptr;
   bool emitted_slice;
   bool emitted_string_utf8;
   bool emitted_void;
+
+  bool emitted_bytes;
+  bool emitted_cstr;
 
   // Derived pointer types by pointee base type.
   char *derived_ptr_type_id[SEM2SIR_TYPE_COUNT];
@@ -208,6 +216,20 @@ bool parse_expr_neg(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, S
 bool parse_expr_bitnot(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out);
 bool parse_expr_bin(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out);
 bool parse_expr_match(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out);
+
+// data literal expressions
+bool parse_expr_bytes(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out);
+bool parse_expr_string_utf8(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out);
+bool parse_expr_cstr(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out);
+bool parse_expr_char(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out);
+
+// float literals / unit / conversions
+bool parse_expr_f64(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out);
+bool parse_expr_f32(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out);
+bool parse_expr_unitval(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out);
+bool parse_expr_zext_i64_from_i32(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out);
+bool parse_expr_sext_i64_from_i32(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out);
+bool parse_expr_trunc_i32_from_i64(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out);
 
 bool parse_expr(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out);
 

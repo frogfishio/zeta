@@ -1,0 +1,68 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"I32": "i32", "I64": "i64", "F32": "f32", "F64": "f64", "Void": "void"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "v"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "void"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {"k": "ExprStmt", "expr": {"k": "UnitVal"}},
+            {"k": "Return", "value": null}
+          ]
+        }
+      },
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "x"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
+              "init": {"k": "Int", "lit": {"k": "tok", "text": "-1"}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "y"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i64"}},
+              "init": {"k": "SExtI64FromI32", "expr": {"k": "Name", "id": {"k": "tok", "text": "x"}}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "z"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
+              "init": {"k": "TruncI32FromI64", "expr": {"k": "Name", "id": {"k": "tok", "text": "y"}}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "a"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "f64"}},
+              "init": {"k": "F64", "bits": {"k": "tok", "text": "0x3ff0000000000000"}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "b"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "f32"}},
+              "init": {"k": "F32", "bits": {"k": "tok", "text": "0x3f800000"}}
+            },
+            {"k": "Call", "callee": {"k": "Name", "id": {"k": "tok", "text": "v"}}, "args": {"k": "Args", "items": []}},
+            {"k": "Return", "value": {"k": "Int", "lit": {"k": "tok", "text": "0"}}}
+          ]
+        }
+      }
+    ]
+  }
+}

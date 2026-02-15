@@ -15,17 +15,21 @@ static bool match(const char *a, size_t an, const char *b, size_t bn) {
 // Types
 
 static const entry TYPE_TABLE[] = {
-    {"i32", 3, SEM2SIR_TYPE_I32},
-    {"bool", 4, SEM2SIR_TYPE_BOOL},
+  {"i8", 2, SEM2SIR_TYPE_I8},
+  {"i32", 3, SEM2SIR_TYPE_I32},
+  {"bool", 4, SEM2SIR_TYPE_BOOL},
   {"u8", 2, SEM2SIR_TYPE_U8},
   {"u32", 3, SEM2SIR_TYPE_U32},
   {"u64", 3, SEM2SIR_TYPE_U64},
   {"i64", 3, SEM2SIR_TYPE_I64},
+  {"f32", 3, SEM2SIR_TYPE_F32},
   {"f64", 3, SEM2SIR_TYPE_F64},
   {"void", 4, SEM2SIR_TYPE_VOID},
   {"ptr", 3, SEM2SIR_TYPE_PTR},
   {"slice", 5, SEM2SIR_TYPE_SLICE},
+  {"bytes", 5, SEM2SIR_TYPE_BYTES},
   {"string.utf8", 11, SEM2SIR_TYPE_STRING_UTF8},
+  {"cstr", 4, SEM2SIR_TYPE_CSTR},
 };
 
 sem2sir_type_id sem2sir_type_parse(const char *s, size_t n) {
@@ -40,6 +44,8 @@ sem2sir_type_id sem2sir_type_parse(const char *s, size_t n) {
 
 const char *sem2sir_type_to_string(sem2sir_type_id t) {
   switch (t) {
+  case SEM2SIR_TYPE_I8:
+    return "i8";
   case SEM2SIR_TYPE_I32:
     return "i32";
   case SEM2SIR_TYPE_BOOL:
@@ -52,6 +58,8 @@ const char *sem2sir_type_to_string(sem2sir_type_id t) {
     return "u64";
   case SEM2SIR_TYPE_I64:
     return "i64";
+  case SEM2SIR_TYPE_F32:
+    return "f32";
   case SEM2SIR_TYPE_F64:
     return "f64";
   case SEM2SIR_TYPE_VOID:
@@ -60,8 +68,12 @@ const char *sem2sir_type_to_string(sem2sir_type_id t) {
     return "ptr";
   case SEM2SIR_TYPE_SLICE:
     return "slice";
+  case SEM2SIR_TYPE_BYTES:
+    return "bytes";
   case SEM2SIR_TYPE_STRING_UTF8:
     return "string.utf8";
+  case SEM2SIR_TYPE_CSTR:
+    return "cstr";
   default:
     return NULL;
   }
@@ -182,6 +194,16 @@ static const entry INTRINSIC_TABLE[] = {
     {"Name", 4, SEM2SIR_INTRINSIC_Name},
   {"TypeRef", 7, SEM2SIR_INTRINSIC_TypeRef},
     {"Int", 3, SEM2SIR_INTRINSIC_Int},
+    {"F32", 3, SEM2SIR_INTRINSIC_F32},
+    {"F64", 3, SEM2SIR_INTRINSIC_F64},
+    {"UnitVal", 7, SEM2SIR_INTRINSIC_UnitVal},
+    {"Bytes", 5, SEM2SIR_INTRINSIC_Bytes},
+    {"StringUtf8", 10, SEM2SIR_INTRINSIC_StringUtf8},
+    {"CStr", 4, SEM2SIR_INTRINSIC_CStr},
+    {"Char", 4, SEM2SIR_INTRINSIC_Char},
+    {"ZExtI64FromI32", 14, SEM2SIR_INTRINSIC_ZExtI64FromI32},
+    {"SExtI64FromI32", 14, SEM2SIR_INTRINSIC_SExtI64FromI32},
+    {"TruncI32FromI64", 15, SEM2SIR_INTRINSIC_TruncI32FromI64},
     {"True", 4, SEM2SIR_INTRINSIC_True},
     {"False", 5, SEM2SIR_INTRINSIC_False},
     {"Nil", 3, SEM2SIR_INTRINSIC_Nil},
@@ -259,6 +281,26 @@ const char *sem2sir_intrinsic_to_string(sem2sir_intrinsic_id k) {
     return "TypeRef";
   case SEM2SIR_INTRINSIC_Int:
     return "Int";
+  case SEM2SIR_INTRINSIC_F32:
+    return "F32";
+  case SEM2SIR_INTRINSIC_F64:
+    return "F64";
+  case SEM2SIR_INTRINSIC_UnitVal:
+    return "UnitVal";
+  case SEM2SIR_INTRINSIC_Bytes:
+    return "Bytes";
+  case SEM2SIR_INTRINSIC_StringUtf8:
+    return "StringUtf8";
+  case SEM2SIR_INTRINSIC_CStr:
+    return "CStr";
+  case SEM2SIR_INTRINSIC_Char:
+    return "Char";
+  case SEM2SIR_INTRINSIC_ZExtI64FromI32:
+    return "ZExtI64FromI32";
+  case SEM2SIR_INTRINSIC_SExtI64FromI32:
+    return "SExtI64FromI32";
+  case SEM2SIR_INTRINSIC_TruncI32FromI64:
+    return "TruncI32FromI64";
   case SEM2SIR_INTRINSIC_True:
     return "True";
   case SEM2SIR_INTRINSIC_False:

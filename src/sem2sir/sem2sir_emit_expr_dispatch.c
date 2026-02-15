@@ -14,6 +14,46 @@ bool parse_expr(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirEx
     free(k);
     return parse_expr_int(c, ctx, expected, out);
   }
+  if (strcmp(k, "F64") == 0) {
+    free(k);
+    return parse_expr_f64(c, ctx, expected, out);
+  }
+  if (strcmp(k, "F32") == 0) {
+    free(k);
+    return parse_expr_f32(c, ctx, expected, out);
+  }
+  if (strcmp(k, "UnitVal") == 0) {
+    free(k);
+    return parse_expr_unitval(c, ctx, expected, out);
+  }
+  if (strcmp(k, "Bytes") == 0) {
+    free(k);
+    return parse_expr_bytes(c, ctx, expected, out);
+  }
+  if (strcmp(k, "StringUtf8") == 0) {
+    free(k);
+    return parse_expr_string_utf8(c, ctx, expected, out);
+  }
+  if (strcmp(k, "CStr") == 0) {
+    free(k);
+    return parse_expr_cstr(c, ctx, expected, out);
+  }
+  if (strcmp(k, "Char") == 0) {
+    free(k);
+    return parse_expr_char(c, ctx, expected, out);
+  }
+  if (strcmp(k, "ZExtI64FromI32") == 0) {
+    free(k);
+    return parse_expr_zext_i64_from_i32(c, ctx, expected, out);
+  }
+  if (strcmp(k, "SExtI64FromI32") == 0) {
+    free(k);
+    return parse_expr_sext_i64_from_i32(c, ctx, expected, out);
+  }
+  if (strcmp(k, "TruncI32FromI64") == 0) {
+    free(k);
+    return parse_expr_trunc_i32_from_i64(c, ctx, expected, out);
+  }
   if (strcmp(k, "Name") == 0) {
     free(k);
     return parse_expr_name(c, ctx, expected, out);

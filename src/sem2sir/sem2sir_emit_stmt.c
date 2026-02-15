@@ -2328,6 +2328,96 @@ bool parse_block(GritJsonCursor *c, EmitCtx *ctx, SirFnBuild *fn, bool require_r
               free(key);
               return false;
             }
+          } else if (strcmp(sk, "ExprStmt") == 0) {
+            free(sk);
+            bool seen_expr = false;
+            bool expr_is_null = false;
+            char *ek = NULL;
+
+            for (;;) {
+              if (!json_peek_non_ws(c, &ch)) {
+                err(ctx->in_path, "unexpected EOF in ExprStmt");
+                free(ek);
+                free(key);
+                return false;
+              }
+              if (ch == '}') {
+                c->p++;
+                break;
+              }
+              if (ch != ',') {
+                err(ctx->in_path, "expected ',' or '}' in ExprStmt");
+                free(ek);
+                free(key);
+                return false;
+              }
+              c->p++;
+              char *ekey = NULL;
+              if (!json_expect_key(c, &ekey)) {
+                err(ctx->in_path, "invalid ExprStmt key");
+                free(ek);
+                free(key);
+                return false;
+              }
+
+              if (strcmp(ekey, "expr") == 0) {
+                seen_expr = true;
+                if (!json_peek_non_ws(c, &ch)) {
+                  err(ctx->in_path, "unexpected EOF in ExprStmt.expr");
+                  free(ekey);
+                  free(ek);
+                  free(key);
+                  return false;
+                }
+                if (ch == 'n') {
+                  expr_is_null = true;
+                  if (!grit_json_skip_value(c)) {
+                    err(ctx->in_path, "invalid ExprStmt.expr (expected null)");
+                    free(ekey);
+                    free(ek);
+                    free(key);
+                    return false;
+                  }
+                } else {
+                  // ExprStmt has no expected type. To avoid implicitness, only allow UnitVal (void) here.
+                  if (!parse_node_k_string(c, ctx, &ek)) {
+                    free(ekey);
+                    free(ek);
+                    free(key);
+                    return false;
+                  }
+                  if (strcmp(ek, "UnitVal") != 0) {
+                    err(ctx->in_path, "ExprStmt only supports UnitVal in sem2sir MVP (no untyped expression statements)");
+                    free(ekey);
+                    free(ek);
+                    free(key);
+                    return false;
+                  }
+                  free(ek);
+                  ek = NULL;
+                  SirExpr uv = {0};
+                  if (!parse_expr_unitval(c, ctx, SEM2SIR_TYPE_VOID, &uv)) {
+                    free(ekey);
+                    free(key);
+                    return false;
+                  }
+                  // UnitVal emits no node; no stmt appended.
+                }
+              } else {
+                if (!grit_json_skip_value(c)) {
+                  err(ctx->in_path, "invalid ExprStmt field");
+                  free(ekey);
+                  free(ek);
+                  free(key);
+                  return false;
+                }
+              }
+
+              free(ekey);
+            }
+
+            (void)seen_expr;
+            (void)expr_is_null;
           } else {
             char msg[128];
             snprintf(msg, sizeof(msg), "unsupported Block item kind: %s", sk ? sk : "<null>");

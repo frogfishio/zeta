@@ -9,6 +9,8 @@
 
 typedef enum {
   SEM2SIR_TYPE_INVALID = 0,
+  // Needed by SIR data:v1 canonical types (bytes/string.utf8/cstr).
+  SEM2SIR_TYPE_I8,
   SEM2SIR_TYPE_I32,
   SEM2SIR_TYPE_BOOL,
   // Common normalized type IDs observed in Stage 4 meta.types.
@@ -16,11 +18,15 @@ typedef enum {
   SEM2SIR_TYPE_U32,
   SEM2SIR_TYPE_U64,
   SEM2SIR_TYPE_I64,
+  SEM2SIR_TYPE_F32,
   SEM2SIR_TYPE_F64,
   SEM2SIR_TYPE_VOID,
   SEM2SIR_TYPE_PTR,
   SEM2SIR_TYPE_SLICE,
+  // data:v1 canonical named types
+  SEM2SIR_TYPE_BYTES,
   SEM2SIR_TYPE_STRING_UTF8,
+  SEM2SIR_TYPE_CSTR,
 } sem2sir_type_id;
 
 typedef enum {
@@ -95,6 +101,20 @@ typedef enum {
   // Types (minimal; explicit typing only)
   SEM2SIR_INTRINSIC_TypeRef,
   SEM2SIR_INTRINSIC_Int,
+  // Float literals (lossless via IEEE-754 bits)
+  SEM2SIR_INTRINSIC_F32,
+  SEM2SIR_INTRINSIC_F64,
+  // Void unique value
+  SEM2SIR_INTRINSIC_UnitVal,
+  // data literals / interop
+  SEM2SIR_INTRINSIC_Bytes,
+  SEM2SIR_INTRINSIC_StringUtf8,
+  SEM2SIR_INTRINSIC_CStr,
+  SEM2SIR_INTRINSIC_Char,
+  // Explicit integer width conversions (committed, 1:1 to SIR)
+  SEM2SIR_INTRINSIC_ZExtI64FromI32,
+  SEM2SIR_INTRINSIC_SExtI64FromI32,
+  SEM2SIR_INTRINSIC_TruncI32FromI64,
   SEM2SIR_INTRINSIC_True,
   SEM2SIR_INTRINSIC_False,
   SEM2SIR_INTRINSIC_Nil,

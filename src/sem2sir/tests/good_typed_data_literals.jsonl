@@ -1,0 +1,48 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"I32": "i32", "U32": "u32", "Bytes": "bytes", "String": "string.utf8", "CStr": "cstr", "Void": "void"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "b"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "bytes"}},
+              "init": {"k": "Bytes", "lit": {"k": "tok", "text": "abc"}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "s"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "string.utf8"}},
+              "init": {"k": "StringUtf8", "lit": {"k": "tok", "text": "hello"}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "c"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "cstr"}},
+              "init": {"k": "CStr", "lit": {"k": "tok", "text": "world"}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "ch"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "u32"}},
+              "init": {"k": "Char", "lit": {"k": "tok", "text": "0x41"}}
+            },
+            {"k": "Return", "value": {"k": "Int", "lit": {"k": "tok", "text": "0"}}}
+          ]
+        }
+      }
+    ]
+  }
+}

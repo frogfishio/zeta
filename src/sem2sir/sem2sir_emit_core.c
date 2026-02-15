@@ -425,6 +425,8 @@ char *new_node_id(EmitCtx *ctx) {
 
 const char *sir_type_id_for(sem2sir_type_id t) {
   switch (t) {
+  case SEM2SIR_TYPE_I8:
+    return "t:i8";
   case SEM2SIR_TYPE_I32:
     return "t:i32";
   case SEM2SIR_TYPE_I64:
@@ -437,14 +439,20 @@ const char *sir_type_id_for(sem2sir_type_id t) {
     return "t:u32";
   case SEM2SIR_TYPE_U64:
     return "t:u64";
+  case SEM2SIR_TYPE_F32:
+    return "t:f32";
   case SEM2SIR_TYPE_F64:
     return "t:f64";
   case SEM2SIR_TYPE_PTR:
     return "t:ptr";
   case SEM2SIR_TYPE_SLICE:
     return "t:slice";
+  case SEM2SIR_TYPE_BYTES:
+    return "t:bytes";
   case SEM2SIR_TYPE_STRING_UTF8:
     return "t:string.utf8";
+  case SEM2SIR_TYPE_CSTR:
+    return "t:cstr";
   case SEM2SIR_TYPE_VOID:
     return "t:void";
   default:
@@ -546,6 +554,13 @@ bool emit_typeinfo_if_needed(EmitCtx *ctx, const SemTypeInfo *ti) {
 }
 
 bool emit_type_if_needed(EmitCtx *ctx, sem2sir_type_id t) {
+  if (t == SEM2SIR_TYPE_I8) {
+    if (ctx->emitted_i8)
+      return true;
+    ctx->emitted_i8 = true;
+    fprintf(ctx->out, "{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":\"t:i8\",\"kind\":\"prim\",\"prim\":\"i8\"}\n");
+    return true;
+  }
   if (t == SEM2SIR_TYPE_I32) {
     if (ctx->emitted_i32)
       return true;
@@ -588,6 +603,13 @@ bool emit_type_if_needed(EmitCtx *ctx, sem2sir_type_id t) {
     fprintf(ctx->out, "{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":\"t:u64\",\"kind\":\"prim\",\"prim\":\"u64\"}\n");
     return true;
   }
+  if (t == SEM2SIR_TYPE_F32) {
+    if (ctx->emitted_f32)
+      return true;
+    ctx->emitted_f32 = true;
+    fprintf(ctx->out, "{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":\"t:f32\",\"kind\":\"prim\",\"prim\":\"f32\"}\n");
+    return true;
+  }
   if (t == SEM2SIR_TYPE_F64) {
     if (ctx->emitted_f64)
       return true;
@@ -609,11 +631,53 @@ bool emit_type_if_needed(EmitCtx *ctx, sem2sir_type_id t) {
     fprintf(ctx->out, "{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":\"t:slice\",\"kind\":\"prim\",\"prim\":\"slice\"}\n");
     return true;
   }
+  if (t == SEM2SIR_TYPE_BYTES) {
+    if (ctx->emitted_bytes)
+      return true;
+    ctx->emitted_bytes = true;
+
+    // data:v1 canonical shape: struct bytes { data: ptr(i8), len: i64 }
+    if (!emit_derived_ptr_type_if_needed(ctx, SEM2SIR_TYPE_I8))
+      return false;
+    if (!emit_type_if_needed(ctx, SEM2SIR_TYPE_I64))
+      return false;
+
+    fprintf(ctx->out,
+            "{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":\"t:bytes\",\"kind\":\"struct\",\"name\":\"bytes\",\"fields\":[{\"name\":\"data\",\"type_ref\":");
+    emit_json_string(ctx->out, get_derived_ptr_type_id(ctx, SEM2SIR_TYPE_I8));
+    fprintf(ctx->out, "},{\"name\":\"len\",\"type_ref\":\"t:i64\"}]}\n");
+    return true;
+  }
   if (t == SEM2SIR_TYPE_STRING_UTF8) {
     if (ctx->emitted_string_utf8)
       return true;
     ctx->emitted_string_utf8 = true;
-    fprintf(ctx->out, "{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":\"t:string.utf8\",\"kind\":\"prim\",\"prim\":\"string.utf8\"}\n");
+    if (!ctx->meta_data_v1) {
+      fprintf(ctx->out, "{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":\"t:string.utf8\",\"kind\":\"prim\",\"prim\":\"string.utf8\"}\n");
+      return true;
+    }
+
+    // data:v1 canonical shape: struct string.utf8 { data: ptr(i8), len: i64 }
+    if (!emit_derived_ptr_type_if_needed(ctx, SEM2SIR_TYPE_I8))
+      return false;
+    if (!emit_type_if_needed(ctx, SEM2SIR_TYPE_I64))
+      return false;
+
+    fprintf(ctx->out,
+            "{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":\"t:string.utf8\",\"kind\":\"struct\",\"name\":\"string.utf8\",\"fields\":[{\"name\":\"data\",\"type_ref\":");
+    emit_json_string(ctx->out, get_derived_ptr_type_id(ctx, SEM2SIR_TYPE_I8));
+    fprintf(ctx->out, "},{\"name\":\"len\",\"type_ref\":\"t:i64\"}]}\n");
+    return true;
+  }
+  if (t == SEM2SIR_TYPE_CSTR) {
+    if (ctx->emitted_cstr)
+      return true;
+    ctx->emitted_cstr = true;
+
+    // data:v1 canonical shape: ptr cstr of i8
+    if (!emit_type_if_needed(ctx, SEM2SIR_TYPE_I8))
+      return false;
+    fprintf(ctx->out, "{\"ir\":\"sir-v1.0\",\"k\":\"type\",\"id\":\"t:cstr\",\"kind\":\"ptr\",\"name\":\"cstr\",\"of\":\"t:i8\"}\n");
     return true;
   }
   if (t == SEM2SIR_TYPE_VOID) {
@@ -664,11 +728,14 @@ bool locals_push_binding(EmitCtx *ctx, const char *name, SemTypeInfo ti, bool is
 
 bool type_supports_slot_storage(sem2sir_type_id t) {
   switch (t) {
+  case SEM2SIR_TYPE_I8:
   case SEM2SIR_TYPE_I32:
   case SEM2SIR_TYPE_I64:
   case SEM2SIR_TYPE_U8:
+  case SEM2SIR_TYPE_F32:
   case SEM2SIR_TYPE_F64:
   case SEM2SIR_TYPE_PTR:
+  case SEM2SIR_TYPE_CSTR:
     return true;
   default:
     return false;
@@ -677,15 +744,20 @@ bool type_supports_slot_storage(sem2sir_type_id t) {
 
 int type_align_bytes(sem2sir_type_id t) {
   switch (t) {
+  case SEM2SIR_TYPE_I8:
+    return 1;
   case SEM2SIR_TYPE_I32:
     return 4;
   case SEM2SIR_TYPE_I64:
     return 8;
   case SEM2SIR_TYPE_U8:
     return 1;
+  case SEM2SIR_TYPE_F32:
+    return 4;
   case SEM2SIR_TYPE_F64:
     return 8;
   case SEM2SIR_TYPE_PTR:
+  case SEM2SIR_TYPE_CSTR:
     return 8;
   default:
     return 0;
@@ -694,15 +766,20 @@ int type_align_bytes(sem2sir_type_id t) {
 
 const char *type_store_tag(sem2sir_type_id t) {
   switch (t) {
+  case SEM2SIR_TYPE_I8:
+    return "store.i8";
   case SEM2SIR_TYPE_I32:
     return "store.i32";
   case SEM2SIR_TYPE_I64:
     return "store.i64";
   case SEM2SIR_TYPE_U8:
     return "store.i8";
+  case SEM2SIR_TYPE_F32:
+    return "store.f32";
   case SEM2SIR_TYPE_F64:
     return "store.f64";
   case SEM2SIR_TYPE_PTR:
+  case SEM2SIR_TYPE_CSTR:
     return "store.ptr";
   default:
     return NULL;
@@ -711,15 +788,20 @@ const char *type_store_tag(sem2sir_type_id t) {
 
 const char *type_load_tag(sem2sir_type_id t) {
   switch (t) {
+  case SEM2SIR_TYPE_I8:
+    return "load.i8";
   case SEM2SIR_TYPE_I32:
     return "load.i32";
   case SEM2SIR_TYPE_I64:
     return "load.i64";
   case SEM2SIR_TYPE_U8:
     return "load.i8";
+  case SEM2SIR_TYPE_F32:
+    return "load.f32";
   case SEM2SIR_TYPE_F64:
     return "load.f64";
   case SEM2SIR_TYPE_PTR:
+  case SEM2SIR_TYPE_CSTR:
     return "load.ptr";
   default:
     return NULL;

@@ -23,6 +23,8 @@ APP_SRCS += sem2sir_emit_expr_ptr.c
 APP_SRCS += sem2sir_emit_expr_unary.c
 APP_SRCS += sem2sir_emit_expr_bin.c
 APP_SRCS += sem2sir_emit_expr_match.c
+APP_SRCS += sem2sir_emit_expr_data.c
+APP_SRCS += sem2sir_emit_expr_float_conv.c
 APP_SRCS += sem2sir_emit_expr_dispatch.c
 APP_SRCS += sem2sir_emit_stmt.c
 APP_SRCS += sem2sir_emit_unit.c
@@ -65,7 +67,7 @@ test: $(BIN)
 	@echo OK_sem2sir_rejects_link_name_without_extern
 	! ./$(BIN) --check tests/bad_proc_extern_body_not_null.jsonl >/dev/null 2>&1
 	@echo OK_sem2sir_rejects_extern_body_not_null
-	rm -f tests/out.sir.jsonl tests/out_fail.sir.jsonl tests/out_add.sir.jsonl tests/out_add_i64.sir.jsonl tests/out_eq.sir.jsonl tests/out_lt_i64.sir.jsonl tests/out_default_int_lt.sir.jsonl tests/out_and_sc.sir.jsonl tests/out_or_sc.sir.jsonl tests/out_not.sir.jsonl tests/out_neg_i64.sir.jsonl tests/out_bitnot_i32.sir.jsonl tests/out_ptr_addrof_deref_i64.sir.jsonl tests/out_ptr_typeapp_i64.sir.jsonl tests/out_ptr_typeapp_void_opaque.sir.jsonl tests/out_assign_stmt_i64.sir.jsonl tests/out_assign_expr_return_i64.sir.jsonl tests/out_assign_expr_chain_return_i64.sir.jsonl tests/out_assign_expr_in_add_i64.sir.jsonl tests/out_assign_deref_stmt_i64.sir.jsonl tests/out_assign_deref_stmt_ptr_typeapp_i64_no_default.sir.jsonl tests/out_assign_deref_expr_in_add_i64.sir.jsonl tests/out_assign_expr_rhs_first_i64.sir.jsonl tests/out_assign_deref_stmt_rhs_first_i64.sir.jsonl tests/out_match_i32.sir.jsonl tests/out_loop_break.sir.jsonl tests/out_dowhile_break.sir.jsonl tests/out_for_break.sir.jsonl tests/out_forint_break.sir.jsonl tests/out_dowhile_continue.sir.jsonl tests/out_for_continue.sir.jsonl tests/out_for_continue_no_step.sir.jsonl tests/out_forint_continue.sir.jsonl build/out_ptr_param_inc_i64.sir.jsonl build/out_call2_add2_i64.sir.jsonl
+	rm -f tests/out.sir.jsonl tests/out_fail.sir.jsonl tests/out_add.sir.jsonl tests/out_add_i64.sir.jsonl tests/out_eq.sir.jsonl tests/out_lt_i64.sir.jsonl tests/out_default_int_lt.sir.jsonl tests/out_and_sc.sir.jsonl tests/out_or_sc.sir.jsonl tests/out_not.sir.jsonl tests/out_neg_i64.sir.jsonl tests/out_bitnot_i32.sir.jsonl tests/out_ptr_addrof_deref_i64.sir.jsonl tests/out_ptr_typeapp_i64.sir.jsonl tests/out_ptr_typeapp_void_opaque.sir.jsonl tests/out_assign_stmt_i64.sir.jsonl tests/out_assign_expr_return_i64.sir.jsonl tests/out_assign_expr_chain_return_i64.sir.jsonl tests/out_assign_expr_in_add_i64.sir.jsonl tests/out_assign_deref_stmt_i64.sir.jsonl tests/out_assign_deref_stmt_ptr_typeapp_i64_no_default.sir.jsonl tests/out_assign_deref_expr_in_add_i64.sir.jsonl tests/out_assign_expr_rhs_first_i64.sir.jsonl tests/out_assign_deref_stmt_rhs_first_i64.sir.jsonl tests/out_match_i32.sir.jsonl tests/out_loop_break.sir.jsonl tests/out_dowhile_break.sir.jsonl tests/out_for_break.sir.jsonl tests/out_forint_break.sir.jsonl tests/out_dowhile_continue.sir.jsonl tests/out_for_continue.sir.jsonl tests/out_for_continue_no_step.sir.jsonl tests/out_forint_continue.sir.jsonl tests/out_data_literals.sir.jsonl tests/out_real_unit_casts.sir.jsonl build/out_ptr_param_inc_i64.sir.jsonl build/out_call2_add2_i64.sir.jsonl
 	rm -f tests/out_extern_call_add2_i64.sir.jsonl
 	rm -f tests/out_extern_call_add2_i64_no_link_name.sir.jsonl
 	./$(BIN) --emit-sir tests/good_typed_min.jsonl --out tests/out.sir.jsonl >/dev/null
@@ -129,6 +131,24 @@ test: $(BIN)
 	grep -q '"fields":{"name":"add2"}' tests/out_extern_call_add2_i64_no_link_name.sir.jsonl
 	grep -q '"tag":"call.indirect"' tests/out_extern_call_add2_i64_no_link_name.sir.jsonl
 	@echo OK_sem2sir_emit_sir_extern_call_add2_i64_no_link_name
+	./$(BIN) --emit-sir tests/good_typed_data_literals.jsonl --out tests/out_data_literals.sir.jsonl >/dev/null
+	$(SIRCC) --verify-strict --verify-only tests/out_data_literals.sir.jsonl >/dev/null
+	grep -q '"data:v1"' tests/out_data_literals.sir.jsonl
+	grep -q '"k":"type","id":"t:bytes","kind":"struct"' tests/out_data_literals.sir.jsonl
+	grep -Eq '"id":"t:bytes".*"name":"data","type_ref":"t:p_i8".*"name":"len","type_ref":"t:i64"' tests/out_data_literals.sir.jsonl
+	grep -q '"k":"type","id":"t:string.utf8","kind":"struct"' tests/out_data_literals.sir.jsonl
+	grep -Eq '"id":"t:string\.utf8".*"name":"data","type_ref":"t:p_i8".*"name":"len","type_ref":"t:i64"' tests/out_data_literals.sir.jsonl
+	grep -q '"k":"type","id":"t:cstr","kind":"ptr","name":"cstr","of":"t:i8"' tests/out_data_literals.sir.jsonl
+	grep -q '"tag":"cstr"' tests/out_data_literals.sir.jsonl
+	grep -q '"tag":"const.struct"' tests/out_data_literals.sir.jsonl
+	@echo OK_sem2sir_emit_sir_data_literals
+	./$(BIN) --emit-sir tests/good_typed_real_unit_casts.jsonl --out tests/out_real_unit_casts.sir.jsonl >/dev/null
+	$(SIRCC) --verify-strict --verify-only tests/out_real_unit_casts.sir.jsonl >/dev/null
+	grep -q '"tag":"const.f64"' tests/out_real_unit_casts.sir.jsonl
+	grep -q '"tag":"const.f32"' tests/out_real_unit_casts.sir.jsonl
+	grep -q '"tag":"i64.sext.i32"' tests/out_real_unit_casts.sir.jsonl
+	grep -q '"tag":"i32.trunc.i64"' tests/out_real_unit_casts.sir.jsonl
+	@echo OK_sem2sir_emit_sir_real_unit_casts
 	./$(BIN) --emit-sir tests/good_loop_break.jsonl --out tests/out_loop_break.sir.jsonl >/dev/null
 	$(SIRCC) --verify-strict --verify-only tests/out_loop_break.sir.jsonl >/dev/null
 	@echo OK_sem2sir_emit_sir_loop_break
