@@ -104,6 +104,8 @@ typedef struct {
 
 struct ProcInfo {
   char *name;
+  char *link_name; // optional override for emitted symbol name (extern decls)
+  bool is_extern;
   char *fn_id;
   char *fn_type_id;
   SemTypeInfo *params;

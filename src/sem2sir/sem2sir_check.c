@@ -755,6 +755,12 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
     bool seen_var = false;
     bool seen_end = false;
 
+    bool seen_extern = false;
+    bool extern_is_true = false;
+    bool extern_is_null = false;
+    bool seen_link_name = false;
+    bool body_is_null = false;
+
     for (;;) {
       if (!json_peek_non_ws(c, &ch)) {
         print_err_at(path, c, "unexpected EOF in object");
@@ -808,6 +814,7 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
             (kid == SEM2SIR_INTRINSIC_Unit && strcmp(key, "name") == 0)) {
           // Track required-field presence before consuming/parsing.
           if (strcmp(key, "name") == 0) seen_name = true;
+          if (strcmp(key, "link_name") == 0) seen_link_name = true;
           if (strcmp(key, "id") == 0) seen_id = true;
           if (strcmp(key, "lit") == 0) seen_lit = true;
 
@@ -866,6 +873,26 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
 
         // Enforce common field shapes for better boundary errors.
         if (!is_tok) {
+          if (kid == SEM2SIR_INTRINSIC_Proc && strcmp(key, "body") == 0) {
+            // Proc.body is required, but its *shape* depends on Proc.extern.
+            // Allow node-or-null here and validate the extern/body consistency after parsing.
+            char ch2 = 0;
+            if (!json_peek_non_ws(c, &ch2)) {
+              print_err_at(path, c, "unexpected EOF");
+              free(key);
+              free(k_str);
+              return false;
+            }
+            body_is_null = (ch2 == 'n' && strncmp(c->p, "null", 4) == 0);
+            if (!json_expect_node_or_null_value(c, path, "Proc.body", NULL)) {
+              free(key);
+              free(k_str);
+              return false;
+            }
+            free(key);
+            continue;
+          }
+
           if ((kid == SEM2SIR_INTRINSIC_Unit && strcmp(key, "items") == 0) ||
               (kid == SEM2SIR_INTRINSIC_Block && strcmp(key, "items") == 0) ||
               (kid == SEM2SIR_INTRINSIC_Args && strcmp(key, "items") == 0) ||
@@ -894,8 +921,7 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
             continue;
           }
 
-          if ((kid == SEM2SIR_INTRINSIC_Proc && strcmp(key, "ret") == 0) ||
-              (kid == SEM2SIR_INTRINSIC_Proc && strcmp(key, "body") == 0) ||
+            if ((kid == SEM2SIR_INTRINSIC_Proc && strcmp(key, "ret") == 0) ||
               (kid == SEM2SIR_INTRINSIC_Var && (strcmp(key, "type") == 0 || strcmp(key, "init") == 0)) ||
               (kid == SEM2SIR_INTRINSIC_VarPat && (strcmp(key, "type") == 0 || strcmp(key, "init") == 0)) ||
               (kid == SEM2SIR_INTRINSIC_ExprStmt && strcmp(key, "expr") == 0) ||
@@ -941,6 +967,7 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
           }
 
           if (kid == SEM2SIR_INTRINSIC_Proc && strcmp(key, "extern") == 0) {
+            seen_extern = true;
             char ch2 = 0;
             if (!json_peek_non_ws(c, &ch2)) {
               print_err_at(path, c, "unexpected EOF");
@@ -958,6 +985,9 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
               free(k_str);
               return false;
             }
+
+            extern_is_true = (ch2 == 't' && strncmp(c->p, "true", 4) == 0);
+            extern_is_null = (ch2 == 'n' && strncmp(c->p, "null", 4) == 0);
             if (!grit_json_skip_value(c)) {
               print_err_at(path, c, "invalid JSON value");
               free(key);
@@ -1116,6 +1146,36 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
           free(k_str);
           return false;
         }
+
+        bool is_extern = (seen_extern && extern_is_true);
+        if (is_extern) {
+          if (!body_is_null) {
+            print_err_at(path, &obj_start, "Proc.extern=true requires Proc.body to be null");
+            fprintf(stderr, "  hint: extern procs are declarations only (no body)\n");
+            free(k_str);
+            return false;
+          }
+        } else {
+          if (body_is_null) {
+            print_err_at(path, &obj_start, "Proc.body is null but Proc.extern is not true");
+            fprintf(stderr, "  hint: set Proc.extern=true for extern declarations\n");
+            free(k_str);
+            return false;
+          }
+          if (seen_link_name) {
+            print_err_at(path, &obj_start, "Proc.link_name is only allowed when Proc.extern=true");
+            free(k_str);
+            return false;
+          }
+        }
+
+        if (seen_link_name && !is_extern) {
+          print_err_at(path, &obj_start, "Proc.link_name is only allowed when Proc.extern=true");
+          free(k_str);
+          return false;
+        }
+
+        (void)extern_is_null; // null is permitted as a witness value; treated as non-extern.
       }
       if (kid == SEM2SIR_INTRINSIC_If) {
         if (!seen_cond || !seen_then) {

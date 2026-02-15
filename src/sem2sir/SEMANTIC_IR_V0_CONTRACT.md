@@ -179,11 +179,14 @@ Fields:
 - `params`: array of `Param` or `ParamPat` nodes (required; may be empty)
 - `ret`: node (required; typically `TypeRef`)
 - `decls`: array of nodes (optional)
-- `body`: `Block` (required)
+- `body`: `Block` or `null` (required; `null` only when `extern: true`)
 - `extern`: boolean (optional)
 - `link_name`: `tok` (optional)
 
-Note: v0 permits `extern`/`link_name` as witnesses for FFI naming.
+Notes:
+
+- v0 permits `extern`/`link_name` as witnesses for FFI naming.
+- If `extern` is `true`, then `body` must be `null` (declaration-only).
 
 #### `Param`
 

@@ -168,6 +168,26 @@ def assert_for_like_continue(nodes_by_id: dict, blocks_by_id: dict):
     die("did not find for-like loop where body branches to step and step branches to header")
 
 
+def assert_for_no_step_continue(nodes_by_id: dict, blocks_by_id: dict):
+    # Look for a loop header H with condbr, with then_to == body.
+    # For no-step form, continue-target is the header, so body terminator must branch to H.
+    for header_id, header_blk in blocks_by_id.items():
+        header_term = block_terminator(nodes_by_id, header_blk)
+        if not isinstance(header_term, TermCondBr):
+            continue
+
+        body_id = header_term.then_to
+        body_blk = blocks_by_id.get(body_id)
+        if not body_blk:
+            continue
+
+        body_term = block_terminator(nodes_by_id, body_blk)
+        if isinstance(body_term, TermBr) and body_term.to == header_id:
+            return
+
+    die("did not find for(no-step) loop where body branches back to header")
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 3:
         die("usage: assert_loop_continue.py <sir.jsonl> <dowhile|for|forint>")
@@ -186,6 +206,10 @@ def main(argv: list[str]) -> int:
 
     if kind in ("for", "forint"):
         assert_for_like_continue(nodes_by_id, blocks_by_id)
+        return 0
+
+    if kind == "for-nostep":
+        assert_for_no_step_continue(nodes_by_id, blocks_by_id)
         return 0
 
     die(f"unknown kind {kind!r}")

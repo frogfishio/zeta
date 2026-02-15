@@ -199,6 +199,7 @@ const char *type_load_tag(sem2sir_type_id t);
 void proc_table_free(EmitCtx *ctx) {
   for (size_t i = 0; i < ctx->proc_count; i++) {
     free(ctx->procs[i].name);
+    free(ctx->procs[i].link_name);
     free(ctx->procs[i].fn_id);
     free(ctx->procs[i].fn_type_id);
     free(ctx->procs[i].params);
@@ -241,6 +242,8 @@ bool proc_table_add(EmitCtx *ctx, const char *name, const SemTypeInfo *params, s
   ProcInfo *p = &ctx->procs[ctx->proc_count++];
   memset(p, 0, sizeof(*p));
   p->name = strdup(name);
+  p->link_name = NULL;
+  p->is_extern = false;
   p->fn_id = new_node_id(ctx);
   {
     size_t n = strlen(name);

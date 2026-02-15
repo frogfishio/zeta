@@ -299,18 +299,35 @@ bool parse_expr_call(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, 
   char *nid = new_node_id(ctx);
   fprintf(ctx->out, "{\"ir\":\"sir-v1.0\",\"k\":\"node\",\"id\":");
   emit_json_string(ctx->out, nid);
-  fprintf(ctx->out, ",\"tag\":\"call\",\"type_ref\":");
-  emit_json_string(ctx->out, tid);
-  fprintf(ctx->out, ",\"fields\":{\"callee\":{\"t\":\"ref\",\"id\":");
-  emit_json_string(ctx->out, p->fn_id);
-  fprintf(ctx->out, "},\"args\":[");
-  for (size_t i = 0; i < arg_count; i++) {
-    if (i) fprintf(ctx->out, ",");
-    fprintf(ctx->out, "{\"t\":\"ref\",\"id\":");
-    emit_json_string(ctx->out, arg_ids[i]);
+  if (p->is_extern) {
+    // Extern calls use decl.fn + call.indirect (sircc producer rule).
+    fprintf(ctx->out, ",\"tag\":\"call.indirect\",\"type_ref\":");
+    emit_json_string(ctx->out, tid);
+    fprintf(ctx->out, ",\"fields\":{\"sig\":");
+    emit_json_string(ctx->out, p->fn_type_id);
+    fprintf(ctx->out, ",\"args\":[{\"t\":\"ref\",\"id\":");
+    emit_json_string(ctx->out, p->fn_id);
     fprintf(ctx->out, "}");
+    for (size_t i = 0; i < arg_count; i++) {
+      fprintf(ctx->out, ",{\"t\":\"ref\",\"id\":");
+      emit_json_string(ctx->out, arg_ids[i]);
+      fprintf(ctx->out, "}");
+    }
+    fprintf(ctx->out, "]}}\n");
+  } else {
+    fprintf(ctx->out, ",\"tag\":\"call\",\"type_ref\":");
+    emit_json_string(ctx->out, tid);
+    fprintf(ctx->out, ",\"fields\":{\"callee\":{\"t\":\"ref\",\"id\":");
+    emit_json_string(ctx->out, p->fn_id);
+    fprintf(ctx->out, "},\"args\":[");
+    for (size_t i = 0; i < arg_count; i++) {
+      if (i) fprintf(ctx->out, ",");
+      fprintf(ctx->out, "{\"t\":\"ref\",\"id\":");
+      emit_json_string(ctx->out, arg_ids[i]);
+      fprintf(ctx->out, "}");
+    }
+    fprintf(ctx->out, "]}}\n");
   }
-  fprintf(ctx->out, "]}}\n");
 
   free(callee_name);
   free(args_json);

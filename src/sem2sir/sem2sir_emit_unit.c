@@ -68,7 +68,10 @@ bool parse_proc_fields_and_emit_fn(GritJsonCursor *c, EmitCtx *ctx) {
   bool seen_params = false;
   bool seen_ret = false;
   bool seen_body = false;
+  bool seen_extern = false;
+  bool is_extern = false;
   char *proc_name = NULL;
+  char *link_name = NULL;
   SemTypeInfo ret_ti = {0};
   SemTypeInfo *param_tis = NULL;
   char **param_names = NULL;
@@ -108,6 +111,66 @@ bool parse_proc_fields_and_emit_fn(GritJsonCursor *c, EmitCtx *ctx) {
       seen_name = true;
       if (!parse_tok_text_alloc_strict(c, ctx->in_path, &proc_name)) {
         free(key);
+        for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+        free(param_names);
+        free(param_tis);
+        free(param_node_ids);
+        return false;
+      }
+    } else if (strcmp(key, "link_name") == 0) {
+      if (seen_body) {
+        err(ctx->in_path, "Proc.link_name must appear before Proc.body");
+        free(key);
+        free(proc_name);
+        free(link_name);
+        for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+        free(param_names);
+        free(param_tis);
+        free(param_node_ids);
+        return false;
+      }
+      free(link_name);
+      link_name = NULL;
+      if (!parse_tok_text_alloc_strict(c, ctx->in_path, &link_name)) {
+        free(key);
+        free(proc_name);
+        for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+        free(param_names);
+        free(param_tis);
+        free(param_node_ids);
+        return false;
+      }
+    } else if (strcmp(key, "extern") == 0) {
+      if (seen_body) {
+        err(ctx->in_path, "Proc.extern must appear before Proc.body");
+        free(key);
+        free(proc_name);
+        free(link_name);
+        for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+        free(param_names);
+        free(param_tis);
+        free(param_node_ids);
+        return false;
+      }
+      seen_extern = true;
+      char ch2 = 0;
+      if (!json_peek_non_ws(c, &ch2)) {
+        err(ctx->in_path, "unexpected EOF in Proc.extern");
+        free(key);
+        free(proc_name);
+        free(link_name);
+        for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+        free(param_names);
+        free(param_tis);
+        free(param_node_ids);
+        return false;
+      }
+      is_extern = (ch2 == 't');
+      if (!grit_json_skip_value(c)) {
+        err(ctx->in_path, "invalid Proc.extern");
+        free(key);
+        free(proc_name);
+        free(link_name);
         for (size_t i = 0; i < param_count; i++) free(param_names[i]);
         free(param_names);
         free(param_tis);
@@ -377,6 +440,7 @@ bool parse_proc_fields_and_emit_fn(GritJsonCursor *c, EmitCtx *ctx) {
         err(ctx->in_path, "Proc.params must appear before Proc.body");
         free(key);
         free(proc_name);
+        free(link_name);
         for (size_t i = 0; i < param_count; i++) free(param_names[i]);
         free(param_names);
         free(param_tis);
@@ -388,27 +452,155 @@ bool parse_proc_fields_and_emit_fn(GritJsonCursor *c, EmitCtx *ctx) {
         err(ctx->in_path, "Proc.ret must appear before Proc.body (no implicit context)");
         free(key);
         free(proc_name);
+        free(link_name);
         for (size_t i = 0; i < param_count; i++) free(param_names[i]);
         free(param_names);
         free(param_tis);
         free(param_node_ids);
         return false;
       }
-      ctx->fn_ret = ret_ti.base;
-      if (!emit_typeinfo_if_needed(ctx, &ret_ti)) {
-        free(key);
-        free(proc_name);
-        for (size_t i = 0; i < param_count; i++) free(param_names[i]);
-        free(param_names);
-        free(param_tis);
-        free(param_node_ids);
-        return false;
-      }
+
       ProcInfo *p = proc_table_find(ctx, proc_name);
       if (!p) {
         err(ctx->in_path, "internal: Proc not found in pre-scan table");
         free(key);
         free(proc_name);
+        free(link_name);
+        for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+        free(param_names);
+        free(param_tis);
+        free(param_node_ids);
+        return false;
+      }
+
+      if (is_extern) {
+        // Extern declarations must not have a body.
+        char ch2 = 0;
+        if (!json_peek_non_ws(c, &ch2)) {
+          err(ctx->in_path, "unexpected EOF in Proc.body");
+          free(key);
+          free(proc_name);
+          free(link_name);
+          for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+          free(param_names);
+          free(param_tis);
+          free(param_node_ids);
+          return false;
+        }
+        if (ch2 != 'n') {
+          err(ctx->in_path, "Proc.extern=true requires Proc.body to be null");
+          free(key);
+          free(proc_name);
+          free(link_name);
+          for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+          free(param_names);
+          free(param_tis);
+          free(param_node_ids);
+          return false;
+        }
+        if (!grit_json_skip_value(c)) {
+          err(ctx->in_path, "invalid Proc.body");
+          free(key);
+          free(proc_name);
+          free(link_name);
+          for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+          free(param_names);
+          free(param_tis);
+          free(param_node_ids);
+          return false;
+        }
+        if (strcmp(proc_name, "main") == 0) {
+          err(ctx->in_path, "Proc 'main' cannot be extern");
+          free(key);
+          free(proc_name);
+          free(link_name);
+          for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+          free(param_names);
+          free(param_tis);
+          free(param_node_ids);
+          return false;
+        }
+
+        p->is_extern = true;
+        if (link_name) {
+          free(p->link_name);
+          p->link_name = strdup(link_name);
+          if (!p->link_name) {
+            err(ctx->in_path, "OOM copying Proc.link_name");
+            free(key);
+            free(proc_name);
+            free(link_name);
+            for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+            free(param_names);
+            free(param_tis);
+            free(param_node_ids);
+            return false;
+          }
+        }
+
+        if (p->ret_ti.base != ret_ti.base || p->ret_ti.ptr_of != ret_ti.ptr_of) {
+          err(ctx->in_path, "Proc.ret does not match prescan signature");
+          free(key);
+          free(proc_name);
+          free(link_name);
+          for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+          free(param_names);
+          free(param_tis);
+          free(param_node_ids);
+          return false;
+        }
+        if (p->param_count != param_count) {
+          err(ctx->in_path, "Proc.params arity does not match prescan signature");
+          free(key);
+          free(proc_name);
+          free(link_name);
+          for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+          free(param_names);
+          free(param_tis);
+          free(param_node_ids);
+          return false;
+        }
+        for (size_t i = 0; i < param_count; i++) {
+          if (p->params[i].base != param_tis[i].base || p->params[i].ptr_of != param_tis[i].ptr_of) {
+            err(ctx->in_path, "Proc.params do not match prescan signature");
+            free(key);
+            free(proc_name);
+            free(link_name);
+            for (size_t j = 0; j < param_count; j++) free(param_names[j]);
+            free(param_names);
+            free(param_tis);
+            free(param_node_ids);
+            return false;
+          }
+        }
+        if (!emit_fn_type_if_needed(ctx, p)) {
+          free(key);
+          free(proc_name);
+          free(link_name);
+          for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+          free(param_names);
+          free(param_tis);
+          free(param_node_ids);
+          return false;
+        }
+
+        fprintf(ctx->out, "{\"ir\":\"sir-v1.0\",\"k\":\"node\",\"id\":");
+        emit_json_string(ctx->out, p->fn_id);
+        fprintf(ctx->out, ",\"tag\":\"decl.fn\",\"type_ref\":");
+        emit_json_string(ctx->out, p->fn_type_id);
+        fprintf(ctx->out, ",\"fields\":{\"name\":");
+        emit_json_string(ctx->out, p->link_name ? p->link_name : proc_name);
+        fprintf(ctx->out, "}}\n");
+
+        free(key);
+        continue;
+      }
+
+      ctx->fn_ret = ret_ti.base;
+      if (!emit_typeinfo_if_needed(ctx, &ret_ti)) {
+        free(key);
+        free(proc_name);
+        free(link_name);
         for (size_t i = 0; i < param_count; i++) free(param_names[i]);
         free(param_names);
         free(param_tis);
@@ -419,6 +611,7 @@ bool parse_proc_fields_and_emit_fn(GritJsonCursor *c, EmitCtx *ctx) {
         err(ctx->in_path, "Proc.ret does not match prescan signature");
         free(key);
         free(proc_name);
+        free(link_name);
         for (size_t i = 0; i < param_count; i++) free(param_names[i]);
         free(param_names);
         free(param_tis);
@@ -429,6 +622,7 @@ bool parse_proc_fields_and_emit_fn(GritJsonCursor *c, EmitCtx *ctx) {
         err(ctx->in_path, "Proc.params arity does not match prescan signature");
         free(key);
         free(proc_name);
+        free(link_name);
         for (size_t i = 0; i < param_count; i++) free(param_names[i]);
         free(param_names);
         free(param_tis);
@@ -440,6 +634,7 @@ bool parse_proc_fields_and_emit_fn(GritJsonCursor *c, EmitCtx *ctx) {
           err(ctx->in_path, "Proc.params do not match prescan signature");
           free(key);
           free(proc_name);
+          free(link_name);
           for (size_t j = 0; j < param_count; j++) free(param_names[j]);
           free(param_names);
           free(param_tis);
@@ -451,6 +646,7 @@ bool parse_proc_fields_and_emit_fn(GritJsonCursor *c, EmitCtx *ctx) {
       if (!emit_fn_type_if_needed(ctx, p)) {
         free(key);
         free(proc_name);
+        free(link_name);
         for (size_t i = 0; i < param_count; i++) free(param_names[i]);
         free(param_names);
         free(param_tis);
@@ -507,6 +703,7 @@ bool parse_proc_fields_and_emit_fn(GritJsonCursor *c, EmitCtx *ctx) {
       if (!parse_block(c, ctx, &fn, false, NULL)) {
         free(key);
         free(proc_name);
+        free(link_name);
         return false;
       }
 
@@ -515,6 +712,7 @@ bool parse_proc_fields_and_emit_fn(GritJsonCursor *c, EmitCtx *ctx) {
         err(ctx->in_path, "Proc.body must end in a terminator (Return/branch); no implicit fallthrough");
         free(key);
         free(proc_name);
+        free(link_name);
         return false;
       }
 
@@ -524,6 +722,7 @@ bool parse_proc_fields_and_emit_fn(GritJsonCursor *c, EmitCtx *ctx) {
           err(ctx->in_path, "unterminated block in CFG (missing Return or branch)");
           free(key);
           free(proc_name);
+          free(link_name);
           return false;
         }
       }
@@ -591,6 +790,7 @@ bool parse_proc_fields_and_emit_fn(GritJsonCursor *c, EmitCtx *ctx) {
         err(ctx->in_path, "invalid Proc field");
         free(key);
         free(proc_name);
+        free(link_name);
         for (size_t i = 0; i < param_count; i++) free(param_names[i]);
         free(param_names);
         free(param_tis);
@@ -601,16 +801,84 @@ bool parse_proc_fields_and_emit_fn(GritJsonCursor *c, EmitCtx *ctx) {
     free(key);
   }
 
-  if (!seen_name || !seen_params || !seen_ret || !seen_body) {
-    err(ctx->in_path, "Proc requires fields: name, params, ret, body (no implicitness)");
+  if (link_name && !is_extern) {
+    err(ctx->in_path, "Proc.link_name is only allowed when Proc.extern=true");
     free(proc_name);
+    free(link_name);
     for (size_t i = 0; i < param_count; i++) free(param_names[i]);
     free(param_names);
     free(param_tis);
     free(param_node_ids);
     return false;
   }
+
+  if (!seen_name || !seen_params || !seen_ret || (!is_extern && !seen_body)) {
+    err(ctx->in_path, "Proc requires fields: name, params, ret, body (unless extern=true)");
+    free(proc_name);
+    free(link_name);
+    for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+    free(param_names);
+    free(param_tis);
+    free(param_node_ids);
+    return false;
+  }
+
+  if (seen_extern && is_extern && !seen_body) {
+    if (strcmp(proc_name, "main") == 0) {
+      err(ctx->in_path, "Proc 'main' cannot be extern");
+      free(proc_name);
+      free(link_name);
+      for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+      free(param_names);
+      free(param_tis);
+      free(param_node_ids);
+      return false;
+    }
+    ProcInfo *p = proc_table_find(ctx, proc_name);
+    if (!p) {
+      err(ctx->in_path, "internal: Proc not found in pre-scan table");
+      free(proc_name);
+      free(link_name);
+      for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+      free(param_names);
+      free(param_tis);
+      free(param_node_ids);
+      return false;
+    }
+    p->is_extern = true;
+    if (link_name) {
+      free(p->link_name);
+      p->link_name = strdup(link_name);
+      if (!p->link_name) {
+        err(ctx->in_path, "OOM copying Proc.link_name");
+        free(proc_name);
+        free(link_name);
+        for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+        free(param_names);
+        free(param_tis);
+        free(param_node_ids);
+        return false;
+      }
+    }
+    if (!emit_fn_type_if_needed(ctx, p)) {
+      free(proc_name);
+      free(link_name);
+      for (size_t i = 0; i < param_count; i++) free(param_names[i]);
+      free(param_names);
+      free(param_tis);
+      free(param_node_ids);
+      return false;
+    }
+    fprintf(ctx->out, "{\"ir\":\"sir-v1.0\",\"k\":\"node\",\"id\":");
+    emit_json_string(ctx->out, p->fn_id);
+    fprintf(ctx->out, ",\"tag\":\"decl.fn\",\"type_ref\":");
+    emit_json_string(ctx->out, p->fn_type_id);
+    fprintf(ctx->out, ",\"fields\":{\"name\":");
+    emit_json_string(ctx->out, p->link_name ? p->link_name : proc_name);
+    fprintf(ctx->out, "}}\n");
+  }
   free(proc_name);
+  free(link_name);
   for (size_t i = 0; i < param_count; i++) free(param_names[i]);
   free(param_names);
   free(param_tis);
@@ -735,6 +1003,8 @@ bool prescan_ast_for_procs(const char *buf, size_t len, EmitCtx *ctx) {
             bool seen_params = false;
             bool seen_ret = false;
             char *pname = NULL;
+            bool is_extern = false;
+            char *plink_name = NULL;
             SemTypeInfo pret_ti = {0};
             SemTypeInfo *pparams = NULL;
             size_t pparam_count = 0;
@@ -768,6 +1038,35 @@ bool prescan_ast_for_procs(const char *buf, size_t len, EmitCtx *ctx) {
                 if (!parse_tok_text_alloc_strict(&c, ctx->in_path, &pname)) {
                   free(pkey);
                   free(pparams);
+                  free(plink_name);
+                  return false;
+                }
+              } else if (strcmp(pkey, "link_name") == 0) {
+                free(plink_name);
+                plink_name = NULL;
+                if (!parse_tok_text_alloc_strict(&c, ctx->in_path, &plink_name)) {
+                  free(pkey);
+                  free(pname);
+                  free(pparams);
+                  return false;
+                }
+              } else if (strcmp(pkey, "extern") == 0) {
+                char ch2 = 0;
+                if (!json_peek_non_ws(&c, &ch2)) {
+                  err(ctx->in_path, "unexpected EOF in Proc.extern (prescan)");
+                  free(pkey);
+                  free(pname);
+                  free(pparams);
+                  free(plink_name);
+                  return false;
+                }
+                is_extern = (ch2 == 't');
+                if (!grit_json_skip_value(&c)) {
+                  err(ctx->in_path, "invalid Proc.extern (prescan)");
+                  free(pkey);
+                  free(pname);
+                  free(pparams);
+                  free(plink_name);
                   return false;
                 }
               } else if (strcmp(pkey, "params") == 0) {
@@ -777,6 +1076,7 @@ bool prescan_ast_for_procs(const char *buf, size_t len, EmitCtx *ctx) {
                   free(pkey);
                   free(pname);
                   free(pparams);
+                  free(plink_name);
                   return false;
                 }
                 if (!json_peek_non_ws(&c, &ch)) {
@@ -847,6 +1147,7 @@ bool prescan_ast_for_procs(const char *buf, size_t len, EmitCtx *ctx) {
                           free(pkey);
                           free(pname);
                           free(pparams);
+                          free(plink_name);
                           return false;
                         }
                       } else if (strcmp(ppkey, "name") == 0) {
@@ -856,6 +1157,7 @@ bool prescan_ast_for_procs(const char *buf, size_t len, EmitCtx *ctx) {
                           free(pkey);
                           free(pname);
                           free(pparams);
+                          free(plink_name);
                           return false;
                         }
                         free(tmp_name);
@@ -868,6 +1170,7 @@ bool prescan_ast_for_procs(const char *buf, size_t len, EmitCtx *ctx) {
                           free(pkey);
                           free(pname);
                           free(pparams);
+                          free(plink_name);
                           return false;
                         }
                       }
@@ -878,6 +1181,7 @@ bool prescan_ast_for_procs(const char *buf, size_t len, EmitCtx *ctx) {
                       free(pkey);
                       free(pname);
                       free(pparams);
+                      free(plink_name);
                       return false;
                     }
 
@@ -889,6 +1193,7 @@ bool prescan_ast_for_procs(const char *buf, size_t len, EmitCtx *ctx) {
                         free(pkey);
                         free(pname);
                         free(pparams);
+                        free(plink_name);
                         return false;
                       }
                       pparams = next;
@@ -901,6 +1206,7 @@ bool prescan_ast_for_procs(const char *buf, size_t len, EmitCtx *ctx) {
                       free(pkey);
                       free(pname);
                       free(pparams);
+                      free(plink_name);
                       return false;
                     }
                     if (ch == ',') {
@@ -912,6 +1218,7 @@ bool prescan_ast_for_procs(const char *buf, size_t len, EmitCtx *ctx) {
                     free(pkey);
                     free(pname);
                     free(pparams);
+                    free(plink_name);
                     return false;
                   }
                 }
@@ -923,6 +1230,7 @@ bool prescan_ast_for_procs(const char *buf, size_t len, EmitCtx *ctx) {
                   free(pkey);
                   free(pname);
                   free(pparams);
+                  free(plink_name);
                   return false;
                 }
                 if (ch == 'n') {
@@ -930,12 +1238,14 @@ bool prescan_ast_for_procs(const char *buf, size_t len, EmitCtx *ctx) {
                   free(pkey);
                   free(pname);
                   free(pparams);
+                  free(plink_name);
                   return false;
                 }
                 if (!parse_type_typeinfo(&c, ctx, &pret_ti)) {
                   free(pkey);
                   free(pname);
                   free(pparams);
+                  free(plink_name);
                   return false;
                 }
               } else {
@@ -944,6 +1254,7 @@ bool prescan_ast_for_procs(const char *buf, size_t len, EmitCtx *ctx) {
                   free(pkey);
                   free(pname);
                   free(pparams);
+                  free(plink_name);
                   return false;
                 }
               }
@@ -955,16 +1266,45 @@ bool prescan_ast_for_procs(const char *buf, size_t len, EmitCtx *ctx) {
               err(ctx->in_path, "Proc requires fields: name, params, ret (prescan)");
               free(pname);
               free(pparams);
+              free(plink_name);
+              return false;
+            }
+            if (is_extern && strcmp(pname, "main") == 0) {
+              err(ctx->in_path, "Proc 'main' cannot be extern");
+              free(pname);
+              free(pparams);
+              free(plink_name);
               return false;
             }
             if (strcmp(pname, "main") == 0) saw_main = true;
             if (!proc_table_add(ctx, pname, pparams, pparam_count, pret_ti)) {
               free(pname);
               free(pparams);
+              free(plink_name);
               return false;
+            }
+            ProcInfo *p = proc_table_find(ctx, pname);
+            if (!p) {
+              err(ctx->in_path, "internal: Proc not found after add (prescan)");
+              free(pname);
+              free(pparams);
+              free(plink_name);
+              return false;
+            }
+            p->is_extern = is_extern;
+            if (plink_name) {
+              p->link_name = strdup(plink_name);
+              if (!p->link_name) {
+                err(ctx->in_path, "OOM copying Proc.link_name (prescan)");
+                free(pname);
+                free(pparams);
+                free(plink_name);
+                return false;
+              }
             }
             free(pname);
             free(pparams);
+            free(plink_name);
           }
 
           if (!json_peek_non_ws(&c, &ch)) {

@@ -1,0 +1,20 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"I64": "i64", "Void": "void"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "ext_add2"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "i64"}},
+        "extern": true,
+        "body": {"k": "Block", "items": []}
+      }
+    ]
+  }
+}
