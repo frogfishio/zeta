@@ -62,6 +62,14 @@ bool parse_expr(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirEx
     free(k);
     return parse_expr_f32_from_i32_s(c, ctx, expected, out);
   }
+  if (strcmp(k, "F64FromI32U") == 0) {
+    free(k);
+    return parse_expr_f64_from_i32_u(c, ctx, expected, out);
+  }
+  if (strcmp(k, "F32FromI32U") == 0) {
+    free(k);
+    return parse_expr_f32_from_i32_u(c, ctx, expected, out);
+  }
   if (strcmp(k, "TruncSatI32FromF64S") == 0) {
     free(k);
     return parse_expr_trunc_sat_i32_from_f64_s(c, ctx, expected, out);
@@ -69,6 +77,46 @@ bool parse_expr(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirEx
   if (strcmp(k, "TruncSatI32FromF32S") == 0) {
     free(k);
     return parse_expr_trunc_sat_i32_from_f32_s(c, ctx, expected, out);
+  }
+  if (strcmp(k, "TruncSatI32FromF64U") == 0) {
+    free(k);
+    return parse_expr_trunc_sat_i32_from_f64_u(c, ctx, expected, out);
+  }
+  if (strcmp(k, "TruncSatI32FromF32U") == 0) {
+    free(k);
+    return parse_expr_trunc_sat_i32_from_f32_u(c, ctx, expected, out);
+  }
+  if (strcmp(k, "F64FromI64S") == 0) {
+    free(k);
+    return parse_expr_f64_from_i64_s(c, ctx, expected, out);
+  }
+  if (strcmp(k, "F32FromI64S") == 0) {
+    free(k);
+    return parse_expr_f32_from_i64_s(c, ctx, expected, out);
+  }
+  if (strcmp(k, "F64FromI64U") == 0) {
+    free(k);
+    return parse_expr_f64_from_i64_u(c, ctx, expected, out);
+  }
+  if (strcmp(k, "F32FromI64U") == 0) {
+    free(k);
+    return parse_expr_f32_from_i64_u(c, ctx, expected, out);
+  }
+  if (strcmp(k, "TruncSatI64FromF64S") == 0) {
+    free(k);
+    return parse_expr_trunc_sat_i64_from_f64_s(c, ctx, expected, out);
+  }
+  if (strcmp(k, "TruncSatI64FromF32S") == 0) {
+    free(k);
+    return parse_expr_trunc_sat_i64_from_f32_s(c, ctx, expected, out);
+  }
+  if (strcmp(k, "TruncSatI64FromF64U") == 0) {
+    free(k);
+    return parse_expr_trunc_sat_i64_from_f64_u(c, ctx, expected, out);
+  }
+  if (strcmp(k, "TruncSatI64FromF32U") == 0) {
+    free(k);
+    return parse_expr_trunc_sat_i64_from_f32_u(c, ctx, expected, out);
   }
   if (strcmp(k, "PtrFromI64") == 0) {
     free(k);

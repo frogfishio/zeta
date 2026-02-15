@@ -669,8 +669,20 @@ static bool is_allowed_node_key(sem2sir_intrinsic_id kid, const char *key) {
   case SEM2SIR_INTRINSIC_TruncI32FromI64:
   case SEM2SIR_INTRINSIC_F64FromI32S:
   case SEM2SIR_INTRINSIC_F32FromI32S:
+  case SEM2SIR_INTRINSIC_F64FromI32U:
+  case SEM2SIR_INTRINSIC_F32FromI32U:
   case SEM2SIR_INTRINSIC_TruncSatI32FromF64S:
   case SEM2SIR_INTRINSIC_TruncSatI32FromF32S:
+  case SEM2SIR_INTRINSIC_TruncSatI32FromF64U:
+  case SEM2SIR_INTRINSIC_TruncSatI32FromF32U:
+  case SEM2SIR_INTRINSIC_F64FromI64S:
+  case SEM2SIR_INTRINSIC_F32FromI64S:
+  case SEM2SIR_INTRINSIC_F64FromI64U:
+  case SEM2SIR_INTRINSIC_F32FromI64U:
+  case SEM2SIR_INTRINSIC_TruncSatI64FromF64S:
+  case SEM2SIR_INTRINSIC_TruncSatI64FromF32S:
+  case SEM2SIR_INTRINSIC_TruncSatI64FromF64U:
+  case SEM2SIR_INTRINSIC_TruncSatI64FromF32U:
   case SEM2SIR_INTRINSIC_PtrFromI64:
   case SEM2SIR_INTRINSIC_I64FromPtr:
     return strcmp(key, "expr") == 0;
@@ -1347,9 +1359,15 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
       }
        if ((kid == SEM2SIR_INTRINSIC_ZExtI64FromI32 || kid == SEM2SIR_INTRINSIC_SExtI64FromI32 ||
          kid == SEM2SIR_INTRINSIC_TruncI32FromI64 || kid == SEM2SIR_INTRINSIC_F64FromI32S ||
-         kid == SEM2SIR_INTRINSIC_F32FromI32S || kid == SEM2SIR_INTRINSIC_TruncSatI32FromF64S ||
-           kid == SEM2SIR_INTRINSIC_TruncSatI32FromF32S || kid == SEM2SIR_INTRINSIC_PtrFromI64 ||
-           kid == SEM2SIR_INTRINSIC_I64FromPtr) &&
+         kid == SEM2SIR_INTRINSIC_F32FromI32S || kid == SEM2SIR_INTRINSIC_F64FromI32U ||
+         kid == SEM2SIR_INTRINSIC_F32FromI32U || kid == SEM2SIR_INTRINSIC_TruncSatI32FromF64S ||
+         kid == SEM2SIR_INTRINSIC_TruncSatI32FromF32S || kid == SEM2SIR_INTRINSIC_TruncSatI32FromF64U ||
+         kid == SEM2SIR_INTRINSIC_TruncSatI32FromF32U || kid == SEM2SIR_INTRINSIC_F64FromI64S ||
+         kid == SEM2SIR_INTRINSIC_F32FromI64S || kid == SEM2SIR_INTRINSIC_F64FromI64U ||
+         kid == SEM2SIR_INTRINSIC_F32FromI64U || kid == SEM2SIR_INTRINSIC_TruncSatI64FromF64S ||
+         kid == SEM2SIR_INTRINSIC_TruncSatI64FromF32S || kid == SEM2SIR_INTRINSIC_TruncSatI64FromF64U ||
+         kid == SEM2SIR_INTRINSIC_TruncSatI64FromF32U || kid == SEM2SIR_INTRINSIC_PtrFromI64 ||
+         kid == SEM2SIR_INTRINSIC_I64FromPtr) &&
           !seen_expr) {
         char msg[128];
         snprintf(msg, sizeof(msg), "%s requires field: expr", k_str);

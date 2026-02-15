@@ -206,8 +206,20 @@ static const entry INTRINSIC_TABLE[] = {
     {"TruncI32FromI64", 15, SEM2SIR_INTRINSIC_TruncI32FromI64},
     {"F64FromI32S", 11, SEM2SIR_INTRINSIC_F64FromI32S},
     {"F32FromI32S", 11, SEM2SIR_INTRINSIC_F32FromI32S},
+    {"F64FromI32U", 11, SEM2SIR_INTRINSIC_F64FromI32U},
+    {"F32FromI32U", 11, SEM2SIR_INTRINSIC_F32FromI32U},
     {"TruncSatI32FromF64S", 19, SEM2SIR_INTRINSIC_TruncSatI32FromF64S},
     {"TruncSatI32FromF32S", 19, SEM2SIR_INTRINSIC_TruncSatI32FromF32S},
+    {"TruncSatI32FromF64U", 19, SEM2SIR_INTRINSIC_TruncSatI32FromF64U},
+    {"TruncSatI32FromF32U", 19, SEM2SIR_INTRINSIC_TruncSatI32FromF32U},
+    {"F64FromI64S", 11, SEM2SIR_INTRINSIC_F64FromI64S},
+    {"F32FromI64S", 11, SEM2SIR_INTRINSIC_F32FromI64S},
+    {"F64FromI64U", 11, SEM2SIR_INTRINSIC_F64FromI64U},
+    {"F32FromI64U", 11, SEM2SIR_INTRINSIC_F32FromI64U},
+    {"TruncSatI64FromF64S", 19, SEM2SIR_INTRINSIC_TruncSatI64FromF64S},
+    {"TruncSatI64FromF32S", 19, SEM2SIR_INTRINSIC_TruncSatI64FromF32S},
+    {"TruncSatI64FromF64U", 19, SEM2SIR_INTRINSIC_TruncSatI64FromF64U},
+    {"TruncSatI64FromF32U", 19, SEM2SIR_INTRINSIC_TruncSatI64FromF32U},
     {"PtrFromI64", 10, SEM2SIR_INTRINSIC_PtrFromI64},
     {"I64FromPtr", 10, SEM2SIR_INTRINSIC_I64FromPtr},
     {"True", 4, SEM2SIR_INTRINSIC_True},
@@ -311,10 +323,34 @@ const char *sem2sir_intrinsic_to_string(sem2sir_intrinsic_id k) {
     return "F64FromI32S";
   case SEM2SIR_INTRINSIC_F32FromI32S:
     return "F32FromI32S";
+  case SEM2SIR_INTRINSIC_F64FromI32U:
+    return "F64FromI32U";
+  case SEM2SIR_INTRINSIC_F32FromI32U:
+    return "F32FromI32U";
   case SEM2SIR_INTRINSIC_TruncSatI32FromF64S:
     return "TruncSatI32FromF64S";
   case SEM2SIR_INTRINSIC_TruncSatI32FromF32S:
     return "TruncSatI32FromF32S";
+  case SEM2SIR_INTRINSIC_TruncSatI32FromF64U:
+    return "TruncSatI32FromF64U";
+  case SEM2SIR_INTRINSIC_TruncSatI32FromF32U:
+    return "TruncSatI32FromF32U";
+  case SEM2SIR_INTRINSIC_F64FromI64S:
+    return "F64FromI64S";
+  case SEM2SIR_INTRINSIC_F32FromI64S:
+    return "F32FromI64S";
+  case SEM2SIR_INTRINSIC_F64FromI64U:
+    return "F64FromI64U";
+  case SEM2SIR_INTRINSIC_F32FromI64U:
+    return "F32FromI64U";
+  case SEM2SIR_INTRINSIC_TruncSatI64FromF64S:
+    return "TruncSatI64FromF64S";
+  case SEM2SIR_INTRINSIC_TruncSatI64FromF32S:
+    return "TruncSatI64FromF32S";
+  case SEM2SIR_INTRINSIC_TruncSatI64FromF64U:
+    return "TruncSatI64FromF64U";
+  case SEM2SIR_INTRINSIC_TruncSatI64FromF32U:
+    return "TruncSatI64FromF32U";
   case SEM2SIR_INTRINSIC_PtrFromI64:
     return "PtrFromI64";
   case SEM2SIR_INTRINSIC_I64FromPtr:

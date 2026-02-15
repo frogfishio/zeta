@@ -1,0 +1,36 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"I32": "i32", "U32": "u32", "F32": "f32", "Void": "void"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "x"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "u32"}},
+              "init": {"k": "Int", "lit": {"k": "tok", "text": "1"}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "not_a_f32"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
+              "init": {"k": "F32FromI32U", "expr": {"k": "Name", "id": {"k": "tok", "text": "x"}}}
+            },
+            {"k": "Return", "value": {"k": "Int", "lit": {"k": "tok", "text": "0"}}}
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"U32": "u32", "F64": "f64", "Void": "void"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "f64"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "a"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "f64"}},
+              "init": {"k": "F64", "bits": {"k": "tok", "text": "0x3ff0000000000000"}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "not_a_u32"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "f64"}},
+              "init": {"k": "TruncSatI32FromF64U", "expr": {"k": "Name", "id": {"k": "tok", "text": "a"}}}
+            },
+            {"k": "Return", "value": {"k": "F64", "bits": {"k": "tok", "text": "0x3ff0000000000000"}}}
+          ]
+        }
+      }
+    ]
+  }
+}

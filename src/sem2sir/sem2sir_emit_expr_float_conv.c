@@ -68,6 +68,71 @@ static bool emit_conv_unary(EmitCtx *ctx, const char *tag, sem2sir_type_id dst_t
   return true;
 }
 
+static bool parse_intrinsic_expr_field(GritJsonCursor *c, EmitCtx *ctx, const char *what, sem2sir_type_id inner_expected,
+                                      SirExpr *out_inner) {
+  bool seen_expr = false;
+  char ch = 0;
+
+  out_inner->id = NULL;
+  out_inner->type = SEM2SIR_TYPE_INVALID;
+  out_inner->ptr_of = SEM2SIR_TYPE_INVALID;
+  out_inner->sir_type_id = NULL;
+
+  for (;;) {
+    if (!json_peek_non_ws(c, &ch)) {
+      err(ctx->in_path, "unexpected EOF in intrinsic expr");
+      free(out_inner->id);
+      return false;
+    }
+    if (ch == '}') {
+      c->p++;
+      break;
+    }
+    if (ch != ',') {
+      err(ctx->in_path, "expected ',' or '}' in intrinsic expr");
+      free(out_inner->id);
+      return false;
+    }
+    c->p++;
+
+    char *key = NULL;
+    if (!json_expect_key(c, &key)) {
+      err(ctx->in_path, "invalid intrinsic key");
+      free(out_inner->id);
+      return false;
+    }
+
+    if (strcmp(key, "expr") == 0) {
+      seen_expr = true;
+      if (!parse_expr(c, ctx, inner_expected, out_inner)) {
+        free(key);
+        free(out_inner->id);
+        return false;
+      }
+    } else {
+      if (!grit_json_skip_value(c)) {
+        err(ctx->in_path, "invalid intrinsic field");
+        free(key);
+        free(out_inner->id);
+        return false;
+      }
+    }
+
+    free(key);
+  }
+
+  if (!seen_expr || !out_inner->id) {
+    char msg[128];
+    snprintf(msg, sizeof(msg), "%s requires field: expr", what);
+    err(ctx->in_path, msg);
+    free(out_inner->id);
+    out_inner->id = NULL;
+    return false;
+  }
+
+  return true;
+}
+
 bool parse_expr_f64(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out) {
   if (expected != SEM2SIR_TYPE_F64) {
     err(ctx->in_path, "F64 literal must be used in f64 context (no implicit casts)");
@@ -734,6 +799,282 @@ bool parse_expr_trunc_sat_i32_from_f32_s(GritJsonCursor *c, EmitCtx *ctx, sem2si
   out->type = SEM2SIR_TYPE_I32;
   out->ptr_of = SEM2SIR_TYPE_INVALID;
   out->sir_type_id = sir_type_id_for(SEM2SIR_TYPE_I32);
+  return true;
+}
+
+bool parse_expr_f64_from_i32_u(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out) {
+  if (expected != SEM2SIR_TYPE_F64) {
+    err(ctx->in_path, "F64FromI32U must be used in f64 context");
+    return false;
+  }
+
+  SirExpr inner = {0};
+  if (!parse_intrinsic_expr_field(c, ctx, "F64FromI32U", SEM2SIR_TYPE_U32, &inner))
+    return false;
+
+  char *id = NULL;
+  bool ok = emit_conv_unary(ctx, "f64.from_i32.u", SEM2SIR_TYPE_F64, inner.id, &id);
+  free(inner.id);
+  if (!ok)
+    return false;
+
+  out->id = id;
+  out->type = SEM2SIR_TYPE_F64;
+  out->ptr_of = SEM2SIR_TYPE_INVALID;
+  out->sir_type_id = sir_type_id_for(SEM2SIR_TYPE_F64);
+  return true;
+}
+
+bool parse_expr_f32_from_i32_u(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out) {
+  if (expected != SEM2SIR_TYPE_F32) {
+    err(ctx->in_path, "F32FromI32U must be used in f32 context");
+    return false;
+  }
+
+  SirExpr inner = {0};
+  if (!parse_intrinsic_expr_field(c, ctx, "F32FromI32U", SEM2SIR_TYPE_U32, &inner))
+    return false;
+
+  char *id = NULL;
+  bool ok = emit_conv_unary(ctx, "f32.from_i32.u", SEM2SIR_TYPE_F32, inner.id, &id);
+  free(inner.id);
+  if (!ok)
+    return false;
+
+  out->id = id;
+  out->type = SEM2SIR_TYPE_F32;
+  out->ptr_of = SEM2SIR_TYPE_INVALID;
+  out->sir_type_id = sir_type_id_for(SEM2SIR_TYPE_F32);
+  return true;
+}
+
+bool parse_expr_trunc_sat_i32_from_f64_u(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out) {
+  if (expected != SEM2SIR_TYPE_U32) {
+    err(ctx->in_path, "TruncSatI32FromF64U must be used in u32 context");
+    return false;
+  }
+
+  SirExpr inner = {0};
+  if (!parse_intrinsic_expr_field(c, ctx, "TruncSatI32FromF64U", SEM2SIR_TYPE_F64, &inner))
+    return false;
+
+  char *id = NULL;
+  bool ok = emit_conv_unary(ctx, "i32.trunc_sat_f64.u", SEM2SIR_TYPE_U32, inner.id, &id);
+  free(inner.id);
+  if (!ok)
+    return false;
+
+  out->id = id;
+  out->type = SEM2SIR_TYPE_U32;
+  out->ptr_of = SEM2SIR_TYPE_INVALID;
+  out->sir_type_id = sir_type_id_for(SEM2SIR_TYPE_U32);
+  return true;
+}
+
+bool parse_expr_trunc_sat_i32_from_f32_u(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out) {
+  if (expected != SEM2SIR_TYPE_U32) {
+    err(ctx->in_path, "TruncSatI32FromF32U must be used in u32 context");
+    return false;
+  }
+
+  SirExpr inner = {0};
+  if (!parse_intrinsic_expr_field(c, ctx, "TruncSatI32FromF32U", SEM2SIR_TYPE_F32, &inner))
+    return false;
+
+  char *id = NULL;
+  bool ok = emit_conv_unary(ctx, "i32.trunc_sat_f32.u", SEM2SIR_TYPE_U32, inner.id, &id);
+  free(inner.id);
+  if (!ok)
+    return false;
+
+  out->id = id;
+  out->type = SEM2SIR_TYPE_U32;
+  out->ptr_of = SEM2SIR_TYPE_INVALID;
+  out->sir_type_id = sir_type_id_for(SEM2SIR_TYPE_U32);
+  return true;
+}
+
+bool parse_expr_f64_from_i64_s(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out) {
+  if (expected != SEM2SIR_TYPE_F64) {
+    err(ctx->in_path, "F64FromI64S must be used in f64 context");
+    return false;
+  }
+
+  SirExpr inner = {0};
+  if (!parse_intrinsic_expr_field(c, ctx, "F64FromI64S", SEM2SIR_TYPE_I64, &inner))
+    return false;
+
+  char *id = NULL;
+  bool ok = emit_conv_unary(ctx, "f64.from_i64.s", SEM2SIR_TYPE_F64, inner.id, &id);
+  free(inner.id);
+  if (!ok)
+    return false;
+
+  out->id = id;
+  out->type = SEM2SIR_TYPE_F64;
+  out->ptr_of = SEM2SIR_TYPE_INVALID;
+  out->sir_type_id = sir_type_id_for(SEM2SIR_TYPE_F64);
+  return true;
+}
+
+bool parse_expr_f32_from_i64_s(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out) {
+  if (expected != SEM2SIR_TYPE_F32) {
+    err(ctx->in_path, "F32FromI64S must be used in f32 context");
+    return false;
+  }
+
+  SirExpr inner = {0};
+  if (!parse_intrinsic_expr_field(c, ctx, "F32FromI64S", SEM2SIR_TYPE_I64, &inner))
+    return false;
+
+  char *id = NULL;
+  bool ok = emit_conv_unary(ctx, "f32.from_i64.s", SEM2SIR_TYPE_F32, inner.id, &id);
+  free(inner.id);
+  if (!ok)
+    return false;
+
+  out->id = id;
+  out->type = SEM2SIR_TYPE_F32;
+  out->ptr_of = SEM2SIR_TYPE_INVALID;
+  out->sir_type_id = sir_type_id_for(SEM2SIR_TYPE_F32);
+  return true;
+}
+
+bool parse_expr_f64_from_i64_u(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out) {
+  if (expected != SEM2SIR_TYPE_F64) {
+    err(ctx->in_path, "F64FromI64U must be used in f64 context");
+    return false;
+  }
+
+  SirExpr inner = {0};
+  if (!parse_intrinsic_expr_field(c, ctx, "F64FromI64U", SEM2SIR_TYPE_U64, &inner))
+    return false;
+
+  char *id = NULL;
+  bool ok = emit_conv_unary(ctx, "f64.from_i64.u", SEM2SIR_TYPE_F64, inner.id, &id);
+  free(inner.id);
+  if (!ok)
+    return false;
+
+  out->id = id;
+  out->type = SEM2SIR_TYPE_F64;
+  out->ptr_of = SEM2SIR_TYPE_INVALID;
+  out->sir_type_id = sir_type_id_for(SEM2SIR_TYPE_F64);
+  return true;
+}
+
+bool parse_expr_f32_from_i64_u(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out) {
+  if (expected != SEM2SIR_TYPE_F32) {
+    err(ctx->in_path, "F32FromI64U must be used in f32 context");
+    return false;
+  }
+
+  SirExpr inner = {0};
+  if (!parse_intrinsic_expr_field(c, ctx, "F32FromI64U", SEM2SIR_TYPE_U64, &inner))
+    return false;
+
+  char *id = NULL;
+  bool ok = emit_conv_unary(ctx, "f32.from_i64.u", SEM2SIR_TYPE_F32, inner.id, &id);
+  free(inner.id);
+  if (!ok)
+    return false;
+
+  out->id = id;
+  out->type = SEM2SIR_TYPE_F32;
+  out->ptr_of = SEM2SIR_TYPE_INVALID;
+  out->sir_type_id = sir_type_id_for(SEM2SIR_TYPE_F32);
+  return true;
+}
+
+bool parse_expr_trunc_sat_i64_from_f64_s(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out) {
+  if (expected != SEM2SIR_TYPE_I64) {
+    err(ctx->in_path, "TruncSatI64FromF64S must be used in i64 context");
+    return false;
+  }
+
+  SirExpr inner = {0};
+  if (!parse_intrinsic_expr_field(c, ctx, "TruncSatI64FromF64S", SEM2SIR_TYPE_F64, &inner))
+    return false;
+
+  char *id = NULL;
+  bool ok = emit_conv_unary(ctx, "i64.trunc_sat_f64.s", SEM2SIR_TYPE_I64, inner.id, &id);
+  free(inner.id);
+  if (!ok)
+    return false;
+
+  out->id = id;
+  out->type = SEM2SIR_TYPE_I64;
+  out->ptr_of = SEM2SIR_TYPE_INVALID;
+  out->sir_type_id = sir_type_id_for(SEM2SIR_TYPE_I64);
+  return true;
+}
+
+bool parse_expr_trunc_sat_i64_from_f32_s(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out) {
+  if (expected != SEM2SIR_TYPE_I64) {
+    err(ctx->in_path, "TruncSatI64FromF32S must be used in i64 context");
+    return false;
+  }
+
+  SirExpr inner = {0};
+  if (!parse_intrinsic_expr_field(c, ctx, "TruncSatI64FromF32S", SEM2SIR_TYPE_F32, &inner))
+    return false;
+
+  char *id = NULL;
+  bool ok = emit_conv_unary(ctx, "i64.trunc_sat_f32.s", SEM2SIR_TYPE_I64, inner.id, &id);
+  free(inner.id);
+  if (!ok)
+    return false;
+
+  out->id = id;
+  out->type = SEM2SIR_TYPE_I64;
+  out->ptr_of = SEM2SIR_TYPE_INVALID;
+  out->sir_type_id = sir_type_id_for(SEM2SIR_TYPE_I64);
+  return true;
+}
+
+bool parse_expr_trunc_sat_i64_from_f64_u(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out) {
+  if (expected != SEM2SIR_TYPE_U64) {
+    err(ctx->in_path, "TruncSatI64FromF64U must be used in u64 context");
+    return false;
+  }
+
+  SirExpr inner = {0};
+  if (!parse_intrinsic_expr_field(c, ctx, "TruncSatI64FromF64U", SEM2SIR_TYPE_F64, &inner))
+    return false;
+
+  char *id = NULL;
+  bool ok = emit_conv_unary(ctx, "i64.trunc_sat_f64.u", SEM2SIR_TYPE_U64, inner.id, &id);
+  free(inner.id);
+  if (!ok)
+    return false;
+
+  out->id = id;
+  out->type = SEM2SIR_TYPE_U64;
+  out->ptr_of = SEM2SIR_TYPE_INVALID;
+  out->sir_type_id = sir_type_id_for(SEM2SIR_TYPE_U64);
+  return true;
+}
+
+bool parse_expr_trunc_sat_i64_from_f32_u(GritJsonCursor *c, EmitCtx *ctx, sem2sir_type_id expected, SirExpr *out) {
+  if (expected != SEM2SIR_TYPE_U64) {
+    err(ctx->in_path, "TruncSatI64FromF32U must be used in u64 context");
+    return false;
+  }
+
+  SirExpr inner = {0};
+  if (!parse_intrinsic_expr_field(c, ctx, "TruncSatI64FromF32U", SEM2SIR_TYPE_F32, &inner))
+    return false;
+
+  char *id = NULL;
+  bool ok = emit_conv_unary(ctx, "i64.trunc_sat_f32.u", SEM2SIR_TYPE_U64, inner.id, &id);
+  free(inner.id);
+  if (!ok)
+    return false;
+
+  out->id = id;
+  out->type = SEM2SIR_TYPE_U64;
+  out->ptr_of = SEM2SIR_TYPE_INVALID;
+  out->sir_type_id = sir_type_id_for(SEM2SIR_TYPE_U64);
   return true;
 }
 

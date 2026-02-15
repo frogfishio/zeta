@@ -1,7 +1,7 @@
 {
   "diagnostics": [],
   "meta": {
-    "types": {"I32": "i32", "I64": "i64", "F32": "f32", "F64": "f64", "Void": "void"},
+    "types": {"I32": "i32", "I64": "i64", "U32": "u32", "U64": "u64", "F32": "f32", "F64": "f64", "Void": "void"},
     "ops": {}
   },
   "ast": {
@@ -48,9 +48,27 @@
             },
             {
               "k": "Var",
+              "name": {"k": "tok", "text": "ux"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "u32"}},
+              "init": {"k": "Int", "lit": {"k": "tok", "text": "1"}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "uxf64"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "f64"}},
+              "init": {"k": "F64FromI32U", "expr": {"k": "Name", "id": {"k": "tok", "text": "ux"}}}
+            },
+            {
+              "k": "Var",
               "name": {"k": "tok", "text": "xback"},
               "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
               "init": {"k": "TruncSatI32FromF64S", "expr": {"k": "Name", "id": {"k": "tok", "text": "xf64"}}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "uxback"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "u32"}},
+              "init": {"k": "TruncSatI32FromF64U", "expr": {"k": "Name", "id": {"k": "tok", "text": "uxf64"}}}
             },
             {
               "k": "Var",
@@ -60,15 +78,81 @@
             },
             {
               "k": "Var",
+              "name": {"k": "tok", "text": "uxf32"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "f32"}},
+              "init": {"k": "F32FromI32U", "expr": {"k": "Name", "id": {"k": "tok", "text": "ux"}}}
+            },
+            {
+              "k": "Var",
               "name": {"k": "tok", "text": "xback32"},
               "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
               "init": {"k": "TruncSatI32FromF32S", "expr": {"k": "Name", "id": {"k": "tok", "text": "xf32"}}}
             },
             {
               "k": "Var",
+              "name": {"k": "tok", "text": "uxback32"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "u32"}},
+              "init": {"k": "TruncSatI32FromF32U", "expr": {"k": "Name", "id": {"k": "tok", "text": "uxf32"}}}
+            },
+            {
+              "k": "Var",
               "name": {"k": "tok", "text": "p"},
               "type": {"k": "TypeRef", "name": {"k": "tok", "text": "ptr"}},
               "init": {"k": "PtrFromI64", "expr": {"k": "Name", "id": {"k": "tok", "text": "y"}}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "yf64"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "f64"}},
+              "init": {"k": "F64FromI64S", "expr": {"k": "Name", "id": {"k": "tok", "text": "y"}}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "yf32"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "f32"}},
+              "init": {"k": "F32FromI64S", "expr": {"k": "Name", "id": {"k": "tok", "text": "y"}}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "ybackf64"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i64"}},
+              "init": {"k": "TruncSatI64FromF64S", "expr": {"k": "Name", "id": {"k": "tok", "text": "yf64"}}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "ybackf32"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i64"}},
+              "init": {"k": "TruncSatI64FromF32S", "expr": {"k": "Name", "id": {"k": "tok", "text": "yf32"}}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "uy"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "u64"}},
+              "init": {"k": "Int", "lit": {"k": "tok", "text": "1"}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "uyf64"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "f64"}},
+              "init": {"k": "F64FromI64U", "expr": {"k": "Name", "id": {"k": "tok", "text": "uy"}}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "uyf32"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "f32"}},
+              "init": {"k": "F32FromI64U", "expr": {"k": "Name", "id": {"k": "tok", "text": "uy"}}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "uybackf64"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "u64"}},
+              "init": {"k": "TruncSatI64FromF64U", "expr": {"k": "Name", "id": {"k": "tok", "text": "uyf64"}}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "uybackf32"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "u64"}},
+              "init": {"k": "TruncSatI64FromF32U", "expr": {"k": "Name", "id": {"k": "tok", "text": "uyf32"}}}
             },
             {
               "k": "Var",
