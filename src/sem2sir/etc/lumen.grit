@@ -1,0 +1,629 @@
+;; Lumen v1.0-draft - minimal semantics-bearing spec
+;;
+;; Scope: parse + intrinsic-AST-lower a small subset sufficient for the
+;; Lumen example fixtures.
+;;
+;; Constraints:
+;; - No nested block comments; only line and block comments.
+;; - Grammar favors deterministic, non-left-recursive operator handling.
+
+module Lumen;
+
+backend {
+  prefer: LALR;
+  fallback: Earley;
+  incremental: false;
+}
+
+tokens {
+  trivia keep WS = /[ \t\r\n]+/;
+  trivia keep LineComment = /\/\/[\x00-\x09\x0B-\x0C\x0E-\xFF]*/;
+  trivia keep BlockComment = /\/\*([^*]|\*+[^*\/])*\*+\//;
+
+  ;; Never matches; used to satisfy optional tok fields canonically.
+  OptTok = /$^/;
+
+  ;; Keywords
+  FnKW = "fn";
+  UnsafeKW = "unsafe";
+  ExternKW = "extern";
+  LetKW = "let";
+  MutKW = "mut";
+  IfKW = "if";
+  ElseKW = "else";
+  MatchKW = "match";
+  DeferKW = "defer";
+  TryKW = "try";
+  ReturnKW = "return";
+  WhileKW = "while";
+  LoopKW = "loop";
+  BreakKW = "break";
+  ContinueKW = "continue";
+  WhereKW = "where";
+  TraitKW = "trait";
+  ImplKW = "impl";
+  ForKW = "for";
+  InKW = "in";
+  EnumKW = "enum";
+  StructKW = "struct";
+  UnionKW = "union";
+  UseKW = "use";
+  AsKW = "as";
+  PubKW = "pub";
+  OutKW = "out";
+  ClobberKW = "clobber";
+  OptionsKW = "options";
+  TrueKW = "true";
+  FalseKW = "false";
+  SelfKW = "self";
+  SuperKW = "super";
+  StaticKW = "static";
+  ConstKW = "const";
+  TypeKW = "type";
+  MacroKW = "macro";
+  TestKW = "test";
+  AsmKW = "asm";
+
+  ;; Identifiers + literals (ASCII-only for MVP)
+  ;; NOTE: The normative spec recommends Unicode XID identifiers; we keep
+  ;; ASCII here until we have a lexer with Unicode class support.
+  Identifier = /[A-Za-z_][A-Za-z0-9_]*/;
+  ;; A path chain like `core::mem::size_of`.
+  ;; NOTE: This does not support per-segment type args; type args can be
+  ;; applied to the whole path via TypeApp (see Types section).
+  ;; Require at least one `::` so plain names still tokenize as Identifier.
+  PathIdent = /[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*/;
+
+  ;; Special-case for grouped import trees: `use foo::{bar, baz}`.
+  ;; Lex as a single token to avoid LALR ambiguities where `UseTreeSimple`
+  ;; matches the `foo` prefix and leaves `::{` unconsumed.
+  ;; NOTE: We also allow `self::{...}` and `super::{...}`.
+  UseGroupPrefix = /(self|super|[A-Za-z_][A-Za-z0-9_]*)(::[A-Za-z_][A-Za-z0-9_]*)*::\{/;
+
+  ;; Extern varargs
+  Ellipsis = "...";
+
+  ;; Literals
+  ;; Order matters: RealLit / HexIntLit before IntLit.
+  RealLit = /[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9][0-9_]*)?|[0-9][0-9_]*[eE][+-]?[0-9][0-9_]*/;
+  HexIntLit = /0[xX][0-9A-Fa-f_]+/;
+  IntLit = /0[bB][01_]+|[0-9][0-9_]*/;
+  StringLit = /\"([^\\\"\n]|\\.)*\"/;
+  ;; NOTE: Canonical token name in Stage 4 cutoff is HexStringLit.
+  ;; We currently use it for the Lumen surface bytes literal `b"..."`.
+  HexStringLit = /b\"([^\\\"\n]|\\.)*\"/;
+  CharLit = /'([^\\'\n]|\\.)*'/;
+
+  ;; Attributes
+  At = "@";
+
+  ;; Punctuation
+  LParen = "(";
+  RParen = ")";
+  LBrace = "{";
+  RBrace = "}";
+  LBrack = "[";
+  RBrack = "]";
+  Comma = ",";
+  PathSep = "::";
+  Colon = ":";
+  Semi = ";";
+  DotDot = "..";
+  Dot = ".";
+  QMark = "?";
+  Bang = "!";
+
+  ;; Operators
+  Arrow = "->";
+  FatArrow = "=>";
+  Eq = "=";
+  OrOr = "||";
+  AndAnd = "&&";
+  ;; Comparisons (split token kinds; required by Stage 4 cutoff signatures).
+  EqEq = "==";
+  NotEq = "!=";
+  Lte = "<=";
+  Gte = ">=";
+  Lt = "<";
+  Gt = ">";
+
+  ;; Bitwise / shifts
+  Shl = "<<";
+  Shr = ">>";
+  Amp = "&";
+  Pipe = "|";
+  Caret = "^";
+
+  ;; Arithmetic / unary
+  Plus = "+";
+  Minus = "-";
+  Star = "*";
+  Slash = "/";
+  Percent = "%";
+  Tilde = "~";
+
+  ;; Pattern-only
+  Underscore = "_";
+}
+
+rules {
+  Program = name:@OptTok? items:Item* => LUnit(name, items);
+
+    ;; Attributes in the normative surface attach to items.
+    ;; We parse them as ignored prefixes (still strict/canonical; no meaning committed).
+    Item = UseItem | FnItem | ExternItem | StaticItem | ConstItem | TypeItem | StructItem | UnionItem | EnumItem | TraitItem | ImplItem | MacroItem | TestItem;
+    Attr = At callee:NameExpr (LParen args:ArgList? RParen)? => Nil();
+    Attrs = attrs:Attr*;
+
+    ;; Visibility (parsed; ignored for now)
+    Visibility = PubKW (LParen scope:NameExpr RParen)?;
+
+    ;; Imports
+    ;; - Lower *simple* `use` items to canonical `Import`.
+    ;; - Keep grouped trees surface-only for now (they would require emitting multiple items).
+    UseItem = UseItemSimpleAs | UseItemSimple | UseItemGroup;
+
+    UseItemSimple = UseItemSimplePath | UseItemSimpleIdent;
+    UseItemSimplePath = Attrs vis:Visibility? UseKW name:@PathIdent path:@OptTok? Semi? => Import(name, path);
+    UseItemSimpleIdent = Attrs vis:Visibility? UseKW name:@Identifier path:@OptTok? Semi? => Import(name, path);
+
+    UseItemSimpleAs = Attrs vis:Visibility? UseKW (path:@PathIdent | path:@Identifier)? AsKW name:@Identifier Semi? => Import(name, path);
+    UseItemGroup = Attrs vis:Visibility? UseKW tree:UseTreeGroup Semi? => Nil();
+
+    UseTree = UseTreeSimple | UseTreeGroup;
+    UseTreeSimple = path:UsePath (AsKW alias:@Identifier)?;
+    UseTreeGroup = UseTreeGroupBare | UseTreeGroupPrefixed;
+    UseTreeGroupBare = LBrace items:UseTree (Comma items:UseTree)* Comma? RBrace;
+    UseTreeGroupPrefixed = prefix:@UseGroupPrefix items:UseTree (Comma items:UseTree)* Comma? RBrace;
+    UsePath = UsePathRoot (PathSep seg:@Identifier)*;
+    UsePathRoot = Identifier | PathIdent | SelfKW | SuperKW;
+
+    ;; -----------------------------
+    ;; Traits / impls (parsed; lowered to Nil for now)
+    ;; -----------------------------
+
+    TraitItem = Attrs vis:Visibility? TraitKW name:@Identifier gen:GenericParams? where:WhereClause?
+                LBrace members:TraitMember* RBrace
+                => Nil();
+    TraitMember = FnSig;
+    FnSig = Attrs fn_kw:@FnKW name:@Identifier
+      gen:GenericParams?
+      LParen params:ParamDecl? (Comma params:ParamDecl)* Comma? RParen
+      (Arrow ret:Type)?
+      where:WhereClause?
+      Semi
+      => Nil();
+
+    ImplItem = Attrs unsafe_kw:@UnsafeKW? ImplKW gen:GenericParams?
+               head:Type (ForKW target:Type)? where:WhereClause?
+               LBrace members:ImplMember* RBrace
+               => Nil();
+    ImplMember = FnItem;
+
+  ;; -----------------------------
+  ;; Top-level items
+  ;; -----------------------------
+
+  FnItem = Attrs vis:Visibility? unsafe_kw:@UnsafeKW? fn_kw:@FnKW name:@Identifier
+           gen:GenericParams?
+           LParen params:ParamDecl? (Comma params:ParamDecl)* Comma? RParen
+           (Arrow ret:Type)?
+           where:WhereClause?
+           decls:VarDecl*
+           body:Block
+           => LProc(name, params, ret, decls, body);
+
+  WhereClause = WhereKW items:WherePred (Comma items:WherePred)*;
+  WherePred = name:Type Colon trait:Type;
+
+  ExternItem = ExternFnDecl | ExternStaticDecl;
+  ;; Varargs are surface-only for now: we parse an optional trailing `, ...` but do not represent it.
+  ExternFnDecl = Attrs vis:Visibility? ExternKW abi:@StringLit unsafe_kw:@UnsafeKW? fn_kw:@FnKW name:@Identifier
+                 LParen params:ExternParam? (Comma params:ExternParam)* Comma? RParen
+                 (Arrow ret:Type)?
+                 link_name:@OptTok?
+                 Semi?
+                 => ExternProc(name, params, ret, link_name);
+  ExternStaticDecl = Attrs vis:Visibility? ExternKW abi:@StringLit StaticKW mut_kw:@MutKW? name:@Identifier (Colon type:Type)? (OptTok init:Expr)? Semi? => Var(name, type, init);
+
+  ExternParam = ParamDecl | ExternVarargs;
+  ExternVarargs = ellipsis:@Ellipsis => Nil();
+
+  ;; Static storage items (parsed; lowered to Nil for now)
+  StaticItem = Attrs vis:Visibility? StaticKW mut_kw:@MutKW? name:@Identifier (Colon type:Type)? (Eq init:Expr)? Semi? => Var(name, type, init);
+
+  ;; Type alias (feature-gated; we lower to TypeDecl for now)
+  TypeItem = Attrs vis:Visibility? TypeKW name:@Identifier gen:GenericParams? Eq type:Type Semi? => TypeDecl(name, type);
+
+  ;; Const item (feature-gated)
+  ConstItem = Attrs vis:Visibility? ConstKW name:@Identifier (Colon type:Type)? Eq value:Expr Semi? => Const(name, type, value);
+
+  StructItem = StructDef | StructFwd;
+  StructDef = Attrs vis:Visibility? StructKW name:@Identifier gen:GenericParams? type:StructBody Semi?
+               => TypeDecl(name, type);
+  ;; `struct Name;` forward decl (surface): parsed for coverage; lowered to Nil().
+  StructFwd = Attrs vis:Visibility? StructKW name:@Identifier gen:GenericParams? Semi
+               => Nil();
+  StructBody = LBrace fields:StructField* RBrace => Record(fields);
+  StructField = Attrs vis:Visibility? name:@Identifier Colon type:Type Comma? => Field(name, type);
+
+  UnionItem = UnionDef | UnionFwd;
+  UnionDef = Attrs vis:Visibility? UnionKW name:@Identifier gen:GenericParams? type:StructBody Semi?
+               => TypeDecl(name, type);
+  ;; `union Name;` forward decl (surface): parsed for coverage; lowered to Nil().
+  UnionFwd = Attrs vis:Visibility? UnionKW name:@Identifier gen:GenericParams? Semi
+               => Nil();
+
+  EnumItem = Attrs vis:Visibility? EnumKW name:@Identifier gen:GenericParams?
+            LBrace type:EnumVariantList RBrace
+            => TypeDecl(name, type);
+  EnumVariantList = (items:EnumVariant (Comma items:EnumVariant)* Comma?)? => Args(items);
+  ;; Avoid LALR ambiguity: parse the variant name first, then optionally tuple args.
+  ;; We lower everything to Call(callee, args?) (unit variants have args absent).
+  EnumVariant = Attrs vis:Visibility? callee:NameExpr args:EnumVariantPayload? => Call(callee, args);
+  EnumVariantPayload = EnumVariantTuple | EnumVariantStruct;
+  EnumVariantTuple = LParen (items:Type (Comma items:Type)* Comma?)? RParen => Args(items);
+  ;; Struct-style enum variant: `V { x: T, ... }`
+  ;; We encode this as Call(Name("V"), Record(fields)) to stay within canonical intrinsics.
+  EnumVariantStruct = LBrace fields:StructField* RBrace => Record(fields);
+
+  GenericParams = LBrack items:NameExpr (Comma items:NameExpr)* Comma? RBrack => Args(items);
+
+  ;; Params: accept patterns and lower them explicitly.
+  ParamDecl = Attrs mode:@OptTok? pat:Pat (Colon type:Type)? => LParamPat(pat, type, mode);
+
+  TypeList = items:Type (Comma items:Type)* Comma? => Args(items);
+
+  ;; -----------------------------
+  ;; Types
+  ;; -----------------------------
+
+  Type = FnType | TypeArray | TypeTuple | TypeApp | TypeRef;
+
+  FnType = fn_kw:@FnKW
+           LParen params:ParamDecl? (Comma params:ParamDecl)* Comma? RParen
+           (Arrow ret:Type)?
+           => FuncType(params, ret);
+  TypeRef = TypeRefPath | TypeRefIdent;
+  TypeRefIdent = name:@Identifier => TypeRef(name);
+  TypeRefPath = name:@PathIdent => TypeRef(name);
+  TypeApp = callee:TypeRef LBrack args:TypeList? RBrack => Call(callee, args);
+
+  ;; Tuple types: `()` / `(T1, T2, ...)`
+  ;; Encoded canonically as Args(items*). (Still surface-first; downstream meaning TBD.)
+  TypeTuple = LParen (items:Type (Comma items:Type)* Comma?)? RParen => Args(items);
+
+  ;; Array type: `[T; N]`
+  ;; NOTE: Array.size is optional in the cutoff signature, so we model it as optional.
+  TypeArray = LBrack base:Type Semi size:Expr? RBrack => Array(size, base);
+
+  ;; -----------------------------
+  ;; Feature-gated surface items (parsed; lowered to Nil() for now)
+  ;; -----------------------------
+
+  MacroItem = Attrs vis:Visibility? MacroKW name:@Identifier body:Block => Nil();
+  TestItem = Attrs vis:Visibility? TestKW name:@StringLit body:Block => Nil();
+
+  ;; -----------------------------
+  ;; Blocks and statements
+  ;; -----------------------------
+
+  ;; Statement separation:
+  ;; - We can't do semicolon insertion here.
+  ;; - Without separators, some statement boundaries are ambiguous (e.g. an Expr
+  ;;   ending a LetStmt can be extended by a following `* ...`).
+  ;; - So we allow explicit `;` between statements at the block level.
+  Block = LBrace (items:Stmt Semi?)* RBrace => Block(items);
+
+  ;; Statements are lowered directly as intrinsic nodes.
+  ;; Expression statements lower to the expression node itself (no ExprStmt wrapper).
+  Stmt = LetStmt | WhileStmt | ForStmt | LoopStmt | BreakStmt | ContinueStmt | DeferStmt | ReturnStmt | Expr;
+
+  ;; Let: accept patterns and lower them explicitly.
+  LetStmt = Attrs LetKW mut_kw:@MutKW? pat:Pat (Colon type:Type)? Eq init:Expr?
+           => LVarPat(pat, type, init);
+
+  VarDecl = LetStmt;
+
+  ;; Lower `defer { ... }` as a plain call node in statement position.
+  DeferStmt = callee:DeferCallee args:Block? => Call(callee, args);
+  DeferCallee = id:@DeferKW => Name(id);
+
+  ReturnStmt = ReturnKW value:Expr? => Return(value);
+
+  ;; Stage 4 cutoff signature requires: While.body : rule Stmt.
+  WhileStmt = WhileKW cond:Expr body:Stmt => While(cond, body);
+
+  ;; `loop { ... }` (surface): semantically an infinite loop.
+  ;; Represent it explicitly (no nested constructors required) and let downstream
+  ;; lowerers decide whether to desugar it (e.g. to `While(True(), body)`).
+  LoopStmt = LoopKW body:Stmt => Loop(body);
+
+  ;; C-style for loop: for (init; cond; step) body
+    ForStmt = ForCStyleStmt | ForInStmt;
+
+  ;; Lowering note:
+  ;; - Stage 4 cutoff signature for `ExprStmt` requires `expr` to be optional.
+  ;; - We must avoid producing a span-less init node in cases like `for (; ...; ...)`.
+  ;;
+  ;; Strategy: make `ForInit` non-nullable by consuming the init terminator token.
+  ;; - C-style: terminator is `;` (consumed by ForInit)
+  ;; - for-in: terminator is `in` (consumed by ForInit)
+  ;;
+  ;; This keeps `ExprStmt(expr?)` signature-correct while ensuring `ForInit` always
+  ;; spans at least one token.
+    ForCStyleStmt = ForKW LParen init:ForInit? cond:Expr? Semi step:Expr? RParen body:Stmt => For(init, cond, step, body);
+
+    ForInitEnd = Semi | InKW;
+    ForInit = expr:Expr? end:ForInitEnd => ExprStmt(expr);
+
+  ;; Spec-style `for pat in expr { ... }` surface form.
+  ;; Note: we currently encode this using the canonical `For(init, cond, step, body)` node.
+  ;; - `init` carries the pattern as an ExprStmt(Name(...)) (irrefutable subset).
+  ;; - `cond` carries the iterable expression.
+  ;; - `step` is always null (OptTok never matches).
+  ForInStmt = ForKW init:ForInit? cond:Expr? (OptTok step:Expr)? body:Stmt => For(init, cond, step, body);
+
+  BreakStmt = BreakKW value:Expr? => Break();
+  ContinueStmt = ContinueKW => Continue();
+
+  ;; -----------------------------
+  ;; Expressions (minimal subset)
+  ;; -----------------------------
+
+  ;; NOTE: The normative surface requires semicolons for ExprStmt/LetStmt.
+  ;; Our cert fixtures currently omit them; since whitespace is trivia we
+  ;; cannot implement semicolon insertion here, so we accept optional `;`.
+
+  Expr = IfExpr | MatchExpr | AssignExpr;
+
+  ;; Assignment is lowest precedence and right-associative.
+  AssignExpr = AssignBin | OrExpr;
+  ;; Note: we allow UnaryExpr on the LHS so pointer deref assignment `*p = v`
+  ;; parses. Downstream stages enforce lvalue discipline.
+  AssignBin = lhs:UnaryExpr op:@Eq op_tok:@OptTok? rhs:AssignExpr => LBin(op, op_tok, lhs, rhs);
+
+  ;; `try` is a unary operator in the normative surface.
+  TryCallee = id:@TryKW => Name(id);
+
+  ;; `if` (used as an expression in Lumen). We lower to the generic `If` node.
+  IfExpr = IfKW cond:Expr then:Block (ElseKW else:ElseBranch)? => If(cond, then, else);
+  ElseBranch = Block | IfExpr;
+
+  MatchExpr = MatchKW cond:Expr LBrace arms:MatchArm* RBrace => LMatch(cond, arms);
+  MatchArm = pat:Pat (IfKW guard:Expr)? FatArrow body:Expr? Comma? => LMatchArm(pat, guard, body);
+
+  ;; Patterns (explicit, magic-free)
+  ;; Note: identifier-start patterns are disambiguated structurally (ctor/struct
+  ;; require '(' / '{'). This avoids the parser committing early to PatBind.
+  Pat = PatTuple | PatWild | PatInt | PatSelfBind | PatIdent | PatParenBind | PatParenWild | PatParenInt;
+  PatWild = id:@Underscore => PatWild();
+  PatSelfBind = name:@SelfKW => PatBind(name);
+  PatIdent = PatIdentStruct | PatIdentCtor | PatIdentBind | PatPathStruct | PatPathCtor | PatPathBind;
+  PatIdentBind = name:@Identifier => PatBind(name);
+  PatPathBind = name:@PathIdent => PatBind(name);
+  PatInt = PatDecInt | PatHexInt;
+  PatDecInt = lit:@IntLit => PatInt(lit);
+  PatHexInt = lit:@HexIntLit => PatInt(lit);
+
+  ;; Parenthesized patterns (surface sugar).
+  ;; We intentionally lower directly to the inner canonical Pat* node.
+  PatParenBind = LParen name:@Identifier RParen => PatBind(name);
+  PatParenWild = LParen u:@Underscore RParen => PatWild();
+  PatParenInt = PatParenDecInt | PatParenHexInt;
+  PatParenDecInt = LParen lit:@IntLit RParen => PatInt(lit);
+  PatParenHexInt = LParen lit:@HexIntLit RParen => PatInt(lit);
+
+  ;; Tuple pattern: must have at least one comma.
+  PatTuple = LParen items:Pat Comma items:Pat? (Comma items:Pat)* Comma? RParen => PatTuple(items);
+
+  ;; Ctor pattern: requires parens to disambiguate from a bind.
+  ;; Note: `args` is optional in the intrinsic signature, so we bind it as an
+  ;; optional rule capture, but still require the parentheses syntactically.
+  PatIdentCtor = name:@Identifier LParen args:PatCtorArgsInner? RParen => PatCtor(name, args);
+  PatPathCtor = name:@PathIdent LParen args:PatCtorArgsInner? RParen => PatCtor(name, args);
+  PatCtorArgsInner = items:Pat (Comma items:Pat)* Comma? => PatArgs(items);
+
+  ;; Struct pattern: explicit fields + optional `..` rest.
+  ;; Note: we currently require at least one field to avoid needing an explicit
+  ;; empty-list literal for `fields` in the semantics-call DSL.
+  PatIdentStruct = name:@Identifier LBrace fields:PatStructField (Comma fields:PatStructField)* (Comma rest:@DotDot)? Comma? RBrace => PatStruct(name, fields, rest);
+  PatPathStruct = name:@PathIdent LBrace fields:PatStructField (Comma fields:PatStructField)* (Comma rest:@DotDot)? Comma? RBrace => PatStruct(name, fields, rest);
+  PatStructField = name:@Identifier (Colon pat:Pat)? => PatStructField(name, pat);
+
+  ;; Binary precedence ladder (matches Stage 4 cutoff structure).
+  ;; Stage 4 folds BinChain/BinTail into canonical Bin nodes.
+
+  OrExpr = head:AndExpr rest:OrTail* => BinChain(head, rest);
+  OrTail = op:@OrOr rhs:AndExpr => BinTail(op, rhs);
+
+  AndExpr = head:BitOrExpr rest:AndTail* => BinChain(head, rest);
+  AndTail = op:@AndAnd rhs:BitOrExpr => BinTail(op, rhs);
+
+  BitOrExpr = head:BitXorExpr rest:BitOrTail* => BinChain(head, rest);
+  BitOrTail = op:@Pipe rhs:BitXorExpr => BinTail(op, rhs);
+
+  BitXorExpr = head:BitAndExpr rest:BitXorTail* => BinChain(head, rest);
+  BitXorTail = op:@Caret rhs:BitAndExpr => BinTail(op, rhs);
+
+  BitAndExpr = head:EqExpr rest:BitAndTail* => BinChain(head, rest);
+  BitAndTail = op:@Amp rhs:EqExpr => BinTail(op, rhs);
+
+  EqExpr = head:RelExpr rest:EqTail* => BinChain(head, rest);
+  EqTail = EqEqTail | NotEqTail;
+  EqEqTail = op:@EqEq rhs:RelExpr => BinTail(op, rhs);
+  NotEqTail = op:@NotEq rhs:RelExpr => BinTail(op, rhs);
+
+  RelExpr = head:ShiftExpr rest:RelTail* => BinChain(head, rest);
+  RelTail = LtTail | LteTail | GtTail | GteTail;
+  LtTail = op:@Lt rhs:ShiftExpr => BinTail(op, rhs);
+  LteTail = op:@Lte rhs:ShiftExpr => BinTail(op, rhs);
+  GtTail = op:@Gt rhs:ShiftExpr => BinTail(op, rhs);
+  GteTail = op:@Gte rhs:ShiftExpr => BinTail(op, rhs);
+
+  ShiftExpr = head:AddExpr rest:ShiftTail* => BinChain(head, rest);
+  ShiftTail = ShlTail | ShrTail;
+  ShlTail = op:@Shl rhs:AddExpr => BinTail(op, rhs);
+  ShrTail = op:@Shr rhs:AddExpr => BinTail(op, rhs);
+
+  AddExpr = head:MulExpr rest:AddTail* => BinChain(head, rest);
+  AddTail = AddPlusTail | AddMinusTail;
+  AddPlusTail = op:@Plus rhs:MulExpr => BinTail(op, rhs);
+  AddMinusTail = op:@Minus rhs:MulExpr => BinTail(op, rhs);
+
+  MulExpr = head:UnaryExpr rest:MulTail* => BinChain(head, rest);
+  MulTail = MulStarTail | MulSlashTail | MulPercentTail;
+  MulStarTail = op:@Star rhs:UnaryExpr => BinTail(op, rhs);
+  MulSlashTail = op:@Slash rhs:UnaryExpr => BinTail(op, rhs);
+  MulPercentTail = op:@Percent rhs:UnaryExpr => BinTail(op, rhs);
+
+  ;; Unary operators (normative): ! - ~ & * try
+  UnaryExpr = TryUnary | NotUnary | NegUnary | BitNotUnary | AddrOfUnary | DerefUnary | PostfixExpr;
+  TryUnary = callee:TryCallee args:UnaryExpr? => Call(callee, args);
+  NotUnary = op:@Bang expr:UnaryExpr => Not(expr);
+  NegUnary = op:@Minus expr:UnaryExpr => Neg(expr);
+  BitNotUnary = op:@Tilde expr:UnaryExpr => BitNot(expr);
+  AddrOfUnary = op:@Amp expr:UnaryExpr => AddrOf(expr);
+  DerefUnary = op:@Star expr:UnaryExpr => Deref(expr);
+
+  ;; General postfix chain support.
+  ;; We use Stage 3 surface-allowed suffix intrinsics; Stage 4 folds them away
+  ;; into canonical Member/Index/Call chains.
+  PrefixExpr = UnaryExpr;
+
+  PostfixExpr = CastExpr | PostfixNoCast;
+  PostfixNoCast = PostfixChain | Primary | DerefUnary;
+  ;; Postfix cast: `x as T`.
+  ;; Represent explicitly (semantic, no Args-list shenanigans).
+  CastExpr = expr:PostfixNoCast AsKW type:Type => Cast(type, expr);
+  PostfixChain = base:Primary suffixes:Suffix (suffixes:Suffix)* => Postfix(base, suffixes);
+
+  Primary = UnsafeBlockExpr | AsmExpr | TupleExpr | ArrayExpr | NameExpr | IntExpr | HexIntExpr | RealExpr | StringExpr | BytesExpr | CharExpr | BoolExpr | ParenExpr | Block;
+
+  ;; Tuple expressions:
+  ;; - `()` unit value => UnitVal()
+  ;; - `(x,)` / `(x, y, ...)` tuple => Tuple([...])
+  TupleExpr = TupleUnit | TupleNonEmpty;
+  TupleUnit = LParen RParen => UnitVal();
+  TupleNonEmpty = LParen items:Expr Comma (items:Expr (Comma items:Expr)*)? Comma? RParen => Tuple(items);
+
+  ;; Array expressions:
+  ;; - `[]` / `[a, b, ...]` => ArrayLit([...])
+  ;; - `[x; n]` repeat form => ArrayRepeat(elem, len)
+  ArrayExpr = ArrayRepeatExpr | ArrayListExpr;
+  ArrayRepeatExpr = LBrack elem:Expr Semi len:Expr RBrack => ArrayRepeat(elem, len);
+  ArrayListExpr = LBrack items:Expr? (Comma items:Expr)* Comma? RBrack => ArrayLit(items);
+  UnsafeBlockExpr = callee:UnsafeCallee args:Block? => Call(callee, args);
+  UnsafeCallee = id:@UnsafeKW => Name(id);
+
+  AsmExpr = callee:AsmCallee LParen args:AsmArgList? RParen => Call(callee, args);
+  AsmCallee = id:@AsmKW => Name(id);
+  AsmArgList = items:AsmTemplate (Comma items:AsmPart)* Comma? => Args(items);
+  AsmTemplate = lit:@StringLit => String(lit);
+  AsmPart = AsmIn | AsmOut | AsmClobber | AsmOptions;
+
+  AsmIn = callee:AsmInCallee args:AsmInArgs? => Call(callee, args);
+  AsmInCallee = id:@InKW => Name(id);
+  AsmInArgs = LParen items:AsmReg RParen (items:Expr)+ => Args(items);
+
+  AsmOut = callee:AsmOutCallee args:AsmOutArgs? => Call(callee, args);
+  AsmOutCallee = id:@OutKW => Name(id);
+  AsmOutArgs = LParen items:AsmReg RParen (items:Expr)+ => Args(items);
+
+  AsmClobber = callee:AsmClobberCallee args:AsmClobberArgs? => Call(callee, args);
+  AsmClobberCallee = id:@ClobberKW => Name(id);
+  AsmClobberArgs = LParen items:AsmReg (Comma items:AsmReg)* Comma? RParen => Args(items);
+
+  AsmOptions = callee:AsmOptionsCallee args:AsmOptionsArgs? => Call(callee, args);
+  AsmOptionsCallee = id:@OptionsKW => Name(id);
+  AsmOptionsArgs = LParen items:AsmReg (Comma items:AsmReg)* Comma? RParen => Args(items);
+
+  AsmReg = lit:@StringLit => String(lit);
+  ParenExpr = LParen expr:Expr RParen => Paren(expr);
+
+  Suffix = FieldSel | IndexSel | CallSel | QSel | BangSel;
+
+  FieldSel = Dot name:@Identifier => FieldSuffix(name);
+  IndexSel = LBrack index:Expr RBrack => IndexSuffix(index);
+  CallSel = LParen args:ArgList? RParen => CallSuffix(args);
+
+  QSel = name:@QMark => FieldSuffix(name);
+  BangSel = name:@Bang => FieldSuffix(name);
+
+  ArgList = items:Expr (Comma items:Expr)* Comma? => Args(items);
+
+  NameExpr = NameIdent | NameUnderscore;
+  NameIdent = NamePath | NamePlain | NameSelf;
+  NamePlain = id:@Identifier => Name(id);
+  NamePath = id:@PathIdent => Name(id);
+  NameSelf = id:@SelfKW => Name(id);
+  NameUnderscore = id:@Underscore => Name(id);
+  IntExpr = lit:@IntLit => Int(lit);
+  HexIntExpr = lit:@HexIntLit => Int(lit);
+  RealExpr = lit:@RealLit => Real(lit);
+  StringExpr = lit:@StringLit => String(lit);
+  BytesExpr = lit:@HexStringLit => Bytes(lit);
+  CharExpr = lit:@CharLit => Char(lit);
+  BoolExpr = TrueExpr | FalseExpr;
+  TrueExpr = id:@TrueKW => True();
+  FalseExpr = id:@FalseKW => False();
+}
+
+section macros {
+  types: {
+    ;; Reserved: sem2sir may interpret Int literals using this committed default
+    ;; when no expected type is available (e.g. literal-vs-literal compares).
+    __default_int: i64;
+    ;; Reserved: sem2sir may interpret raw ptr deref/store using this committed default
+    ;; when no expected type is available (no implicit pointee typing).
+    __default_ptr_pointee: i64;
+    F64: f64;
+    U8: u8;
+    Usize: u64;
+    Void: void;
+    Ptr: ptr;
+    Slice: slice;
+  };
+  ops: {
+    bin: {
+      Eq: "core.assign";
+      OrOr: "core.bool.or_sc";
+      AndAnd: "core.bool.and_sc";
+      EqEq: "core.eq";
+      NotEq: "core.ne";
+      Lt: "core.lt";
+      Lte: "core.lte";
+      Gt: "core.gt";
+      Gte: "core.gte";
+      Shl: "core.shl";
+      Shr: "core.shr";
+      Amp: "core.bitand";
+      Pipe: "core.bitor";
+      Caret: "core.bitxor";
+      Plus: "core.add";
+      Minus: "core.sub";
+      Star: "core.mul";
+      Slash: "core.div";
+      Percent: "core.rem";
+    };
+    assign: {
+    };
+    suffix: {
+    };
+    ternary: {
+    };
+  };
+
+  ;; Stage 3 surface macro rewrite: allow Lumen-facing semantics-call names
+  ;; while still validating against (and emitting) canonical GL intrinsics.
+  sem: {
+    LUnit: { callee: Unit; fields: { name: name; items: items; }; };
+    LProc: { callee: Proc; fields: { name: name; params: params; ret: ret; decls: decls; body: body; }; };
+    LVar: { callee: Var; fields: { name: name; type: type; init: init; }; };
+    LVarPat: { callee: VarPat; fields: { pat: pat; type: type; init: init; }; };
+    LParamPat: { callee: ParamPat; fields: { pat: pat; type: type; mode: mode; }; };
+    LMatch: { callee: Match; fields: { cond: cond; arms: arms; }; };
+    LMatchArm: { callee: MatchArm; fields: { pat: pat; guard: guard; body: body; }; };
+    LBin: { callee: Bin; fields: { op: op; op_tok: op_tok; lhs: lhs; rhs: rhs; }; };
+  };
+}

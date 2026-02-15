@@ -2,6 +2,13 @@
 
 #include "sem2sir_emit_internal.h"
 
+static void sem2sir_emit_ctx_free(EmitCtx *ctx) {
+  if (!ctx)
+    return;
+  locals_free(ctx);
+  proc_table_free(ctx);
+}
+
 int sem2sir_emit_sir_file(const char *in_stage4_jsonl_path, const char *out_sir_jsonl_path) {
   // First: enforce the strict Stage 4 boundary checker.
   if (sem2sir_check_stage4_file(in_stage4_jsonl_path) != 0) {
@@ -258,8 +265,7 @@ int sem2sir_emit_sir_file(const char *in_stage4_jsonl_path, const char *out_sir_
   }
 
 done:
-  locals_free(&ctx);
-  proc_table_free(&ctx);
+  sem2sir_emit_ctx_free(&ctx);
   free(buf);
   if (!ok) {
     fclose(out);

@@ -503,6 +503,94 @@ bool parse_stmt_while(GritJsonCursor *c, EmitCtx *ctx, SirFnBuild *fn) {
   return true;
 }
 
+bool parse_stmt_loop(GritJsonCursor *c, EmitCtx *ctx, SirFnBuild *fn) {
+  bool seen_body = false;
+
+  // Allocate blocks upfront: body, exit.
+  size_t body_idx = 0;
+  size_t exit_idx = 0;
+  if (!fn_build_new_block(fn, ctx, &body_idx) || !fn_build_new_block(fn, ctx, &exit_idx)) {
+    err(ctx->in_path, "OOM creating Loop blocks");
+    return false;
+  }
+
+  // Jump from current block to body.
+  char *br_to_body = NULL;
+  if (!emit_term_br(ctx, fn->blocks[body_idx].id, &br_to_body)) {
+    err(ctx->in_path, "OOM emitting term.br");
+    return false;
+  }
+  if (!fn_build_append_stmt(fn, ctx, br_to_body, true)) {
+    return false;
+  }
+
+  char ch = 0;
+  for (;;) {
+    if (!json_peek_non_ws(c, &ch)) {
+      err(ctx->in_path, "unexpected EOF in Loop");
+      return false;
+    }
+    if (ch == '}') {
+      c->p++;
+      break;
+    }
+    if (ch != ',') {
+      err(ctx->in_path, "expected ',' or '}' in Loop");
+      return false;
+    }
+    c->p++;
+
+    char *key = NULL;
+    if (!json_expect_key(c, &key)) {
+      err(ctx->in_path, "invalid Loop key");
+      return false;
+    }
+
+    if (strcmp(key, "body") == 0) {
+      seen_body = true;
+
+      LoopTargets targets = {.break_to = exit_idx, .continue_to = body_idx};
+      fn->cur_block = body_idx;
+      if (!parse_block(c, ctx, fn, false, &targets)) {
+        free(key);
+        return false;
+      }
+
+      // If body falls through, loop back to the top of the body.
+      if (!fn->blocks[fn->cur_block].terminated) {
+        char *back_id = NULL;
+        if (!emit_term_br(ctx, fn->blocks[body_idx].id, &back_id)) {
+          free(key);
+          return false;
+        }
+        if (!fn_build_append_stmt(fn, ctx, back_id, true)) {
+          free(key);
+          return false;
+        }
+      }
+
+      free(key);
+      continue;
+    }
+
+    if (!grit_json_skip_value(c)) {
+      err(ctx->in_path, "invalid Loop field");
+      free(key);
+      return false;
+    }
+    free(key);
+  }
+
+  if (!seen_body) {
+    err(ctx->in_path, "Loop requires field: body");
+    return false;
+  }
+
+  // Continue after the loop.
+  fn->cur_block = exit_idx;
+  return true;
+}
+
 bool parse_block(GritJsonCursor *c, EmitCtx *ctx, SirFnBuild *fn, bool require_return, const LoopTargets *loop) {
 
   char *k = NULL;
@@ -962,10 +1050,16 @@ bool parse_block(GritJsonCursor *c, EmitCtx *ctx, SirFnBuild *fn, bool require_r
               free(key);
               return false;
             }
+          } else if (strcmp(sk, "Loop") == 0) {
+            free(sk);
+            if (!parse_stmt_loop(c, ctx, fn)) {
+              free(key);
+              return false;
+            }
           } else if (strcmp(sk, "Break") == 0) {
             free(sk);
             if (!loop) {
-              err(ctx->in_path, "Break outside of While is not supported");
+              err(ctx->in_path, "Break outside of loop is not supported");
               free(key);
               return false;
             }
@@ -987,7 +1081,7 @@ bool parse_block(GritJsonCursor *c, EmitCtx *ctx, SirFnBuild *fn, bool require_r
           } else if (strcmp(sk, "Continue") == 0) {
             free(sk);
             if (!loop) {
-              err(ctx->in_path, "Continue outside of While is not supported");
+              err(ctx->in_path, "Continue outside of loop is not supported");
               free(key);
               return false;
             }

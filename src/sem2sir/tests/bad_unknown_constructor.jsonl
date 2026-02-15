@@ -1,0 +1,13 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {
+      "__default_int": "i64"
+    },
+    "ops": {}
+  },
+  "ast": {
+    "k": "Wut",
+    "x": 1
+  }
+}

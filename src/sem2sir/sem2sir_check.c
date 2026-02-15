@@ -9,20 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static bool is_ident_like_type_name(const char *s) {
-  if (!s || !s[0])
-    return false;
-  unsigned char c0 = (unsigned char)s[0];
-  if (!((c0 >= 'A' && c0 <= 'Z') || (c0 >= 'a' && c0 <= 'z') || c0 == '_'))
-    return false;
-  for (size_t i = 1; s[i]; i++) {
-    unsigned char c = (unsigned char)s[i];
-    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.')
-      continue;
-    return false;
-  }
-  return true;
-}
+static const char *g_buf_start = NULL;
+static const char *g_buf_end = NULL;
 
 static char *read_file(const char *path, size_t *len_out) {
   FILE *f = fopen(path, "rb");
@@ -62,8 +50,300 @@ static char *read_file(const char *path, size_t *len_out) {
 }
 
 static void print_err_at(const char *path, const GritJsonCursor *c, const char *msg) {
-  (void)c;
   fprintf(stderr, "sem2sir: %s: %s\n", path ? path : "<input>", msg ? msg : "error");
+
+  if (!c || !g_buf_start || !g_buf_end)
+    return;
+  if (c->p < g_buf_start || c->p > g_buf_end)
+    return;
+
+  size_t byte_off = (size_t)(c->p - g_buf_start);
+  size_t line = 1;
+  size_t col = 1;
+  for (const char *p = g_buf_start; p < c->p; p++) {
+    if (*p == '\n') {
+      line++;
+      col = 1;
+    } else {
+      col++;
+    }
+  }
+
+  fprintf(stderr, "  at byte %zu (line %zu, col %zu)\n", byte_off, line, col);
+
+  const char *snippet_start = c->p;
+  const char *snippet_end = c->p;
+  const size_t radius = 60;
+  for (size_t i = 0; i < radius && snippet_start > g_buf_start; i++)
+    snippet_start--;
+  for (size_t i = 0; i < radius && snippet_end < g_buf_end; i++)
+    snippet_end++;
+
+  fprintf(stderr, "  near: ");
+  for (const char *p = snippet_start; p < snippet_end; p++) {
+    char ch = *p;
+    if (ch == '\n' || ch == '\r' || ch == '\t') {
+      fputc(' ', stderr);
+    } else {
+      fputc(ch, stderr);
+    }
+  }
+  fputc('\n', stderr);
+}
+
+static void print_allowed_ops(FILE *out) {
+  bool first = true;
+  for (int op = 1; op <= (int)SEM2SIR_OP_CORE_GTE; op++) {
+    const char *s = sem2sir_op_to_string((sem2sir_op_id)op);
+    if (!s)
+      continue;
+    fprintf(out, "%s%s", first ? "" : ", ", s);
+    first = false;
+  }
+}
+
+static void print_allowed_types(FILE *out) {
+  bool first = true;
+  for (int t = 1; t <= (int)SEM2SIR_TYPE_STRING_UTF8; t++) {
+    const char *s = sem2sir_type_to_string((sem2sir_type_id)t);
+    if (!s)
+      continue;
+    fprintf(out, "%s%s", first ? "" : ", ", s);
+    first = false;
+  }
+}
+
+static void print_allowed_intrinsics(FILE *out) {
+  bool first = true;
+  for (int k = 1; k <= (int)SEM2SIR_INTRINSIC_MatchArm; k++) {
+    const char *s = sem2sir_intrinsic_to_string((sem2sir_intrinsic_id)k);
+    if (!s)
+      continue;
+    fprintf(out, "%s%s", first ? "" : ", ", s);
+    first = false;
+  }
+}
+
+static void print_allowed_node_keys(FILE *out, sem2sir_intrinsic_id kid) {
+  // Keep in sync with is_allowed_node_key(). This is only for diagnostics.
+  fprintf(out, "k, nid, span");
+  switch (kid) {
+  case SEM2SIR_INTRINSIC_Unit:
+    fprintf(out, ", name, items");
+    break;
+  case SEM2SIR_INTRINSIC_Proc:
+    fprintf(out, ", name, params, ret, decls, body, extern, link_name");
+    break;
+  case SEM2SIR_INTRINSIC_Block:
+    fprintf(out, ", items");
+    break;
+  case SEM2SIR_INTRINSIC_Var:
+    fprintf(out, ", name, type, init");
+    break;
+  case SEM2SIR_INTRINSIC_VarPat:
+    fprintf(out, ", pat, type, init");
+    break;
+  case SEM2SIR_INTRINSIC_ExprStmt:
+    fprintf(out, ", expr");
+    break;
+  case SEM2SIR_INTRINSIC_Return:
+    fprintf(out, ", value");
+    break;
+  case SEM2SIR_INTRINSIC_If:
+    fprintf(out, ", cond, then, else");
+    break;
+  case SEM2SIR_INTRINSIC_While:
+    fprintf(out, ", cond, body");
+    break;
+  case SEM2SIR_INTRINSIC_Loop:
+    fprintf(out, ", body");
+    break;
+  case SEM2SIR_INTRINSIC_Break:
+  case SEM2SIR_INTRINSIC_Continue:
+    break;
+  case SEM2SIR_INTRINSIC_Param:
+    fprintf(out, ", name, type, mode");
+    break;
+  case SEM2SIR_INTRINSIC_ParamPat:
+    fprintf(out, ", pat, type, mode");
+    break;
+  case SEM2SIR_INTRINSIC_Call:
+    fprintf(out, ", callee, args");
+    break;
+  case SEM2SIR_INTRINSIC_Args:
+    fprintf(out, ", items");
+    break;
+  case SEM2SIR_INTRINSIC_PatBind:
+    fprintf(out, ", name");
+    break;
+  case SEM2SIR_INTRINSIC_PatInt:
+    fprintf(out, ", lit");
+    break;
+  case SEM2SIR_INTRINSIC_PatWild:
+    break;
+  case SEM2SIR_INTRINSIC_Name:
+    fprintf(out, ", id");
+    break;
+  case SEM2SIR_INTRINSIC_TypeRef:
+    fprintf(out, ", name");
+    break;
+  case SEM2SIR_INTRINSIC_Int:
+    fprintf(out, ", lit");
+    break;
+  case SEM2SIR_INTRINSIC_True:
+  case SEM2SIR_INTRINSIC_False:
+  case SEM2SIR_INTRINSIC_Nil:
+    break;
+  case SEM2SIR_INTRINSIC_Paren:
+  case SEM2SIR_INTRINSIC_Not:
+  case SEM2SIR_INTRINSIC_Neg:
+  case SEM2SIR_INTRINSIC_BitNot:
+  case SEM2SIR_INTRINSIC_AddrOf:
+  case SEM2SIR_INTRINSIC_Deref:
+    fprintf(out, ", expr");
+    break;
+  case SEM2SIR_INTRINSIC_Bin:
+    fprintf(out, ", op, op_tok, lhs, rhs");
+    break;
+  case SEM2SIR_INTRINSIC_Match:
+    fprintf(out, ", cond, arms");
+    break;
+  case SEM2SIR_INTRINSIC_MatchArm:
+    fprintf(out, ", pat, guard, body");
+    break;
+  default:
+    break;
+  }
+}
+
+static void print_expected_schema(FILE *out, sem2sir_intrinsic_id kid) {
+  // Only describe requirements that sem2sir_check actually enforces.
+  // (sem2sir --emit-sir performs additional typed validation.)
+  switch (kid) {
+  case SEM2SIR_INTRINSIC_Unit:
+    fprintf(out, "Unit expects: items: [node, ...]");
+    break;
+  case SEM2SIR_INTRINSIC_Block:
+    fprintf(out, "Block expects: items: [node, ...]");
+    break;
+  case SEM2SIR_INTRINSIC_Proc:
+    fprintf(out, "Proc expects: body: Block");
+    break;
+  case SEM2SIR_INTRINSIC_Call:
+    fprintf(out, "Call expects: callee: node, args: null | Args");
+    break;
+  case SEM2SIR_INTRINSIC_Args:
+    fprintf(out, "Args expects: items: [node, ...]");
+    break;
+  case SEM2SIR_INTRINSIC_Param:
+    fprintf(out, "Param expects: name: tok, type: node");
+    break;
+  case SEM2SIR_INTRINSIC_ParamPat:
+    fprintf(out, "ParamPat expects: pat: node, type: node");
+    break;
+  case SEM2SIR_INTRINSIC_VarPat:
+    fprintf(out, "VarPat expects: pat: node, init: node");
+    break;
+  case SEM2SIR_INTRINSIC_PatBind:
+    fprintf(out, "PatBind expects: name: tok");
+    break;
+  case SEM2SIR_INTRINSIC_PatInt:
+    fprintf(out, "PatInt expects: lit: tok");
+    break;
+  case SEM2SIR_INTRINSIC_Bin:
+    fprintf(out, "Bin expects: op: string(core.*), lhs: node, rhs: node");
+    break;
+  case SEM2SIR_INTRINSIC_Match:
+    fprintf(out, "Match expects: cond: node, arms: [MatchArm, ...]");
+    break;
+  case SEM2SIR_INTRINSIC_Name:
+    fprintf(out, "Name expects: id: tok");
+    break;
+  case SEM2SIR_INTRINSIC_TypeRef:
+    fprintf(out, "TypeRef expects: name: tok(text is builtin type id)");
+    break;
+  case SEM2SIR_INTRINSIC_Int:
+    fprintf(out, "Int expects: lit: tok");
+    break;
+  case SEM2SIR_INTRINSIC_Paren:
+  case SEM2SIR_INTRINSIC_Not:
+  case SEM2SIR_INTRINSIC_Neg:
+  case SEM2SIR_INTRINSIC_BitNot:
+  case SEM2SIR_INTRINSIC_AddrOf:
+  case SEM2SIR_INTRINSIC_Deref:
+    fprintf(out, "%s expects: expr: node", sem2sir_intrinsic_to_string(kid));
+    break;
+  case SEM2SIR_INTRINSIC_If:
+    fprintf(out, "If expects: cond: node, then: Block, else: null | Block");
+    break;
+  case SEM2SIR_INTRINSIC_While:
+    fprintf(out, "While expects: cond: node, body: Block");
+    break;
+  case SEM2SIR_INTRINSIC_Loop:
+    fprintf(out, "Loop expects: body: Block");
+    break;
+  default:
+    fprintf(out, "(no schema hint available)");
+    break;
+  }
+}
+
+static void print_expected_field_schema(FILE *out, const char *field_name) {
+  if (!field_name || !*field_name) {
+    fprintf(out, "(unknown field)");
+    return;
+  }
+
+  // Field-specific shape hints. Keep short; this is for quick repair.
+  if (strcmp(field_name, "Unit.items") == 0 || strcmp(field_name, "Block.items") == 0 ||
+      strcmp(field_name, "Args.items") == 0) {
+    fprintf(out, "%s: [node, ...]", field_name);
+    return;
+  }
+  if (strcmp(field_name, "Proc.params") == 0) {
+    fprintf(out, "Proc.params: [Param|ParamPat, ...]");
+    return;
+  }
+  if (strcmp(field_name, "Match.arms") == 0) {
+    fprintf(out, "Match.arms: [MatchArm, ...]");
+    return;
+  }
+  if (strcmp(field_name, "Call.args") == 0) {
+    fprintf(out, "Call.args: null | Args");
+    return;
+  }
+  if (strcmp(field_name, "Proc.extern") == 0) {
+    fprintf(out, "Proc.extern: true | false (or omit)");
+    return;
+  }
+
+  // Default.
+  fprintf(out, "%s: (see contract for shape)", field_name);
+}
+
+static void print_err_unknown_op_id(const char *path, const GritJsonCursor *c, const char *op_str) {
+  char msg[512];
+  snprintf(msg, sizeof(msg), "Bin.op must be a semantic operator id (e.g. 'core.add'), got '%s'", op_str ? op_str : "<null>");
+  print_err_at(path, c, msg);
+  fprintf(stderr, "  hint: commit surface operators upstream; do not pass '+', 'Plus', 'EqEq', etc as Bin.op\n");
+  fprintf(stderr, "        example: '+' -> Bin.op='core.add' (and optionally Bin.op_tok as a witness)\n");
+  fprintf(stderr, "  allowed: ");
+  print_allowed_ops(stderr);
+  fputc('\n', stderr);
+  fprintf(stderr, "  see: src/sem2sir/SEMANTIC_IR_V0_CONTRACT.md\n");
+}
+
+static void print_err_unknown_type_id(const char *path, const GritJsonCursor *c, const char *type_str) {
+  char msg[512];
+  snprintf(msg, sizeof(msg), "TypeRef.name must be a normalized sem2sir builtin type id (e.g. 'i64'), got '%s'",
+           type_str ? type_str : "<null>");
+  print_err_at(path, c, msg);
+  fprintf(stderr, "  hint: sem2sir does not resolve nominal/user types; commit builtin types upstream\n");
+  fprintf(stderr, "        example: 'I64'/'Usize' are surface names; emit 'i64'/'u64' in TypeRef.name\n");
+  fprintf(stderr, "  allowed: ");
+  print_allowed_types(stderr);
+  fputc('\n', stderr);
+  fprintf(stderr, "  see: src/sem2sir/SEMANTIC_IR_V0_CONTRACT.md\n");
 }
 
 static bool json_peek_non_ws(GritJsonCursor *c, char *out) {
@@ -71,6 +351,77 @@ static bool json_peek_non_ws(GritJsonCursor *c, char *out) {
   if (c->p >= c->end) return false;
   if (out) *out = *c->p;
   return true;
+}
+
+static bool validate_array(GritJsonCursor *c, const char *path);
+static bool validate_object(GritJsonCursor *c, const char *path);
+
+static bool json_expect_array_value(GritJsonCursor *c, const char *path, const char *field_name) {
+  char ch = 0;
+  if (!json_peek_non_ws(c, &ch)) {
+    print_err_at(path, c, "unexpected EOF");
+    return false;
+  }
+  if (ch != '[') {
+    char msg[256];
+    snprintf(msg, sizeof(msg), "%s must be an array", field_name ? field_name : "<field>");
+    print_err_at(path, c, msg);
+    fprintf(stderr, "  hint: expected JSON array value starting with '['\n");
+    fprintf(stderr, "  expected: ");
+    print_expected_field_schema(stderr, field_name);
+    fputc('\n', stderr);
+    return false;
+  }
+  return validate_array(c, path);
+}
+
+static bool json_expect_node_or_null_value(GritJsonCursor *c, const char *path, const char *field_name,
+                                          const char *hint) {
+  char ch = 0;
+  if (!json_peek_non_ws(c, &ch)) {
+    print_err_at(path, c, "unexpected EOF");
+    return false;
+  }
+  if (ch == '{')
+    return validate_object(c, path);
+  if (ch == 'n') {
+    // null
+    if (!grit_json_skip_value(c)) {
+      print_err_at(path, c, "invalid JSON value");
+      return false;
+    }
+    return true;
+  }
+
+  char msg[256];
+  snprintf(msg, sizeof(msg), "%s must be an AST node object or null", field_name ? field_name : "<field>");
+  print_err_at(path, c, msg);
+  if (hint && *hint)
+    fprintf(stderr, "  hint: %s\n", hint);
+  fprintf(stderr, "  expected: ");
+  print_expected_field_schema(stderr, field_name);
+  fputc('\n', stderr);
+  return false;
+}
+
+static bool json_expect_node_value(GritJsonCursor *c, const char *path, const char *field_name, const char *hint) {
+  char ch = 0;
+  if (!json_peek_non_ws(c, &ch)) {
+    print_err_at(path, c, "unexpected EOF");
+    return false;
+  }
+  if (ch != '{') {
+    char msg[256];
+    snprintf(msg, sizeof(msg), "%s must be an AST node object", field_name ? field_name : "<field>");
+    print_err_at(path, c, msg);
+    if (hint && *hint)
+      fprintf(stderr, "  hint: %s\n", hint);
+    fprintf(stderr, "  expected: ");
+    print_expected_field_schema(stderr, field_name);
+    fputc('\n', stderr);
+    return false;
+  }
+  return validate_object(c, path);
 }
 
 static bool json_expect_key(GritJsonCursor *c, char **out_key) {
@@ -82,7 +433,6 @@ static bool json_expect_key(GritJsonCursor *c, char **out_key) {
   }
   return true;
 }
-
 static bool validate_value(GritJsonCursor *c, const char *path, const char *ctx_msg);
 static bool is_allowed_tok_key(const char *key);
 
@@ -178,6 +528,16 @@ static bool parse_tok_text_alloc_strict(GritJsonCursor *c, const char *path, cha
   return true;
 }
 
+static bool parse_tok_text_alloc_strict_field(GritJsonCursor *c, const char *path, const char *field_name,
+                                              char **out_text) {
+  if (!parse_tok_text_alloc_strict(c, path, out_text)) {
+    fprintf(stderr, "  hint: %s must be a token leaf {\"k\":\"tok\",\"text\":\"...\"} (witness only)\n",
+            field_name ? field_name : "<field>");
+    return false;
+  }
+  return true;
+}
+
 static bool is_allowed_tok_key(const char *key) {
   return strcmp(key, "k") == 0 || strcmp(key, "nid") == 0 || strcmp(key, "i") == 0 || strcmp(key, "kind") == 0 ||
          strcmp(key, "start_byte") == 0 || strcmp(key, "end_byte") == 0 || strcmp(key, "text") == 0;
@@ -207,6 +567,8 @@ static bool is_allowed_node_key(sem2sir_intrinsic_id kid, const char *key) {
     return strcmp(key, "cond") == 0 || strcmp(key, "then") == 0 || strcmp(key, "else") == 0;
   case SEM2SIR_INTRINSIC_While:
     return strcmp(key, "cond") == 0 || strcmp(key, "body") == 0;
+  case SEM2SIR_INTRINSIC_Loop:
+    return strcmp(key, "body") == 0;
   case SEM2SIR_INTRINSIC_Param:
     return strcmp(key, "name") == 0 || strcmp(key, "type") == 0 || strcmp(key, "mode") == 0;
   case SEM2SIR_INTRINSIC_ParamPat:
@@ -286,10 +648,15 @@ static bool validate_array(GritJsonCursor *c, const char *path) {
 }
 
 static bool validate_object(GritJsonCursor *c, const char *path) {
+  // Remember object start so missing-required-field errors can point at the node.
+  GritJsonCursor obj_start = *c;
   if (!grit_json_consume_char(c, '{')) {
     print_err_at(path, c, "expected '{'");
     return false;
   }
+  // Point at '{' for better "near:" snippets.
+  if (obj_start.p > g_buf_start)
+    obj_start.p--;
 
   char ch = 0;
   if (!json_peek_non_ws(c, &ch)) {
@@ -335,6 +702,10 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
         char msg[256];
         snprintf(msg, sizeof(msg), "unknown intrinsic constructor k='%s'", k_str);
         print_err_at(path, c, msg);
+        fprintf(stderr, "  allowed: ");
+        print_allowed_intrinsics(stderr);
+        fputc('\n', stderr);
+        fprintf(stderr, "  see: src/sem2sir/SEMANTIC_IR_V0_CONTRACT.md\n");
         free(k_str);
         return false;
       }
@@ -387,9 +758,46 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
         char msg[256];
         snprintf(msg, sizeof(msg), "field '%s' is not allowed on k='%s'", key, k_str);
         print_err_at(path, c, msg);
+        if (!is_tok) {
+          fprintf(stderr, "  allowed fields for %s: ", k_str);
+          print_allowed_node_keys(stderr, kid);
+          fputc('\n', stderr);
+        }
         free(key);
         free(k_str);
         return false;
+      }
+
+      // Enforce token-leaf shapes for common witness fields. Without this, scalars can
+      // accidentally slip through validate_value().
+      if (!is_tok) {
+        if ((kid == SEM2SIR_INTRINSIC_Proc && (strcmp(key, "name") == 0 || strcmp(key, "link_name") == 0)) ||
+            (kid == SEM2SIR_INTRINSIC_Var && strcmp(key, "name") == 0) ||
+            (kid == SEM2SIR_INTRINSIC_Param && strcmp(key, "name") == 0) ||
+            (kid == SEM2SIR_INTRINSIC_PatBind && strcmp(key, "name") == 0) ||
+            (kid == SEM2SIR_INTRINSIC_Name && strcmp(key, "id") == 0) ||
+            (kid == SEM2SIR_INTRINSIC_Int && strcmp(key, "lit") == 0) ||
+            (kid == SEM2SIR_INTRINSIC_PatInt && strcmp(key, "lit") == 0) ||
+            (kid == SEM2SIR_INTRINSIC_Bin && strcmp(key, "op_tok") == 0) ||
+            (kid == SEM2SIR_INTRINSIC_Unit && strcmp(key, "name") == 0)) {
+          // Track required-field presence before consuming/parsing.
+          if (strcmp(key, "name") == 0) seen_name = true;
+          if (strcmp(key, "id") == 0) seen_id = true;
+          if (strcmp(key, "lit") == 0) seen_lit = true;
+
+          char field_buf[64];
+          snprintf(field_buf, sizeof(field_buf), "%s.%s", k_str, key);
+          char *tmp = NULL;
+          if (!parse_tok_text_alloc_strict_field(c, path, field_buf, &tmp)) {
+            free(tmp);
+            free(key);
+            free(k_str);
+            return false;
+          }
+          free(tmp);
+          free(key);
+          continue;
+        }
       }
 
       if (!is_tok && kid == SEM2SIR_INTRINSIC_Bin && strcmp(key, "op") == 0) {
@@ -403,9 +811,7 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
         }
         sem2sir_op_id opid = sem2sir_op_parse(op_str, strlen(op_str));
         if (opid == SEM2SIR_OP_INVALID) {
-          char msg[256];
-          snprintf(msg, sizeof(msg), "unknown or non-normalized operator id '%s'", op_str);
-          print_err_at(path, c, msg);
+          print_err_unknown_op_id(path, c, op_str);
           free(op_str);
           free(key);
           free(k_str);
@@ -430,9 +836,108 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
         if (strcmp(key, "init") == 0) seen_init = true;
         if (strcmp(key, "arms") == 0) seen_arms = true;
 
+        // Enforce common field shapes for better boundary errors.
+        if (!is_tok) {
+          if ((kid == SEM2SIR_INTRINSIC_Unit && strcmp(key, "items") == 0) ||
+              (kid == SEM2SIR_INTRINSIC_Block && strcmp(key, "items") == 0) ||
+              (kid == SEM2SIR_INTRINSIC_Args && strcmp(key, "items") == 0) ||
+              (kid == SEM2SIR_INTRINSIC_Proc && strcmp(key, "params") == 0) ||
+              (kid == SEM2SIR_INTRINSIC_Match && strcmp(key, "arms") == 0)) {
+            char field_buf[64];
+            snprintf(field_buf, sizeof(field_buf), "%s.%s", k_str, key);
+            if (!json_expect_array_value(c, path, field_buf)) {
+              free(key);
+              free(k_str);
+              return false;
+            }
+            free(key);
+            continue;
+          }
+
+          if (kid == SEM2SIR_INTRINSIC_Call && strcmp(key, "args") == 0) {
+            if (!json_expect_node_or_null_value(
+                    c, path, "Call.args",
+                    "use null for arity 0, or {\"k\":\"Args\",\"items\":[...]} for arity > 0")) {
+              free(key);
+              free(k_str);
+              return false;
+            }
+            free(key);
+            continue;
+          }
+
+          if ((kid == SEM2SIR_INTRINSIC_Proc && strcmp(key, "ret") == 0) ||
+              (kid == SEM2SIR_INTRINSIC_Proc && strcmp(key, "body") == 0) ||
+              (kid == SEM2SIR_INTRINSIC_Var && (strcmp(key, "type") == 0 || strcmp(key, "init") == 0)) ||
+              (kid == SEM2SIR_INTRINSIC_VarPat && (strcmp(key, "type") == 0 || strcmp(key, "init") == 0)) ||
+              (kid == SEM2SIR_INTRINSIC_ExprStmt && strcmp(key, "expr") == 0) ||
+              (kid == SEM2SIR_INTRINSIC_If && (strcmp(key, "cond") == 0 || strcmp(key, "then") == 0 || strcmp(key, "else") == 0)) ||
+              (kid == SEM2SIR_INTRINSIC_While && (strcmp(key, "cond") == 0 || strcmp(key, "body") == 0)) ||
+              (kid == SEM2SIR_INTRINSIC_Loop && strcmp(key, "body") == 0) ||
+              (kid == SEM2SIR_INTRINSIC_Paren && strcmp(key, "expr") == 0) ||
+              (kid == SEM2SIR_INTRINSIC_Not && strcmp(key, "expr") == 0) ||
+              (kid == SEM2SIR_INTRINSIC_Neg && strcmp(key, "expr") == 0) ||
+              (kid == SEM2SIR_INTRINSIC_BitNot && strcmp(key, "expr") == 0) ||
+              (kid == SEM2SIR_INTRINSIC_AddrOf && strcmp(key, "expr") == 0) ||
+              (kid == SEM2SIR_INTRINSIC_Deref && strcmp(key, "expr") == 0) ||
+              (kid == SEM2SIR_INTRINSIC_Match && strcmp(key, "cond") == 0) ||
+              (kid == SEM2SIR_INTRINSIC_MatchArm && (strcmp(key, "pat") == 0 || strcmp(key, "body") == 0))) {
+            char field_buf[64];
+            snprintf(field_buf, sizeof(field_buf), "%s.%s", k_str, key);
+            // Some of these are optional; allow null where permitted.
+            bool allow_null = (kid == SEM2SIR_INTRINSIC_If && strcmp(key, "else") == 0) ||
+                              (kid == SEM2SIR_INTRINSIC_Return && strcmp(key, "value") == 0) ||
+                              (kid == SEM2SIR_INTRINSIC_MatchArm && strcmp(key, "guard") == 0);
+
+            if (allow_null) {
+              if (!json_expect_node_or_null_value(c, path, field_buf, NULL)) {
+                free(key);
+                free(k_str);
+                return false;
+              }
+            } else {
+              if (!json_expect_node_value(c, path, field_buf, NULL)) {
+                free(key);
+                free(k_str);
+                return false;
+              }
+            }
+            free(key);
+            continue;
+          }
+
+          if (kid == SEM2SIR_INTRINSIC_Proc && strcmp(key, "extern") == 0) {
+            char ch2 = 0;
+            if (!json_peek_non_ws(c, &ch2)) {
+              print_err_at(path, c, "unexpected EOF");
+              free(key);
+              free(k_str);
+              return false;
+            }
+            if (!(ch2 == 't' || ch2 == 'f' || ch2 == 'n')) {
+              print_err_at(path, c, "Proc.extern must be true/false or null");
+              fprintf(stderr, "  hint: extern is a witness bool; omit or set to true/false\n");
+              fprintf(stderr, "  expected: ");
+              print_expected_field_schema(stderr, "Proc.extern");
+              fputc('\n', stderr);
+              free(key);
+              free(k_str);
+              return false;
+            }
+            if (!grit_json_skip_value(c)) {
+              print_err_at(path, c, "invalid JSON value");
+              free(key);
+              free(k_str);
+              return false;
+            }
+            free(key);
+            continue;
+          }
+        }
+
         if (!is_tok && kid == SEM2SIR_INTRINSIC_TypeRef && strcmp(key, "name") == 0) {
-          // TypeRef.name must be a tok leaf. If it's a known physical sem2sir type,
-          // require it to be normalized; otherwise allow user-defined/nominal names.
+          // TypeRef.name must be a tok leaf containing a normalized sem2sir builtin type id.
+          // sem2sir does not resolve nominal/user-defined types.
           char *type_text = NULL;
           if (!parse_tok_text_alloc_strict(c, path, &type_text)) {
             free(key);
@@ -440,10 +945,8 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
             return false;
           }
           sem2sir_type_id tid = sem2sir_type_parse(type_text, strlen(type_text));
-          if (tid == SEM2SIR_TYPE_INVALID && !is_ident_like_type_name(type_text)) {
-            char msg[256];
-            snprintf(msg, sizeof(msg), "TypeRef.name must be identifier-like, got '%s'", type_text);
-            print_err_at(path, c, msg);
+          if (tid == SEM2SIR_TYPE_INVALID) {
+            print_err_unknown_type_id(path, c, type_text);
             free(type_text);
             free(key);
             free(k_str);
@@ -468,14 +971,20 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
     if (!is_tok) {
       if (kid == SEM2SIR_INTRINSIC_Call) {
         if (!seen_callee || !seen_args) {
-          print_err_at(path, c, "Call requires fields: callee, args");
+          print_err_at(path, &obj_start, "Call requires fields: callee, args");
+          fprintf(stderr, "  expected: ");
+          print_expected_schema(stderr, kid);
+          fputc('\n', stderr);
           free(k_str);
           return false;
         }
       }
       if (kid == SEM2SIR_INTRINSIC_Args) {
         if (!seen_items) {
-          print_err_at(path, c, "Args requires field: items");
+          print_err_at(path, &obj_start, "Args requires field: items");
+          fprintf(stderr, "  expected: ");
+          print_expected_schema(stderr, kid);
+          fputc('\n', stderr);
           free(k_str);
           return false;
         }
@@ -483,49 +992,70 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
       if (kid == SEM2SIR_INTRINSIC_Param) {
         // Param.name is tracked as seen_name, Param.type as seen_type.
         if (!seen_name || !seen_type) {
-          print_err_at(path, c, "Param requires fields: name, type");
+          print_err_at(path, &obj_start, "Param requires fields: name, type");
+          fprintf(stderr, "  expected: ");
+          print_expected_schema(stderr, kid);
+          fputc('\n', stderr);
           free(k_str);
           return false;
         }
       }
       if (kid == SEM2SIR_INTRINSIC_ParamPat) {
         if (!seen_pat || !seen_type) {
-          print_err_at(path, c, "ParamPat requires fields: pat, type");
+          print_err_at(path, &obj_start, "ParamPat requires fields: pat, type");
+          fprintf(stderr, "  expected: ");
+          print_expected_schema(stderr, kid);
+          fputc('\n', stderr);
           free(k_str);
           return false;
         }
       }
       if (kid == SEM2SIR_INTRINSIC_VarPat) {
         if (!seen_pat || !seen_init) {
-          print_err_at(path, c, "VarPat requires fields: pat, init");
+          print_err_at(path, &obj_start, "VarPat requires fields: pat, init");
+          fprintf(stderr, "  expected: ");
+          print_expected_schema(stderr, kid);
+          fputc('\n', stderr);
           free(k_str);
           return false;
         }
       }
       if (kid == SEM2SIR_INTRINSIC_PatBind) {
         if (!seen_name) {
-          print_err_at(path, c, "PatBind requires field: name");
+          print_err_at(path, &obj_start, "PatBind requires field: name");
+          fprintf(stderr, "  expected: ");
+          print_expected_schema(stderr, kid);
+          fputc('\n', stderr);
           free(k_str);
           return false;
         }
       }
       if (kid == SEM2SIR_INTRINSIC_PatInt) {
         if (!seen_lit) {
-          print_err_at(path, c, "PatInt requires field: lit");
+          print_err_at(path, &obj_start, "PatInt requires field: lit");
+          fprintf(stderr, "  expected: ");
+          print_expected_schema(stderr, kid);
+          fputc('\n', stderr);
           free(k_str);
           return false;
         }
       }
       if (kid == SEM2SIR_INTRINSIC_Bin) {
         if (!seen_op || !seen_lhs || !seen_rhs) {
-          print_err_at(path, c, "Bin requires fields: op, lhs, rhs");
+          print_err_at(path, &obj_start, "Bin requires fields: op, lhs, rhs");
+          fprintf(stderr, "  expected: ");
+          print_expected_schema(stderr, kid);
+          fputc('\n', stderr);
           free(k_str);
           return false;
         }
       }
       if (kid == SEM2SIR_INTRINSIC_Match) {
         if (!seen_cond || !seen_arms) {
-          print_err_at(path, c, "Match requires fields: cond, arms");
+          print_err_at(path, &obj_start, "Match requires fields: cond, arms");
+          fprintf(stderr, "  expected: ");
+          print_expected_schema(stderr, kid);
+          fputc('\n', stderr);
           free(k_str);
           return false;
         }
@@ -533,51 +1063,89 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
       if (kid == SEM2SIR_INTRINSIC_Block || kid == SEM2SIR_INTRINSIC_Unit) {
         // Unit.items and Block.items are required (may be empty array).
         if (!seen_items) {
-          print_err_at(path, c, "node requires field: items");
+          char msg[128];
+          snprintf(msg, sizeof(msg), "%s requires field: items", k_str);
+          print_err_at(path, &obj_start, msg);
+          fprintf(stderr, "  expected: ");
+          print_expected_schema(stderr, kid);
+          fputc('\n', stderr);
           free(k_str);
           return false;
         }
       }
       if (kid == SEM2SIR_INTRINSIC_Proc) {
         if (!seen_body) {
-          print_err_at(path, c, "Proc requires field: body");
+          print_err_at(path, &obj_start, "Proc requires field: body");
+          fprintf(stderr, "  expected: ");
+          print_expected_schema(stderr, kid);
+          fputc('\n', stderr);
           free(k_str);
           return false;
         }
       }
       if (kid == SEM2SIR_INTRINSIC_If) {
         if (!seen_cond || !seen_then) {
-          print_err_at(path, c, "If requires fields: cond, then");
+          print_err_at(path, &obj_start, "If requires fields: cond, then");
+          fprintf(stderr, "  expected: ");
+          print_expected_schema(stderr, kid);
+          fputc('\n', stderr);
           free(k_str);
           return false;
         }
       }
       if (kid == SEM2SIR_INTRINSIC_While) {
         if (!seen_cond || !seen_body) {
-          print_err_at(path, c, "While requires fields: cond, body");
+          print_err_at(path, &obj_start, "While requires fields: cond, body");
+          fprintf(stderr, "  expected: ");
+          print_expected_schema(stderr, kid);
+          fputc('\n', stderr);
+          free(k_str);
+          return false;
+        }
+      }
+      if (kid == SEM2SIR_INTRINSIC_Loop) {
+        if (!seen_body) {
+          print_err_at(path, &obj_start, "Loop requires field: body");
+          fprintf(stderr, "  expected: ");
+          print_expected_schema(stderr, kid);
+          fputc('\n', stderr);
           free(k_str);
           return false;
         }
       }
       if (kid == SEM2SIR_INTRINSIC_Name && !seen_id) {
-        print_err_at(path, c, "Name requires field: id");
+        print_err_at(path, &obj_start, "Name requires field: id");
+        fprintf(stderr, "  expected: ");
+        print_expected_schema(stderr, kid);
+        fputc('\n', stderr);
         free(k_str);
         return false;
       }
       if (kid == SEM2SIR_INTRINSIC_TypeRef && !seen_name) {
-        print_err_at(path, c, "TypeRef requires field: name");
+        print_err_at(path, &obj_start, "TypeRef requires field: name");
+        fprintf(stderr, "  expected: ");
+        print_expected_schema(stderr, kid);
+        fputc('\n', stderr);
         free(k_str);
         return false;
       }
       if (kid == SEM2SIR_INTRINSIC_Int && !seen_lit) {
-        print_err_at(path, c, "Int requires field: lit");
+        print_err_at(path, &obj_start, "Int requires field: lit");
+        fprintf(stderr, "  expected: ");
+        print_expected_schema(stderr, kid);
+        fputc('\n', stderr);
         free(k_str);
         return false;
       }
       if ((kid == SEM2SIR_INTRINSIC_Paren || kid == SEM2SIR_INTRINSIC_Not || kid == SEM2SIR_INTRINSIC_Neg ||
            kid == SEM2SIR_INTRINSIC_BitNot || kid == SEM2SIR_INTRINSIC_AddrOf || kid == SEM2SIR_INTRINSIC_Deref) &&
           !seen_expr) {
-        print_err_at(path, c, "node requires field: expr");
+        char msg[128];
+        snprintf(msg, sizeof(msg), "%s requires field: expr", k_str);
+        print_err_at(path, &obj_start, msg);
+        fprintf(stderr, "  expected: ");
+        print_expected_schema(stderr, kid);
+        fputc('\n', stderr);
         free(k_str);
         return false;
       }
@@ -795,6 +1363,25 @@ static bool check_meta_types(GritJsonCursor *c, const char *path) {
         free(key);
         return false;
       }
+    } else if (strcmp(key, "ops") == 0) {
+      // sem2sir does not accept operator aliasing metadata. If present, it must
+      // be an empty object.
+      if (!grit_json_consume_char(c, '{')) {
+        print_err_at(path, c, "meta.ops must be an object");
+        free(key);
+        return false;
+      }
+      if (!json_peek_non_ws(c, &ch)) {
+        print_err_at(path, c, "unexpected EOF in meta.ops");
+        free(key);
+        return false;
+      }
+      if (ch != '}') {
+        print_err_at(path, c, "meta.ops must be {} (commit operators upstream)");
+        free(key);
+        return false;
+      }
+      c->p++;
     } else {
       if (!grit_json_skip_value(c)) {
         print_err_at(path, c, "invalid meta value");
@@ -832,6 +1419,10 @@ int sem2sir_check_stage4_file(const char *path) {
     fprintf(stderr, "sem2sir: %s: failed to read file\n", path ? path : "<input>");
     return 1;
   }
+
+  // Enable location/snippet printing for diagnostics.
+  g_buf_start = buf;
+  g_buf_end = buf + len;
 
   GritJsonCursor c = grit_json_cursor(buf, len);
   bool ok = true;
@@ -948,6 +1539,8 @@ int sem2sir_check_stage4_file(const char *path) {
   }
 
 done:
+  g_buf_start = NULL;
+  g_buf_end = NULL;
   free(buf);
   return ok ? 0 : 1;
 }

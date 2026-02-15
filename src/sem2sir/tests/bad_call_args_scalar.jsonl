@@ -1,0 +1,31 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"__default_int": "i64"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "i64"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {
+              "k": "ExprStmt",
+              "expr": {
+                "k": "Call",
+                "callee": {"k": "Name", "id": {"k": "tok", "text": "f"}},
+                "args": 123
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

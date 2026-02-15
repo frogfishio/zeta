@@ -1,0 +1,40 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {
+      "I32": "i32",
+      "Bool": "bool",
+      "Void": "void"
+    },
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {
+              "k": "Loop",
+              "body": {
+                "k": "Block",
+                "items": [
+                  {"k": "Break"}
+                ]
+              }
+            },
+            {
+              "k": "Return",
+              "value": {"k": "Int", "lit": {"k": "tok", "text": "0"}}
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

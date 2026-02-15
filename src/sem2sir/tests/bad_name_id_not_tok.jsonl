@@ -1,0 +1,26 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {
+      "__default_int": "i64"
+    },
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "i64"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {"k": "Return", "value": {"k": "Name", "id": "x"}}
+          ]
+        }
+      }
+    ]
+  }
+}

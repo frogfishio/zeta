@@ -1,0 +1,8 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"__default_int": "i64"},
+    "ops": {"+": "core.add"}
+  },
+  "ast": {"k": "Unit", "items": []}
+}

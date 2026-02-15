@@ -67,7 +67,7 @@ const char *sem2sir_type_to_string(sem2sir_type_id t) {
   }
 }
 
-// Ops (semantic operator IDs from pack meta.ops -> Stage4 Bin.op)
+// Ops (semantic operator IDs; Stage4 Bin.op must already be normalized)
 
 static const entry OP_TABLE[] = {
     {"core.assign", 11, SEM2SIR_OP_CORE_ASSIGN},
@@ -163,6 +163,7 @@ static const entry INTRINSIC_TABLE[] = {
     {"Return", 6, SEM2SIR_INTRINSIC_Return},
     {"If", 2, SEM2SIR_INTRINSIC_If},
     {"While", 5, SEM2SIR_INTRINSIC_While},
+    {"Loop", 4, SEM2SIR_INTRINSIC_Loop},
     {"Break", 5, SEM2SIR_INTRINSIC_Break},
     {"Continue", 8, SEM2SIR_INTRINSIC_Continue},
 
@@ -223,6 +224,8 @@ const char *sem2sir_intrinsic_to_string(sem2sir_intrinsic_id k) {
     return "If";
   case SEM2SIR_INTRINSIC_While:
     return "While";
+  case SEM2SIR_INTRINSIC_Loop:
+    return "Loop";
   case SEM2SIR_INTRINSIC_Break:
     return "Break";
   case SEM2SIR_INTRINSIC_Continue:

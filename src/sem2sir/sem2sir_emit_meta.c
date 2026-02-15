@@ -115,6 +115,25 @@ bool parse_meta_for_defaults(GritJsonCursor *c, EmitCtx *ctx) {
         free(key);
         return false;
       }
+    } else if (strcmp(key, "ops") == 0) {
+      // sem2sir does not consume operator aliasing metadata.
+      // If present, it must be an empty object.
+      if (!grit_json_consume_char(c, '{')) {
+        err(ctx->in_path, "meta.ops must be an object");
+        free(key);
+        return false;
+      }
+      if (!json_peek_non_ws(c, &ch)) {
+        err(ctx->in_path, "unexpected EOF in meta.ops");
+        free(key);
+        return false;
+      }
+      if (ch != '}') {
+        err(ctx->in_path, "meta.ops must be {} (commit operators upstream)");
+        free(key);
+        return false;
+      }
+      c->p++; // consume '}'
     } else {
       if (!grit_json_skip_value(c)) {
         err(ctx->in_path, "invalid meta value");

@@ -14,66 +14,45 @@ static void usage(const char *argv0) {
 }
 
 static int dump_profile(void) {
-  // Keep this simple: just prove the dictionary is wired up.
-  const char *types[] = {"i32", "bool", "u8", "u32", "u64", "i64", "f64", "void", "ptr", "slice", "string.utf8"};
-  const char *ops[] = {
-      "core.assign",
-      "core.bool.or_sc",
-      "core.bool.and_sc",
-      "core.add",
-      "core.sub",
-      "core.mul",
-      "core.div",
-      "core.rem",
-      "core.shl",
-      "core.shr",
-      "core.bitand",
-      "core.bitor",
-      "core.bitxor",
-      "core.eq",
-      "core.ne",
-      "core.lt",
-      "core.lte",
-      "core.gt",
-      "core.gte",
-  };
-  const char *ks[] = {
-      "Unit", "Proc", "Block", "Var", "ExprStmt", "Return", "If", "While",
-      "Param", "Call", "Args",
-      "Name", "TypeRef", "Int", "True", "False", "Nil", "Paren", "Bin",
-  };
+  // Keep this simple: dump the full dictionary and assert roundtrips.
 
-  for (size_t i = 0; i < sizeof(types) / sizeof(types[0]); i++) {
-    const char *s = types[i];
-    sem2sir_type_id t = sem2sir_type_parse(s, strlen(s));
-    const char *back = sem2sir_type_to_string(t);
-    if (t == SEM2SIR_TYPE_INVALID || !back) {
-      fprintf(stderr, "internal: type not in dictionary: %s\n", s);
+  for (int t = 1; t <= (int)SEM2SIR_TYPE_STRING_UTF8; t++) {
+    sem2sir_type_id tid = (sem2sir_type_id)t;
+    const char *s = sem2sir_type_to_string(tid);
+    if (!s)
+      continue;
+    sem2sir_type_id back = sem2sir_type_parse(s, strlen(s));
+    if (back != tid) {
+      fprintf(stderr, "internal: type dictionary mismatch: id=%d string='%s' parsed=%d\n", t, s, (int)back);
       return 2;
     }
-    printf("type %s\n", back);
+    printf("type %s\n", s);
   }
 
-  for (size_t i = 0; i < sizeof(ops) / sizeof(ops[0]); i++) {
-    const char *s = ops[i];
-    sem2sir_op_id op = sem2sir_op_parse(s, strlen(s));
-    const char *back = sem2sir_op_to_string(op);
-    if (op == SEM2SIR_OP_INVALID || !back) {
-      fprintf(stderr, "internal: op not in dictionary: %s\n", s);
+  for (int op = 1; op <= (int)SEM2SIR_OP_CORE_GTE; op++) {
+    sem2sir_op_id opid = (sem2sir_op_id)op;
+    const char *s = sem2sir_op_to_string(opid);
+    if (!s)
+      continue;
+    sem2sir_op_id back = sem2sir_op_parse(s, strlen(s));
+    if (back != opid) {
+      fprintf(stderr, "internal: op dictionary mismatch: id=%d string='%s' parsed=%d\n", op, s, (int)back);
       return 2;
     }
-    printf("op %s\n", back);
+    printf("op %s\n", s);
   }
 
-  for (size_t i = 0; i < sizeof(ks) / sizeof(ks[0]); i++) {
-    const char *s = ks[i];
-    sem2sir_intrinsic_id k = sem2sir_intrinsic_parse(s, strlen(s));
-    const char *back = sem2sir_intrinsic_to_string(k);
-    if (k == SEM2SIR_INTRINSIC_INVALID || !back) {
-      fprintf(stderr, "internal: intrinsic not in dictionary: %s\n", s);
+  for (int k = 1; k <= (int)SEM2SIR_INTRINSIC_MatchArm; k++) {
+    sem2sir_intrinsic_id kid = (sem2sir_intrinsic_id)k;
+    const char *s = sem2sir_intrinsic_to_string(kid);
+    if (!s)
+      continue;
+    sem2sir_intrinsic_id back = sem2sir_intrinsic_parse(s, strlen(s));
+    if (back != kid) {
+      fprintf(stderr, "internal: intrinsic dictionary mismatch: id=%d string='%s' parsed=%d\n", k, s, (int)back);
       return 2;
     }
-    printf("intrinsic %s\n", back);
+    printf("intrinsic %s\n", s);
   }
 
   return 0;
