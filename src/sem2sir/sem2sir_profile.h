@@ -73,6 +73,9 @@ typedef enum {
   SEM2SIR_INTRINSIC_If,
   SEM2SIR_INTRINSIC_While,
   SEM2SIR_INTRINSIC_Loop,
+  SEM2SIR_INTRINSIC_DoWhile,
+  SEM2SIR_INTRINSIC_For,
+  SEM2SIR_INTRINSIC_ForInt,
   SEM2SIR_INTRINSIC_Break,
   SEM2SIR_INTRINSIC_Continue,
 
@@ -106,6 +109,9 @@ typedef enum {
   // Control-flow expressions
   SEM2SIR_INTRINSIC_Match,
   SEM2SIR_INTRINSIC_MatchArm,
+
+  // Sentinel (not a real intrinsic)
+  SEM2SIR_INTRINSIC__MAX,
 } sem2sir_intrinsic_id;
 
 // Parse/format helpers. These are strict: they only accept the closed vocab.

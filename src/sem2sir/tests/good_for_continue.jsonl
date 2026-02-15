@@ -1,0 +1,61 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"@default.int": "i32", "I32": "i32", "Bool": "bool", "Void": "void"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {
+              "k": "For",
+              "init": {
+                "k": "Block",
+                "items": [
+                  {
+                    "k": "Var",
+                    "name": {"k": "tok", "text": "i"},
+                    "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
+                    "init": {"k": "Int", "lit": {"k": "tok", "text": "0"}}
+                  }
+                ]
+              },
+              "cond": {
+                "k": "Bin",
+                "op": "core.lt",
+                "lhs": {"k": "Name", "id": {"k": "tok", "text": "i"}},
+                "rhs": {"k": "Int", "lit": {"k": "tok", "text": "10"}}
+              },
+              "step": {
+                "k": "Block",
+                "items": [
+                  {
+                    "k": "Bin",
+                    "op": "core.assign",
+                    "lhs": {"k": "Name", "id": {"k": "tok", "text": "i"}},
+                    "rhs": {
+                      "k": "Bin",
+                      "op": "core.add",
+                      "lhs": {"k": "Name", "id": {"k": "tok", "text": "i"}},
+                      "rhs": {"k": "Int", "lit": {"k": "tok", "text": "1"}}
+                    }
+                  }
+                ]
+              },
+              "body": {"k": "Block", "items": [{"k": "Continue"}]}
+            },
+            {"k": "Return", "value": {"k": "Int", "lit": {"k": "tok", "text": "0"}}}
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -164,6 +164,9 @@ static const entry INTRINSIC_TABLE[] = {
     {"If", 2, SEM2SIR_INTRINSIC_If},
     {"While", 5, SEM2SIR_INTRINSIC_While},
     {"Loop", 4, SEM2SIR_INTRINSIC_Loop},
+    {"DoWhile", 7, SEM2SIR_INTRINSIC_DoWhile},
+    {"For", 3, SEM2SIR_INTRINSIC_For},
+    {"ForInt", 6, SEM2SIR_INTRINSIC_ForInt},
     {"Break", 5, SEM2SIR_INTRINSIC_Break},
     {"Continue", 8, SEM2SIR_INTRINSIC_Continue},
 
@@ -226,6 +229,12 @@ const char *sem2sir_intrinsic_to_string(sem2sir_intrinsic_id k) {
     return "While";
   case SEM2SIR_INTRINSIC_Loop:
     return "Loop";
+  case SEM2SIR_INTRINSIC_DoWhile:
+    return "DoWhile";
+  case SEM2SIR_INTRINSIC_For:
+    return "For";
+  case SEM2SIR_INTRINSIC_ForInt:
+    return "ForInt";
   case SEM2SIR_INTRINSIC_Break:
     return "Break";
   case SEM2SIR_INTRINSIC_Continue:

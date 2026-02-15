@@ -42,7 +42,7 @@ static int dump_profile(void) {
     printf("op %s\n", s);
   }
 
-  for (int k = 1; k <= (int)SEM2SIR_INTRINSIC_MatchArm; k++) {
+  for (int k = 1; k < (int)SEM2SIR_INTRINSIC__MAX; k++) {
     sem2sir_intrinsic_id kid = (sem2sir_intrinsic_id)k;
     const char *s = sem2sir_intrinsic_to_string(kid);
     if (!s)

@@ -62,6 +62,88 @@ static bool parse_pat_bind_name_alloc_strict(GritJsonCursor *c, EmitCtx *ctx, ch
   return true;
 }
 
+static bool forint_parse_var_name_alloc_strict(const char *var_json, size_t var_len, EmitCtx *ctx, char **out_name) {
+  *out_name = NULL;
+  if (!var_json || var_len == 0) {
+    err(ctx->in_path, "ForInt.var missing JSON");
+    return false;
+  }
+
+  GritJsonCursor vc = grit_json_cursor(var_json, var_len);
+  char *k = NULL;
+  if (!parse_node_k_string(&vc, ctx, &k))
+    return false;
+
+  bool is_var = (strcmp(k, "Var") == 0);
+  bool is_var_pat = (strcmp(k, "VarPat") == 0);
+  if (!is_var && !is_var_pat) {
+    err(ctx->in_path, "ForInt.var must be Var or VarPat");
+    free(k);
+    return false;
+  }
+  free(k);
+
+  bool seen_name = false;
+  bool seen_pat = false;
+  char *name_text = NULL;
+  char ch = 0;
+  for (;;) {
+    if (!json_peek_non_ws(&vc, &ch)) {
+      err(ctx->in_path, "unexpected EOF in ForInt.var");
+      free(name_text);
+      return false;
+    }
+    if (ch == '}') {
+      vc.p++;
+      break;
+    }
+    if (ch != ',') {
+      err(ctx->in_path, "expected ',' or '}' in ForInt.var");
+      free(name_text);
+      return false;
+    }
+    vc.p++;
+    char *key = NULL;
+    if (!json_expect_key(&vc, &key)) {
+      err(ctx->in_path, "invalid ForInt.var key");
+      free(name_text);
+      return false;
+    }
+
+    if (is_var && strcmp(key, "name") == 0) {
+      seen_name = true;
+      if (!parse_tok_text_alloc_strict(&vc, ctx->in_path, &name_text)) {
+        free(key);
+        return false;
+      }
+    } else if (is_var_pat && strcmp(key, "pat") == 0) {
+      seen_pat = true;
+      if (!parse_pat_bind_name_alloc_strict(&vc, ctx, &name_text)) {
+        free(key);
+        return false;
+      }
+    } else {
+      if (!grit_json_skip_value(&vc)) {
+        err(ctx->in_path, "invalid ForInt.var field");
+        free(key);
+        free(name_text);
+        return false;
+      }
+    }
+
+    free(key);
+  }
+
+  if ((is_var && (!seen_name || !name_text)) || (is_var_pat && (!seen_pat || !name_text))) {
+    err(ctx->in_path, "ForInt.var must bind a name (Var.name or VarPat.pat=PatBind)");
+    free(name_text);
+    return false;
+  }
+
+  *out_name = name_text;
+  return true;
+}
+
 bool parse_block(GritJsonCursor *c, EmitCtx *ctx, SirFnBuild *fn, bool require_return, const LoopTargets *loop);
 
 bool skip_remaining_object_fields(GritJsonCursor *c, EmitCtx *ctx, const char *what) {
@@ -591,6 +673,1111 @@ bool parse_stmt_loop(GritJsonCursor *c, EmitCtx *ctx, SirFnBuild *fn) {
   return true;
 }
 
+bool parse_stmt_do_while(GritJsonCursor *c, EmitCtx *ctx, SirFnBuild *fn) {
+  bool seen_body = false;
+  bool seen_cond = false;
+
+  char *body_json = NULL;
+  size_t body_len = 0;
+  char *cond_json = NULL;
+  size_t cond_len = 0;
+
+  char ch = 0;
+  for (;;) {
+    if (!json_peek_non_ws(c, &ch)) {
+      err(ctx->in_path, "unexpected EOF in DoWhile");
+      free(body_json);
+      free(cond_json);
+      return false;
+    }
+    if (ch == '}') {
+      c->p++;
+      break;
+    }
+    if (ch != ',') {
+      err(ctx->in_path, "expected ',' or '}' in DoWhile");
+      free(body_json);
+      free(cond_json);
+      return false;
+    }
+    c->p++;
+
+    char *key = NULL;
+    if (!json_expect_key(c, &key)) {
+      err(ctx->in_path, "invalid DoWhile key");
+      free(body_json);
+      free(cond_json);
+      return false;
+    }
+
+    if (strcmp(key, "body") == 0) {
+      seen_body = true;
+      free(body_json);
+      body_json = NULL;
+      if (!capture_json_value_alloc(c, &body_json, &body_len)) {
+        err(ctx->in_path, "invalid DoWhile.body");
+        free(key);
+        free(cond_json);
+        return false;
+      }
+      free(key);
+      continue;
+    }
+
+    if (strcmp(key, "cond") == 0) {
+      seen_cond = true;
+      free(cond_json);
+      cond_json = NULL;
+      if (!capture_json_value_alloc(c, &cond_json, &cond_len)) {
+        err(ctx->in_path, "invalid DoWhile.cond");
+        free(key);
+        free(body_json);
+        return false;
+      }
+      free(key);
+      continue;
+    }
+
+    if (!grit_json_skip_value(c)) {
+      err(ctx->in_path, "invalid DoWhile field");
+      free(key);
+      free(body_json);
+      free(cond_json);
+      return false;
+    }
+    free(key);
+  }
+
+  if (!seen_body || !seen_cond || !body_json || !cond_json) {
+    err(ctx->in_path, "DoWhile requires fields: body, cond");
+    free(body_json);
+    free(cond_json);
+    return false;
+  }
+
+  // Allocate blocks: body, cond-check, exit.
+  size_t body_idx = 0;
+  size_t cond_idx = 0;
+  size_t exit_idx = 0;
+  if (!fn_build_new_block(fn, ctx, &body_idx) || !fn_build_new_block(fn, ctx, &cond_idx) ||
+      !fn_build_new_block(fn, ctx, &exit_idx)) {
+    err(ctx->in_path, "OOM creating DoWhile blocks");
+    free(body_json);
+    free(cond_json);
+    return false;
+  }
+
+  // Jump to body.
+  char *br_to_body = NULL;
+  if (!emit_term_br(ctx, fn->blocks[body_idx].id, &br_to_body)) {
+    err(ctx->in_path, "OOM emitting term.br");
+    free(body_json);
+    free(cond_json);
+    return false;
+  }
+  if (!fn_build_append_stmt(fn, ctx, br_to_body, true)) {
+    free(body_json);
+    free(cond_json);
+    return false;
+  }
+
+  // Parse body.
+  LoopTargets targets = {.break_to = exit_idx, .continue_to = cond_idx};
+  fn->cur_block = body_idx;
+  GritJsonCursor bc = grit_json_cursor(body_json, body_len);
+  if (!parse_block(&bc, ctx, fn, false, &targets)) {
+    free(body_json);
+    free(cond_json);
+    return false;
+  }
+  if (!fn->blocks[fn->cur_block].terminated) {
+    char *to_cond = NULL;
+    if (!emit_term_br(ctx, fn->blocks[cond_idx].id, &to_cond)) {
+      free(body_json);
+      free(cond_json);
+      return false;
+    }
+    if (!fn_build_append_stmt(fn, ctx, to_cond, true)) {
+      free(body_json);
+      free(cond_json);
+      return false;
+    }
+  }
+
+  // Parse cond-check.
+  fn->cur_block = cond_idx;
+  SirExpr cond = {0};
+  StmtList cond_effects = {0};
+  {
+    GritJsonCursor cc = grit_json_cursor(cond_json, cond_len);
+    StmtList *saved = ctx->effects;
+    ctx->effects = &cond_effects;
+    bool ok = parse_expr(&cc, ctx, SEM2SIR_TYPE_BOOL, &cond);
+    ctx->effects = saved;
+    if (!ok) {
+      free(body_json);
+      free(cond_json);
+      free(cond_effects.ids);
+      return false;
+    }
+  }
+  if (!fn_build_append_effects(fn, ctx, &cond_effects)) {
+    free(body_json);
+    free(cond_json);
+    free(cond.id);
+    return false;
+  }
+  if (cond.type != SEM2SIR_TYPE_BOOL) {
+    err(ctx->in_path, "DoWhile.cond must be bool");
+    free(body_json);
+    free(cond_json);
+    free(cond.id);
+    return false;
+  }
+  char *t_id = NULL;
+  if (!emit_term_condbr(ctx, cond.id, fn->blocks[body_idx].id, fn->blocks[exit_idx].id, &t_id)) {
+    free(body_json);
+    free(cond_json);
+    free(cond.id);
+    return false;
+  }
+  if (!fn_build_append_stmt(fn, ctx, t_id, true)) {
+    free(body_json);
+    free(cond_json);
+    free(cond.id);
+    return false;
+  }
+
+  fn->cur_block = exit_idx;
+  free(body_json);
+  free(cond_json);
+  free(cond.id);
+  return true;
+}
+
+bool parse_stmt_for(GritJsonCursor *c, EmitCtx *ctx, SirFnBuild *fn) {
+  bool seen_body = false;
+  bool init_is_null = true;
+  bool cond_is_null = true;
+  bool step_is_null = true;
+
+  char *init_json = NULL;
+  size_t init_len = 0;
+  char *cond_json = NULL;
+  size_t cond_len = 0;
+  char *step_json = NULL;
+  size_t step_len = 0;
+  char *body_json = NULL;
+  size_t body_len = 0;
+
+  char ch = 0;
+  for (;;) {
+    if (!json_peek_non_ws(c, &ch)) {
+      err(ctx->in_path, "unexpected EOF in For");
+      free(init_json);
+      free(cond_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    if (ch == '}') {
+      c->p++;
+      break;
+    }
+    if (ch != ',') {
+      err(ctx->in_path, "expected ',' or '}' in For");
+      free(init_json);
+      free(cond_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    c->p++;
+
+    char *key = NULL;
+    if (!json_expect_key(c, &key)) {
+      err(ctx->in_path, "invalid For key");
+      free(init_json);
+      free(cond_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+
+    if (strcmp(key, "init") == 0) {
+      free(init_json);
+      init_json = NULL;
+      init_len = 0;
+      if (!json_peek_non_ws(c, &ch)) {
+        err(ctx->in_path, "unexpected EOF in For.init");
+        free(key);
+        free(cond_json);
+        free(step_json);
+        free(body_json);
+        return false;
+      }
+      if (ch == 'n') {
+        init_is_null = true;
+        if (!grit_json_skip_value(c)) {
+          err(ctx->in_path, "invalid For.init");
+          free(key);
+          free(cond_json);
+          free(step_json);
+          free(body_json);
+          return false;
+        }
+      } else {
+        init_is_null = false;
+        if (!capture_json_value_alloc(c, &init_json, &init_len)) {
+          err(ctx->in_path, "invalid For.init");
+          free(key);
+          free(cond_json);
+          free(step_json);
+          free(body_json);
+          return false;
+        }
+      }
+      free(key);
+      continue;
+    }
+
+    if (strcmp(key, "cond") == 0) {
+      free(cond_json);
+      cond_json = NULL;
+      cond_len = 0;
+      if (!json_peek_non_ws(c, &ch)) {
+        err(ctx->in_path, "unexpected EOF in For.cond");
+        free(key);
+        free(init_json);
+        free(step_json);
+        free(body_json);
+        return false;
+      }
+      if (ch == 'n') {
+        cond_is_null = true;
+        if (!grit_json_skip_value(c)) {
+          err(ctx->in_path, "invalid For.cond");
+          free(key);
+          free(init_json);
+          free(step_json);
+          free(body_json);
+          return false;
+        }
+      } else {
+        cond_is_null = false;
+        if (!capture_json_value_alloc(c, &cond_json, &cond_len)) {
+          err(ctx->in_path, "invalid For.cond");
+          free(key);
+          free(init_json);
+          free(step_json);
+          free(body_json);
+          return false;
+        }
+      }
+      free(key);
+      continue;
+    }
+
+    if (strcmp(key, "step") == 0) {
+      free(step_json);
+      step_json = NULL;
+      step_len = 0;
+      if (!json_peek_non_ws(c, &ch)) {
+        err(ctx->in_path, "unexpected EOF in For.step");
+        free(key);
+        free(init_json);
+        free(cond_json);
+        free(body_json);
+        return false;
+      }
+      if (ch == 'n') {
+        step_is_null = true;
+        if (!grit_json_skip_value(c)) {
+          err(ctx->in_path, "invalid For.step");
+          free(key);
+          free(init_json);
+          free(cond_json);
+          free(body_json);
+          return false;
+        }
+      } else {
+        step_is_null = false;
+        if (!capture_json_value_alloc(c, &step_json, &step_len)) {
+          err(ctx->in_path, "invalid For.step");
+          free(key);
+          free(init_json);
+          free(cond_json);
+          free(body_json);
+          return false;
+        }
+      }
+      free(key);
+      continue;
+    }
+
+    if (strcmp(key, "body") == 0) {
+      seen_body = true;
+      free(body_json);
+      body_json = NULL;
+      if (!capture_json_value_alloc(c, &body_json, &body_len)) {
+        err(ctx->in_path, "invalid For.body");
+        free(key);
+        free(init_json);
+        free(cond_json);
+        free(step_json);
+        return false;
+      }
+      free(key);
+      continue;
+    }
+
+    if (!grit_json_skip_value(c)) {
+      err(ctx->in_path, "invalid For field");
+      free(key);
+      free(init_json);
+      free(cond_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    free(key);
+  }
+
+  if (!seen_body || !body_json) {
+    err(ctx->in_path, "For requires field: body");
+    free(init_json);
+    free(cond_json);
+    free(step_json);
+    free(body_json);
+    return false;
+  }
+
+  // Emit init (if present) into the current block.
+  if (!init_is_null && init_json) {
+    GritJsonCursor ic = grit_json_cursor(init_json, init_len);
+    if (!parse_block(&ic, ctx, fn, false, NULL)) {
+      free(init_json);
+      free(cond_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+  }
+
+  // Allocate CFG blocks.
+  size_t header_idx = 0;
+  size_t body_idx = 0;
+  size_t step_idx = 0;
+  size_t exit_idx = 0;
+  bool has_step = (!step_is_null && step_json);
+
+  if (!fn_build_new_block(fn, ctx, &header_idx) || !fn_build_new_block(fn, ctx, &body_idx) ||
+      (has_step && !fn_build_new_block(fn, ctx, &step_idx)) || !fn_build_new_block(fn, ctx, &exit_idx)) {
+    err(ctx->in_path, "OOM creating For blocks");
+    free(init_json);
+    free(cond_json);
+    free(step_json);
+    free(body_json);
+    return false;
+  }
+
+  // Jump to header.
+  char *br_to_header = NULL;
+  if (!emit_term_br(ctx, fn->blocks[header_idx].id, &br_to_header)) {
+    err(ctx->in_path, "OOM emitting term.br");
+    free(init_json);
+    free(cond_json);
+    free(step_json);
+    free(body_json);
+    return false;
+  }
+  if (!fn_build_append_stmt(fn, ctx, br_to_header, true)) {
+    free(init_json);
+    free(cond_json);
+    free(step_json);
+    free(body_json);
+    return false;
+  }
+
+  // Header: evaluate cond if present; else unconditional branch to body.
+  fn->cur_block = header_idx;
+  if (!cond_is_null && cond_json) {
+    SirExpr cond = {0};
+    StmtList cond_effects = {0};
+    {
+      GritJsonCursor cc = grit_json_cursor(cond_json, cond_len);
+      StmtList *saved = ctx->effects;
+      ctx->effects = &cond_effects;
+      bool ok = parse_expr(&cc, ctx, SEM2SIR_TYPE_BOOL, &cond);
+      ctx->effects = saved;
+      if (!ok) {
+        free(init_json);
+        free(cond_json);
+        free(step_json);
+        free(body_json);
+        free(cond_effects.ids);
+        return false;
+      }
+    }
+    if (!fn_build_append_effects(fn, ctx, &cond_effects)) {
+      free(init_json);
+      free(cond_json);
+      free(step_json);
+      free(body_json);
+      free(cond.id);
+      return false;
+    }
+    if (cond.type != SEM2SIR_TYPE_BOOL) {
+      err(ctx->in_path, "For.cond must be bool");
+      free(init_json);
+      free(cond_json);
+      free(step_json);
+      free(body_json);
+      free(cond.id);
+      return false;
+    }
+    char *t_id = NULL;
+    if (!emit_term_condbr(ctx, cond.id, fn->blocks[body_idx].id, fn->blocks[exit_idx].id, &t_id)) {
+      free(init_json);
+      free(cond_json);
+      free(step_json);
+      free(body_json);
+      free(cond.id);
+      return false;
+    }
+    if (!fn_build_append_stmt(fn, ctx, t_id, true)) {
+      free(init_json);
+      free(cond_json);
+      free(step_json);
+      free(body_json);
+      free(cond.id);
+      return false;
+    }
+    free(cond.id);
+  } else {
+    char *t_id = NULL;
+    if (!emit_term_br(ctx, fn->blocks[body_idx].id, &t_id)) {
+      free(init_json);
+      free(cond_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    if (!fn_build_append_stmt(fn, ctx, t_id, true)) {
+      free(init_json);
+      free(cond_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+  }
+
+  // Body.
+  LoopTargets targets = {.break_to = exit_idx, .continue_to = has_step ? step_idx : header_idx};
+  fn->cur_block = body_idx;
+  {
+    GritJsonCursor bc = grit_json_cursor(body_json, body_len);
+    if (!parse_block(&bc, ctx, fn, false, &targets)) {
+      free(init_json);
+      free(cond_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+  }
+  if (!fn->blocks[fn->cur_block].terminated) {
+    char *to_next = NULL;
+    const char *next_id = fn->blocks[has_step ? step_idx : header_idx].id;
+    if (!emit_term_br(ctx, next_id, &to_next)) {
+      free(init_json);
+      free(cond_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    if (!fn_build_append_stmt(fn, ctx, to_next, true)) {
+      free(init_json);
+      free(cond_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+  }
+
+  // Step.
+  if (has_step) {
+    fn->cur_block = step_idx;
+    GritJsonCursor sc = grit_json_cursor(step_json, step_len);
+    if (!parse_block(&sc, ctx, fn, false, NULL)) {
+      free(init_json);
+      free(cond_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    if (!fn->blocks[fn->cur_block].terminated) {
+      char *back = NULL;
+      if (!emit_term_br(ctx, fn->blocks[header_idx].id, &back)) {
+        free(init_json);
+        free(cond_json);
+        free(step_json);
+        free(body_json);
+        return false;
+      }
+      if (!fn_build_append_stmt(fn, ctx, back, true)) {
+        free(init_json);
+        free(cond_json);
+        free(step_json);
+        free(body_json);
+        return false;
+      }
+    }
+  }
+
+  fn->cur_block = exit_idx;
+  free(init_json);
+  free(cond_json);
+  free(step_json);
+  free(body_json);
+  return true;
+}
+
+bool parse_stmt_for_int(GritJsonCursor *c, EmitCtx *ctx, SirFnBuild *fn) {
+  bool seen_var = false;
+  bool seen_end = false;
+  bool seen_body = false;
+  bool step_is_null = true;
+
+  char *var_json = NULL;
+  size_t var_len = 0;
+  char *end_json = NULL;
+  size_t end_len = 0;
+  char *step_json = NULL;
+  size_t step_len = 0;
+  char *body_json = NULL;
+  size_t body_len = 0;
+
+  char ch = 0;
+  for (;;) {
+    if (!json_peek_non_ws(c, &ch)) {
+      err(ctx->in_path, "unexpected EOF in ForInt");
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    if (ch == '}') {
+      c->p++;
+      break;
+    }
+    if (ch != ',') {
+      err(ctx->in_path, "expected ',' or '}' in ForInt");
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    c->p++;
+
+    char *key = NULL;
+    if (!json_expect_key(c, &key)) {
+      err(ctx->in_path, "invalid ForInt key");
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+
+    if (strcmp(key, "var") == 0) {
+      seen_var = true;
+      free(var_json);
+      var_json = NULL;
+      if (!capture_json_value_alloc(c, &var_json, &var_len)) {
+        err(ctx->in_path, "invalid ForInt.var");
+        free(key);
+        free(end_json);
+        free(step_json);
+        free(body_json);
+        return false;
+      }
+      free(key);
+      continue;
+    }
+
+    if (strcmp(key, "end") == 0) {
+      seen_end = true;
+      free(end_json);
+      end_json = NULL;
+      if (!capture_json_value_alloc(c, &end_json, &end_len)) {
+        err(ctx->in_path, "invalid ForInt.end");
+        free(key);
+        free(var_json);
+        free(step_json);
+        free(body_json);
+        return false;
+      }
+      free(key);
+      continue;
+    }
+
+    if (strcmp(key, "step") == 0) {
+      free(step_json);
+      step_json = NULL;
+      step_len = 0;
+      if (!json_peek_non_ws(c, &ch)) {
+        err(ctx->in_path, "unexpected EOF in ForInt.step");
+        free(key);
+        free(var_json);
+        free(end_json);
+        free(body_json);
+        return false;
+      }
+      if (ch == 'n') {
+        step_is_null = true;
+        if (!grit_json_skip_value(c)) {
+          err(ctx->in_path, "invalid ForInt.step");
+          free(key);
+          free(var_json);
+          free(end_json);
+          free(body_json);
+          return false;
+        }
+      } else {
+        step_is_null = false;
+        if (!capture_json_value_alloc(c, &step_json, &step_len)) {
+          err(ctx->in_path, "invalid ForInt.step");
+          free(key);
+          free(var_json);
+          free(end_json);
+          free(body_json);
+          return false;
+        }
+      }
+      free(key);
+      continue;
+    }
+
+    if (strcmp(key, "body") == 0) {
+      seen_body = true;
+      free(body_json);
+      body_json = NULL;
+      if (!capture_json_value_alloc(c, &body_json, &body_len)) {
+        err(ctx->in_path, "invalid ForInt.body");
+        free(key);
+        free(var_json);
+        free(end_json);
+        free(step_json);
+        return false;
+      }
+      free(key);
+      continue;
+    }
+
+    if (!grit_json_skip_value(c)) {
+      err(ctx->in_path, "invalid ForInt field");
+      free(key);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    free(key);
+  }
+
+  if (!seen_var || !seen_end || !seen_body || !var_json || !end_json || !body_json) {
+    err(ctx->in_path, "ForInt requires fields: var, end, body");
+    free(var_json);
+    free(end_json);
+    free(step_json);
+    free(body_json);
+    return false;
+  }
+
+  // Determine induction variable name.
+  char *iv_name = NULL;
+  if (!forint_parse_var_name_alloc_strict(var_json, var_len, ctx, &iv_name)) {
+    free(var_json);
+    free(end_json);
+    free(step_json);
+    free(body_json);
+    return false;
+  }
+
+  // Emit var declaration by parsing a synthetic one-item Block.
+  {
+    const char *pre = "{\"k\":\"Block\",\"items\":[";
+    const char *post = "]}";
+    size_t syn_len = strlen(pre) + var_len + strlen(post);
+    char *syn = (char *)malloc(syn_len + 1);
+    if (!syn) {
+      err(ctx->in_path, "OOM building ForInt synthetic Block");
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    memcpy(syn, pre, strlen(pre));
+    memcpy(syn + strlen(pre), var_json, var_len);
+    memcpy(syn + strlen(pre) + var_len, post, strlen(post));
+    syn[syn_len] = '\0';
+
+    GritJsonCursor sc = grit_json_cursor(syn, syn_len);
+    bool ok = parse_block(&sc, ctx, fn, false, NULL);
+    free(syn);
+    if (!ok) {
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+  }
+
+  // Lookup iv type and ensure it's assignable + supported.
+  sem2sir_type_id iv_ty = SEM2SIR_TYPE_INVALID;
+  sem2sir_type_id iv_ptr_of = SEM2SIR_TYPE_INVALID;
+  const char *iv_sir_tyid = NULL;
+  bool iv_is_slot = false;
+  if (!locals_lookup(ctx, iv_name, &iv_ty, &iv_ptr_of, &iv_sir_tyid, &iv_is_slot)) {
+    err(ctx->in_path, "ForInt.var did not bind a local");
+    free(iv_name);
+    free(var_json);
+    free(end_json);
+    free(step_json);
+    free(body_json);
+    return false;
+  }
+  if (!iv_is_slot) {
+    err(ctx->in_path, "ForInt induction var must be addressable (slot-backed local)");
+    free(iv_name);
+    free(var_json);
+    free(end_json);
+    free(step_json);
+    free(body_json);
+    return false;
+  }
+  if (iv_ty != SEM2SIR_TYPE_I32 && iv_ty != SEM2SIR_TYPE_I64) {
+    err(ctx->in_path, "ForInt induction var type must be i32 or i64 in emitter MVP");
+    free(iv_name);
+    free(var_json);
+    free(end_json);
+    free(step_json);
+    free(body_json);
+    return false;
+  }
+
+  // Allocate CFG blocks: header, body, step, exit.
+  size_t header_idx = 0;
+  size_t body_idx = 0;
+  size_t step_idx = 0;
+  size_t exit_idx = 0;
+  if (!fn_build_new_block(fn, ctx, &header_idx) || !fn_build_new_block(fn, ctx, &body_idx) ||
+      !fn_build_new_block(fn, ctx, &step_idx) || !fn_build_new_block(fn, ctx, &exit_idx)) {
+    err(ctx->in_path, "OOM creating ForInt blocks");
+    free(iv_name);
+    free(var_json);
+    free(end_json);
+    free(step_json);
+    free(body_json);
+    return false;
+  }
+
+  // Jump to header.
+  char *br_to_header = NULL;
+  if (!emit_term_br(ctx, fn->blocks[header_idx].id, &br_to_header)) {
+    err(ctx->in_path, "OOM emitting term.br");
+    free(iv_name);
+    free(var_json);
+    free(end_json);
+    free(step_json);
+    free(body_json);
+    return false;
+  }
+  if (!fn_build_append_stmt(fn, ctx, br_to_header, true)) {
+    free(iv_name);
+    free(var_json);
+    free(end_json);
+    free(step_json);
+    free(body_json);
+    return false;
+  }
+
+  // Build JSON snippets for Name(iv) and step default.
+  const char *step_default = "{\"k\":\"Int\",\"lit\":{\"k\":\"tok\",\"text\":\"1\"}}";
+  const char *step_expr = (step_is_null || !step_json) ? step_default : step_json;
+  size_t step_expr_len = (step_is_null || !step_json) ? strlen(step_default) : step_len;
+
+  // name_json
+  const char *name_pre = "{\"k\":\"Name\",\"id\":{\"k\":\"tok\",\"text\":";
+  const char *name_post = "}}";
+  size_t iv_esc_extra = 0;
+  (void)iv_esc_extra;
+  // Note: iv_name comes from tok.text, so it should not contain quotes in well-formed input.
+  size_t name_json_len = strlen(name_pre) + 2 + strlen(iv_name) + strlen(name_post);
+  char *name_json = (char *)malloc(name_json_len + 1);
+  if (!name_json) {
+    err(ctx->in_path, "OOM building ForInt Name JSON");
+    free(iv_name);
+    free(var_json);
+    free(end_json);
+    free(step_json);
+    free(body_json);
+    return false;
+  }
+  snprintf(name_json, name_json_len + 1, "%s\"%s\"%s", name_pre, iv_name, name_post);
+
+  // Header: cond is (iv < end) end-exclusive.
+  fn->cur_block = header_idx;
+  {
+    const char *cmp_pre = "{\"k\":\"Bin\",\"op\":\"core.lt\",\"lhs\":";
+    const char *mid = ",\"rhs\":";
+    const char *cmp_post = "}";
+    size_t cmp_len = strlen(cmp_pre) + strlen(name_json) + strlen(mid) + end_len + strlen(cmp_post);
+    char *cmp_json = (char *)malloc(cmp_len + 1);
+    if (!cmp_json) {
+      err(ctx->in_path, "OOM building ForInt cond JSON");
+      free(name_json);
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    memcpy(cmp_json, cmp_pre, strlen(cmp_pre));
+    memcpy(cmp_json + strlen(cmp_pre), name_json, strlen(name_json));
+    memcpy(cmp_json + strlen(cmp_pre) + strlen(name_json), mid, strlen(mid));
+    memcpy(cmp_json + strlen(cmp_pre) + strlen(name_json) + strlen(mid), end_json, end_len);
+    memcpy(cmp_json + strlen(cmp_pre) + strlen(name_json) + strlen(mid) + end_len, cmp_post, strlen(cmp_post));
+    cmp_json[cmp_len] = '\0';
+
+    SirExpr cond = {0};
+    StmtList cond_effects = {0};
+    GritJsonCursor cc = grit_json_cursor(cmp_json, cmp_len);
+    StmtList *saved = ctx->effects;
+    ctx->effects = &cond_effects;
+    bool ok = parse_expr(&cc, ctx, SEM2SIR_TYPE_BOOL, &cond);
+    ctx->effects = saved;
+    free(cmp_json);
+    if (!ok) {
+      free(cond_effects.ids);
+      free(name_json);
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    if (!fn_build_append_effects(fn, ctx, &cond_effects)) {
+      free(cond.id);
+      free(name_json);
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    char *t_id = NULL;
+    if (!emit_term_condbr(ctx, cond.id, fn->blocks[body_idx].id, fn->blocks[exit_idx].id, &t_id)) {
+      free(cond.id);
+      free(name_json);
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    if (!fn_build_append_stmt(fn, ctx, t_id, true)) {
+      free(cond.id);
+      free(name_json);
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    free(cond.id);
+  }
+
+  // Body.
+  LoopTargets targets = {.break_to = exit_idx, .continue_to = step_idx};
+  fn->cur_block = body_idx;
+  {
+    GritJsonCursor bc = grit_json_cursor(body_json, body_len);
+    if (!parse_block(&bc, ctx, fn, false, &targets)) {
+      free(name_json);
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+  }
+  if (!fn->blocks[fn->cur_block].terminated) {
+    char *to_step = NULL;
+    if (!emit_term_br(ctx, fn->blocks[step_idx].id, &to_step)) {
+      free(name_json);
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    if (!fn_build_append_stmt(fn, ctx, to_step, true)) {
+      free(name_json);
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+  }
+
+  // Step: iv = iv + step (default step=1).
+  fn->cur_block = step_idx;
+  {
+    const char *add_pre = "{\"k\":\"Bin\",\"op\":\"core.add\",\"lhs\":";
+    const char *mid = ",\"rhs\":";
+    const char *add_post = "}";
+    size_t add_len = strlen(add_pre) + strlen(name_json) + strlen(mid) + step_expr_len + strlen(add_post);
+    char *add_json = (char *)malloc(add_len + 1);
+    if (!add_json) {
+      err(ctx->in_path, "OOM building ForInt step add JSON");
+      free(name_json);
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    memcpy(add_json, add_pre, strlen(add_pre));
+    memcpy(add_json + strlen(add_pre), name_json, strlen(name_json));
+    memcpy(add_json + strlen(add_pre) + strlen(name_json), mid, strlen(mid));
+    memcpy(add_json + strlen(add_pre) + strlen(name_json) + strlen(mid), step_expr, step_expr_len);
+    memcpy(add_json + strlen(add_pre) + strlen(name_json) + strlen(mid) + step_expr_len, add_post, strlen(add_post));
+    add_json[add_len] = '\0';
+
+    const char *as_pre = "{\"k\":\"Bin\",\"op\":\"core.assign\",\"lhs\":";
+    const char *as_mid = ",\"rhs\":";
+    const char *as_post = "}";
+    size_t as_len = strlen(as_pre) + strlen(name_json) + strlen(as_mid) + add_len + strlen(as_post);
+    char *as_json = (char *)malloc(as_len + 1);
+    if (!as_json) {
+      err(ctx->in_path, "OOM building ForInt step assign JSON");
+      free(add_json);
+      free(name_json);
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    memcpy(as_json, as_pre, strlen(as_pre));
+    memcpy(as_json + strlen(as_pre), name_json, strlen(name_json));
+    memcpy(as_json + strlen(as_pre) + strlen(name_json), as_mid, strlen(as_mid));
+    memcpy(as_json + strlen(as_pre) + strlen(name_json) + strlen(as_mid), add_json, add_len);
+    memcpy(as_json + strlen(as_pre) + strlen(name_json) + strlen(as_mid) + add_len, as_post, strlen(as_post));
+    as_json[as_len] = '\0';
+    free(add_json);
+
+    GritJsonCursor ac = grit_json_cursor(as_json, as_len);
+    char *k = NULL;
+    if (!parse_node_k_string(&ac, ctx, &k)) {
+      free(as_json);
+      free(name_json);
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    free(k);
+
+    StmtList step_effects = {0};
+    StmtList *saved = ctx->effects;
+    ctx->effects = &step_effects;
+    char *st_id = NULL;
+    bool ok = parse_stmt_bin_assign_emit_store(&ac, ctx, &st_id);
+    ctx->effects = saved;
+    free(as_json);
+    if (!ok) {
+      free(step_effects.ids);
+      free(name_json);
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    if (!fn_build_append_effects(fn, ctx, &step_effects)) {
+      free(st_id);
+      free(name_json);
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    if (!fn_build_append_stmt(fn, ctx, st_id, false)) {
+      free(name_json);
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+
+    char *back = NULL;
+    if (!emit_term_br(ctx, fn->blocks[header_idx].id, &back)) {
+      free(name_json);
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+    if (!fn_build_append_stmt(fn, ctx, back, true)) {
+      free(name_json);
+      free(iv_name);
+      free(var_json);
+      free(end_json);
+      free(step_json);
+      free(body_json);
+      return false;
+    }
+  }
+
+  fn->cur_block = exit_idx;
+  free(name_json);
+  free(iv_name);
+  free(var_json);
+  free(end_json);
+  free(step_json);
+  free(body_json);
+  return true;
+}
+
 bool parse_block(GritJsonCursor *c, EmitCtx *ctx, SirFnBuild *fn, bool require_return, const LoopTargets *loop) {
 
   char *k = NULL;
@@ -1053,6 +2240,24 @@ bool parse_block(GritJsonCursor *c, EmitCtx *ctx, SirFnBuild *fn, bool require_r
           } else if (strcmp(sk, "Loop") == 0) {
             free(sk);
             if (!parse_stmt_loop(c, ctx, fn)) {
+              free(key);
+              return false;
+            }
+          } else if (strcmp(sk, "DoWhile") == 0) {
+            free(sk);
+            if (!parse_stmt_do_while(c, ctx, fn)) {
+              free(key);
+              return false;
+            }
+          } else if (strcmp(sk, "For") == 0) {
+            free(sk);
+            if (!parse_stmt_for(c, ctx, fn)) {
+              free(key);
+              return false;
+            }
+          } else if (strcmp(sk, "ForInt") == 0) {
+            free(sk);
+            if (!parse_stmt_for_int(c, ctx, fn)) {
               free(key);
               return false;
             }

@@ -1,0 +1,16 @@
+{"ir":"sir-v1.0","k":"meta","producer":"sem2sir","unit":"main"}
+
+{"ir":"sir-v1.0","k":"type","id":"t:i32","kind":"prim","prim":"i32"}
+{"ir":"sir-v1.0","k":"type","id":"t:fn:main","kind":"fn","params":[],"ret":"t:i32"}
+{"ir":"sir-v1.0","k":"node","id":"n:6","tag":"term.br","fields":{"to":{"t":"ref","id":"n:3"}}}
+{"ir":"sir-v1.0","k":"node","id":"n:7","tag":"term.br","fields":{"to":{"t":"ref","id":"n:4"}}}
+{"ir":"sir-v1.0","k":"type","id":"t:bool","kind":"prim","prim":"bool"}
+{"ir":"sir-v1.0","k":"node","id":"n:8","tag":"const.bool","type_ref":"t:bool","fields":{"value":0}}
+{"ir":"sir-v1.0","k":"node","id":"n:9","tag":"term.condbr","fields":{"cond":{"t":"ref","id":"n:8"},"then":{"to":{"t":"ref","id":"n:3"}},"else":{"to":{"t":"ref","id":"n:5"}}}}
+{"ir":"sir-v1.0","k":"node","id":"n:10","tag":"const.i32","type_ref":"t:i32","fields":{"value":0}}
+{"ir":"sir-v1.0","k":"node","id":"n:11","tag":"term.ret","fields":{"value":{"t":"ref","id":"n:10"}}}
+{"ir":"sir-v1.0","k":"node","id":"n:2","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:6"}]}}
+{"ir":"sir-v1.0","k":"node","id":"n:3","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:7"}]}}
+{"ir":"sir-v1.0","k":"node","id":"n:4","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:9"}]}}
+{"ir":"sir-v1.0","k":"node","id":"n:5","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:11"}]}}
+{"ir":"sir-v1.0","k":"node","id":"n:1","tag":"fn","type_ref":"t:fn:main","fields":{"name":"main","linkage":"public","params":[],"entry":{"t":"ref","id":"n:2"},"blocks":[{"t":"ref","id":"n:2"},{"t":"ref","id":"n:3"},{"t":"ref","id":"n:4"},{"t":"ref","id":"n:5"}]}}

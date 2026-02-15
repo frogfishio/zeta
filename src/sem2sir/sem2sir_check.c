@@ -115,7 +115,7 @@ static void print_allowed_types(FILE *out) {
 
 static void print_allowed_intrinsics(FILE *out) {
   bool first = true;
-  for (int k = 1; k <= (int)SEM2SIR_INTRINSIC_MatchArm; k++) {
+  for (int k = 1; k < (int)SEM2SIR_INTRINSIC__MAX; k++) {
     const char *s = sem2sir_intrinsic_to_string((sem2sir_intrinsic_id)k);
     if (!s)
       continue;
@@ -157,6 +157,15 @@ static void print_allowed_node_keys(FILE *out, sem2sir_intrinsic_id kid) {
     break;
   case SEM2SIR_INTRINSIC_Loop:
     fprintf(out, ", body");
+    break;
+  case SEM2SIR_INTRINSIC_DoWhile:
+    fprintf(out, ", body, cond");
+    break;
+  case SEM2SIR_INTRINSIC_For:
+    fprintf(out, ", init, cond, step, body");
+    break;
+  case SEM2SIR_INTRINSIC_ForInt:
+    fprintf(out, ", var, end, step, body");
     break;
   case SEM2SIR_INTRINSIC_Break:
   case SEM2SIR_INTRINSIC_Continue:
@@ -281,6 +290,15 @@ static void print_expected_schema(FILE *out, sem2sir_intrinsic_id kid) {
     break;
   case SEM2SIR_INTRINSIC_Loop:
     fprintf(out, "Loop expects: body: Block");
+    break;
+  case SEM2SIR_INTRINSIC_DoWhile:
+    fprintf(out, "DoWhile expects: body: Block, cond: node");
+    break;
+  case SEM2SIR_INTRINSIC_For:
+    fprintf(out, "For expects: init: null|Block, cond: null|node, step: null|Block, body: Block");
+    break;
+  case SEM2SIR_INTRINSIC_ForInt:
+    fprintf(out, "ForInt expects: var: node, end: node, step: null|node, body: Block");
     break;
   default:
     fprintf(out, "(no schema hint available)");
@@ -569,6 +587,12 @@ static bool is_allowed_node_key(sem2sir_intrinsic_id kid, const char *key) {
     return strcmp(key, "cond") == 0 || strcmp(key, "body") == 0;
   case SEM2SIR_INTRINSIC_Loop:
     return strcmp(key, "body") == 0;
+  case SEM2SIR_INTRINSIC_DoWhile:
+    return strcmp(key, "body") == 0 || strcmp(key, "cond") == 0;
+  case SEM2SIR_INTRINSIC_For:
+    return strcmp(key, "init") == 0 || strcmp(key, "cond") == 0 || strcmp(key, "step") == 0 || strcmp(key, "body") == 0;
+  case SEM2SIR_INTRINSIC_ForInt:
+    return strcmp(key, "var") == 0 || strcmp(key, "end") == 0 || strcmp(key, "step") == 0 || strcmp(key, "body") == 0;
   case SEM2SIR_INTRINSIC_Param:
     return strcmp(key, "name") == 0 || strcmp(key, "type") == 0 || strcmp(key, "mode") == 0;
   case SEM2SIR_INTRINSIC_ParamPat:
@@ -728,6 +752,8 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
     bool seen_pat = false;
     bool seen_init = false;
     bool seen_arms = false;
+    bool seen_var = false;
+    bool seen_end = false;
 
     for (;;) {
       if (!json_peek_non_ws(c, &ch)) {
@@ -835,6 +861,8 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
         if (strcmp(key, "pat") == 0) seen_pat = true;
         if (strcmp(key, "init") == 0) seen_init = true;
         if (strcmp(key, "arms") == 0) seen_arms = true;
+        if (strcmp(key, "var") == 0) seen_var = true;
+        if (strcmp(key, "end") == 0) seen_end = true;
 
         // Enforce common field shapes for better boundary errors.
         if (!is_tok) {
@@ -874,6 +902,10 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
               (kid == SEM2SIR_INTRINSIC_If && (strcmp(key, "cond") == 0 || strcmp(key, "then") == 0 || strcmp(key, "else") == 0)) ||
               (kid == SEM2SIR_INTRINSIC_While && (strcmp(key, "cond") == 0 || strcmp(key, "body") == 0)) ||
               (kid == SEM2SIR_INTRINSIC_Loop && strcmp(key, "body") == 0) ||
+              (kid == SEM2SIR_INTRINSIC_DoWhile && (strcmp(key, "cond") == 0 || strcmp(key, "body") == 0)) ||
+              (kid == SEM2SIR_INTRINSIC_For && (strcmp(key, "init") == 0 || strcmp(key, "cond") == 0 || strcmp(key, "step") == 0 || strcmp(key, "body") == 0)) ||
+              (kid == SEM2SIR_INTRINSIC_ForInt && (strcmp(key, "var") == 0 || strcmp(key, "end") == 0 || strcmp(key, "body") == 0)) ||
+              (kid == SEM2SIR_INTRINSIC_ForInt && strcmp(key, "step") == 0) ||
               (kid == SEM2SIR_INTRINSIC_Paren && strcmp(key, "expr") == 0) ||
               (kid == SEM2SIR_INTRINSIC_Not && strcmp(key, "expr") == 0) ||
               (kid == SEM2SIR_INTRINSIC_Neg && strcmp(key, "expr") == 0) ||
@@ -887,7 +919,9 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
             // Some of these are optional; allow null where permitted.
             bool allow_null = (kid == SEM2SIR_INTRINSIC_If && strcmp(key, "else") == 0) ||
                               (kid == SEM2SIR_INTRINSIC_Return && strcmp(key, "value") == 0) ||
-                              (kid == SEM2SIR_INTRINSIC_MatchArm && strcmp(key, "guard") == 0);
+                              (kid == SEM2SIR_INTRINSIC_MatchArm && strcmp(key, "guard") == 0) ||
+                              (kid == SEM2SIR_INTRINSIC_For && (strcmp(key, "init") == 0 || strcmp(key, "cond") == 0 || strcmp(key, "step") == 0)) ||
+                              (kid == SEM2SIR_INTRINSIC_ForInt && strcmp(key, "step") == 0);
 
             if (allow_null) {
               if (!json_expect_node_or_null_value(c, path, field_buf, NULL)) {
@@ -1106,6 +1140,36 @@ static bool validate_object(GritJsonCursor *c, const char *path) {
       if (kid == SEM2SIR_INTRINSIC_Loop) {
         if (!seen_body) {
           print_err_at(path, &obj_start, "Loop requires field: body");
+          fprintf(stderr, "  expected: ");
+          print_expected_schema(stderr, kid);
+          fputc('\n', stderr);
+          free(k_str);
+          return false;
+        }
+      }
+      if (kid == SEM2SIR_INTRINSIC_DoWhile) {
+        if (!seen_cond || !seen_body) {
+          print_err_at(path, &obj_start, "DoWhile requires fields: body, cond");
+          fprintf(stderr, "  expected: ");
+          print_expected_schema(stderr, kid);
+          fputc('\n', stderr);
+          free(k_str);
+          return false;
+        }
+      }
+      if (kid == SEM2SIR_INTRINSIC_For) {
+        if (!seen_body) {
+          print_err_at(path, &obj_start, "For requires field: body");
+          fprintf(stderr, "  expected: ");
+          print_expected_schema(stderr, kid);
+          fputc('\n', stderr);
+          free(k_str);
+          return false;
+        }
+      }
+      if (kid == SEM2SIR_INTRINSIC_ForInt) {
+        if (!seen_body || !seen_var || !seen_end) {
+          print_err_at(path, &obj_start, "ForInt requires fields: var, end, body");
           fprintf(stderr, "  expected: ");
           print_expected_schema(stderr, kid);
           fputc('\n', stderr);

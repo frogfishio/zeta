@@ -1,0 +1,29 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"@default.int": "i32", "I32": "i32", "Bool": "bool", "Void": "void"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {
+              "k": "DoWhile",
+              "body": {"k": "Block", "items": [{"k": "Continue"}]},
+              "cond": {"k": "False"}
+            },
+            {"k": "Return", "value": {"k": "Int", "lit": {"k": "tok", "text": "0"}}}
+          ]
+        }
+      }
+    ]
+  }
+}

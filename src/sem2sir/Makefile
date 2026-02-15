@@ -61,7 +61,7 @@ test: $(BIN)
 	@echo OK_sem2sir_rejects_bad_default_ptr_pointee
 	! ./$(BIN) --check tests/bad_meta_ops_nonempty.jsonl >/dev/null 2>&1
 	@echo OK_sem2sir_rejects_meta_ops_nonempty
-	rm -f tests/out.sir.jsonl tests/out_fail.sir.jsonl tests/out_add.sir.jsonl tests/out_add_i64.sir.jsonl tests/out_eq.sir.jsonl tests/out_lt_i64.sir.jsonl tests/out_default_int_lt.sir.jsonl tests/out_and_sc.sir.jsonl tests/out_or_sc.sir.jsonl tests/out_not.sir.jsonl tests/out_neg_i64.sir.jsonl tests/out_bitnot_i32.sir.jsonl tests/out_ptr_addrof_deref_i64.sir.jsonl tests/out_ptr_typeapp_i64.sir.jsonl tests/out_ptr_typeapp_void_opaque.sir.jsonl tests/out_assign_stmt_i64.sir.jsonl tests/out_assign_expr_return_i64.sir.jsonl tests/out_assign_expr_chain_return_i64.sir.jsonl tests/out_assign_expr_in_add_i64.sir.jsonl tests/out_assign_deref_stmt_i64.sir.jsonl tests/out_assign_deref_stmt_ptr_typeapp_i64_no_default.sir.jsonl tests/out_assign_deref_expr_in_add_i64.sir.jsonl tests/out_assign_expr_rhs_first_i64.sir.jsonl tests/out_assign_deref_stmt_rhs_first_i64.sir.jsonl tests/out_match_i32.sir.jsonl tests/out_loop_break.sir.jsonl build/out_ptr_param_inc_i64.sir.jsonl build/out_call2_add2_i64.sir.jsonl
+	rm -f tests/out.sir.jsonl tests/out_fail.sir.jsonl tests/out_add.sir.jsonl tests/out_add_i64.sir.jsonl tests/out_eq.sir.jsonl tests/out_lt_i64.sir.jsonl tests/out_default_int_lt.sir.jsonl tests/out_and_sc.sir.jsonl tests/out_or_sc.sir.jsonl tests/out_not.sir.jsonl tests/out_neg_i64.sir.jsonl tests/out_bitnot_i32.sir.jsonl tests/out_ptr_addrof_deref_i64.sir.jsonl tests/out_ptr_typeapp_i64.sir.jsonl tests/out_ptr_typeapp_void_opaque.sir.jsonl tests/out_assign_stmt_i64.sir.jsonl tests/out_assign_expr_return_i64.sir.jsonl tests/out_assign_expr_chain_return_i64.sir.jsonl tests/out_assign_expr_in_add_i64.sir.jsonl tests/out_assign_deref_stmt_i64.sir.jsonl tests/out_assign_deref_stmt_ptr_typeapp_i64_no_default.sir.jsonl tests/out_assign_deref_expr_in_add_i64.sir.jsonl tests/out_assign_expr_rhs_first_i64.sir.jsonl tests/out_assign_deref_stmt_rhs_first_i64.sir.jsonl tests/out_match_i32.sir.jsonl tests/out_loop_break.sir.jsonl tests/out_dowhile_break.sir.jsonl tests/out_for_break.sir.jsonl tests/out_forint_break.sir.jsonl tests/out_dowhile_continue.sir.jsonl tests/out_for_continue.sir.jsonl tests/out_forint_continue.sir.jsonl build/out_ptr_param_inc_i64.sir.jsonl build/out_call2_add2_i64.sir.jsonl
 	./$(BIN) --emit-sir tests/good_typed_min.jsonl --out tests/out.sir.jsonl >/dev/null
 	$(SIRCC) --verify-strict --verify-only tests/out.sir.jsonl >/dev/null
 	@echo OK_sem2sir_emit_sir_typed_min
@@ -114,6 +114,27 @@ test: $(BIN)
 	./$(BIN) --emit-sir tests/good_loop_break.jsonl --out tests/out_loop_break.sir.jsonl >/dev/null
 	$(SIRCC) --verify-strict --verify-only tests/out_loop_break.sir.jsonl >/dev/null
 	@echo OK_sem2sir_emit_sir_loop_break
+	./$(BIN) --emit-sir tests/good_dowhile_break.jsonl --out tests/out_dowhile_break.sir.jsonl >/dev/null
+	$(SIRCC) --verify-strict --verify-only tests/out_dowhile_break.sir.jsonl >/dev/null
+	@echo OK_sem2sir_emit_sir_dowhile_break
+	./$(BIN) --emit-sir tests/good_for_break.jsonl --out tests/out_for_break.sir.jsonl >/dev/null
+	$(SIRCC) --verify-strict --verify-only tests/out_for_break.sir.jsonl >/dev/null
+	@echo OK_sem2sir_emit_sir_for_break
+	./$(BIN) --emit-sir tests/good_forint_break.jsonl --out tests/out_forint_break.sir.jsonl >/dev/null
+	$(SIRCC) --verify-strict --verify-only tests/out_forint_break.sir.jsonl >/dev/null
+	@echo OK_sem2sir_emit_sir_forint_break
+	./$(BIN) --emit-sir tests/good_dowhile_continue.jsonl --out tests/out_dowhile_continue.sir.jsonl >/dev/null
+	$(SIRCC) --verify-strict --verify-only tests/out_dowhile_continue.sir.jsonl >/dev/null
+	python3 tests/assert_loop_continue.py tests/out_dowhile_continue.sir.jsonl dowhile
+	@echo OK_sem2sir_emit_sir_dowhile_continue
+	./$(BIN) --emit-sir tests/good_for_continue.jsonl --out tests/out_for_continue.sir.jsonl >/dev/null
+	$(SIRCC) --verify-strict --verify-only tests/out_for_continue.sir.jsonl >/dev/null
+	python3 tests/assert_loop_continue.py tests/out_for_continue.sir.jsonl for
+	@echo OK_sem2sir_emit_sir_for_continue
+	./$(BIN) --emit-sir tests/good_forint_continue.jsonl --out tests/out_forint_continue.sir.jsonl >/dev/null
+	$(SIRCC) --verify-strict --verify-only tests/out_forint_continue.sir.jsonl >/dev/null
+	python3 tests/assert_loop_continue.py tests/out_forint_continue.sir.jsonl forint
+	@echo OK_sem2sir_emit_sir_forint_continue
 	@if [ -f ../4_ast/cert/cases/lumen/lumen.ast.sem2sir_ptr_param_inc_i64.jsonl ]; then \
 		./$(BIN) --emit-sir ../4_ast/cert/cases/lumen/lumen.ast.sem2sir_ptr_param_inc_i64.jsonl --out build/out_ptr_param_inc_i64.sir.jsonl >/dev/null && \
 		$(SIRCC) --verify-strict --verify-only build/out_ptr_param_inc_i64.sir.jsonl >/dev/null && \
