@@ -1,0 +1,32 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"I32": "i32", "Bool": "bool", "Void": "void"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "bool"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {
+              "k": "Return",
+              "value": {
+                "k": "Bin",
+                "op": "core.bool.or_sc",
+                "lhs": {"k": "False"},
+                "rhs": {"k": "True"}
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

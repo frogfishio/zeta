@@ -1,0 +1,38 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"I32": "i32", "Bool": "bool", "Void": "void"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "bool"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "x"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
+              "init": {"k": "Int", "lit": {"k": "tok", "text": "1"}}
+            },
+            {
+              "k": "Return",
+              "value": {
+                "k": "Bin",
+                "op": "core.eq",
+                "rhs": {"k": "Int", "lit": {"k": "tok", "text": "2"}},
+                "lhs": {"k": "Name", "id": {"k": "tok", "text": "x"}}
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

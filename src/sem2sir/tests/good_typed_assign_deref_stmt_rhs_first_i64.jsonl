@@ -1,0 +1,60 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"I64": "i64", "Ptr": "ptr", "Void": "void", "__default_ptr_pointee": "i64"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "i64"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "a"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i64"}},
+              "init": {"k": "Int", "lit": {"k": "tok", "text": "1"}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "b"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i64"}},
+              "init": {"k": "Int", "lit": {"k": "tok", "text": "2"}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "p"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "ptr"}},
+              "init": {
+                "k": "AddrOf",
+                "expr": {"k": "Name", "id": {"k": "tok", "text": "a"}}
+              }
+            },
+            {
+              "k": "Bin",
+              "op": "core.assign",
+              "rhs": {"k": "Name", "id": {"k": "tok", "text": "b"}},
+              "lhs": {
+                "k": "Deref",
+                "expr": {"k": "Name", "id": {"k": "tok", "text": "p"}}
+              }
+            },
+            {
+              "k": "Return",
+              "value": {
+                "k": "Deref",
+                "expr": {"k": "Name", "id": {"k": "tok", "text": "p"}}
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

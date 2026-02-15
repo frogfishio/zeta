@@ -1,0 +1,32 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"I32": "i32", "I64": "i64", "Bool": "bool", "Void": "void"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "i64"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {
+              "k": "Return",
+              "value": {
+                "k": "Bin",
+                "op": "core.add",
+                "lhs": {"k": "Int", "lit": {"k": "tok", "text": "40"}},
+                "rhs": {"k": "Int", "lit": {"k": "tok", "text": "2"}}
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

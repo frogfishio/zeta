@@ -1,0 +1,49 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"I64": "i64", "Void": "void"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "i64"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "a"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i64"}},
+              "init": {"k": "Int", "lit": {"k": "tok", "text": "1"}}
+            },
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "b"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i64"}},
+              "init": {"k": "Int", "lit": {"k": "tok", "text": "2"}}
+            },
+            {
+              "k": "Return",
+              "value": {
+                "k": "Bin",
+                "op": "core.add",
+                "lhs": {
+                  "k": "Bin",
+                  "op": "core.assign",
+                  "lhs": {"k": "Name", "id": {"k": "tok", "text": "a"}},
+                  "rhs": {"k": "Name", "id": {"k": "tok", "text": "b"}}
+                },
+                "rhs": {"k": "Int", "lit": {"k": "tok", "text": "1"}}
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

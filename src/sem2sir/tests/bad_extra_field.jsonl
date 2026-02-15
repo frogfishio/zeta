@@ -1,0 +1,1 @@
+{"diagnostics":[],"meta":{"note":"pack-ast","root":"Program","types":{}},"ast":{"k":"Int","nid":1,"span":{"start_byte":0,"end_byte":1},"lit":{"k":"tok","nid":2,"i":0,"kind":0,"start_byte":0,"end_byte":1,"text":"1"},"extra":123},"symbols":[],"symtab":[],"sym_by_tok_i":[]}

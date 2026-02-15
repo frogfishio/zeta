@@ -1,0 +1,27 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"I32": "i32", "Void": "void"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {
+              "k": "Return",
+              "value": {"k": "BitNot", "expr": {"k": "Int", "lit": {"k": "tok", "text": "0"}}}
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

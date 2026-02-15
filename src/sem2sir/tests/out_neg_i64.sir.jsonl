@@ -1,0 +1,9 @@
+{"ir":"sir-v1.0","k":"meta","producer":"sem2sir","unit":"main"}
+
+{"ir":"sir-v1.0","k":"type","id":"t:i64","kind":"prim","prim":"i64"}
+{"ir":"sir-v1.0","k":"type","id":"t:fn:main","kind":"fn","params":[],"ret":"t:i64"}
+{"ir":"sir-v1.0","k":"node","id":"n:3","tag":"const.i64","type_ref":"t:i64","fields":{"value":7}}
+{"ir":"sir-v1.0","k":"node","id":"n:4","tag":"i64.neg","type_ref":"t:i64","fields":{"args":[{"t":"ref","id":"n:3"}]}}
+{"ir":"sir-v1.0","k":"node","id":"n:5","tag":"term.ret","fields":{"value":{"t":"ref","id":"n:4"}}}
+{"ir":"sir-v1.0","k":"node","id":"n:2","tag":"block","fields":{"stmts":[{"t":"ref","id":"n:5"}]}}
+{"ir":"sir-v1.0","k":"node","id":"n:1","tag":"fn","type_ref":"t:fn:main","fields":{"name":"main","linkage":"public","params":[],"entry":{"t":"ref","id":"n:2"},"blocks":[{"t":"ref","id":"n:2"}]}}

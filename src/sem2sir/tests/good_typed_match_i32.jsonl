@@ -1,0 +1,57 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"I32": "i32", "I64": "i64", "Bool": "bool", "Void": "void"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [
+          {
+            "k": "ParamPat",
+            "pat": {"k": "PatBind", "name": {"k": "tok", "text": "x"}},
+            "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
+            "mode": null
+          }
+        ],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "i32"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {
+              "k": "Return",
+              "value": {
+                "k": "Match",
+                "cond": {"k": "Name", "id": {"k": "tok", "text": "x"}},
+                "arms": [
+                  {
+                    "k": "MatchArm",
+                    "pat": {"k": "PatInt", "lit": {"k": "tok", "text": "0"}},
+                    "guard": null,
+                    "body": {"k": "Int", "lit": {"k": "tok", "text": "10"}}
+                  },
+                  {
+                    "k": "MatchArm",
+                    "pat": {"k": "PatInt", "lit": {"k": "tok", "text": "1"}},
+                    "guard": null,
+                    "body": {"k": "Int", "lit": {"k": "tok", "text": "20"}}
+                  },
+                  {
+                    "k": "MatchArm",
+                    "pat": {"k": "PatWild"},
+                    "guard": null,
+                    "body": {"k": "Int", "lit": {"k": "tok", "text": "30"}}
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

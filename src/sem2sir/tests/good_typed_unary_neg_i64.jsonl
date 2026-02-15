@@ -1,0 +1,27 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"I64": "i64", "Void": "void"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "i64"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {
+              "k": "Return",
+              "value": {"k": "Neg", "expr": {"k": "Int", "lit": {"k": "tok", "text": "7"}}}
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"I64": "i64", "Ptr": "ptr", "Void": "void"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "params": [],
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "i64"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {
+              "k": "Var",
+              "name": {"k": "tok", "text": "x"},
+              "type": {"k": "TypeRef", "name": {"k": "tok", "text": "i64"}},
+              "init": {"k": "Int", "lit": {"k": "tok", "text": "1"}}
+            },
+            {
+              "k": "Return",
+              "value": {
+                "k": "Deref",
+                "expr": {
+                  "k": "AddrOf",
+                  "expr": {"k": "Name", "id": {"k": "tok", "text": "x"}}
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

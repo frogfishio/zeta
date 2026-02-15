@@ -1,0 +1,24 @@
+{
+  "diagnostics": [],
+  "meta": {
+    "types": {"@default.int": "f64", "F64": "f64", "Bool": "bool", "Void": "void"},
+    "ops": {}
+  },
+  "ast": {
+    "k": "Unit",
+        "params": [],
+    "items": [
+      {
+        "k": "Proc",
+        "name": {"k": "tok", "text": "main"},
+        "ret": {"k": "TypeRef", "name": {"k": "tok", "text": "bool"}},
+        "body": {
+          "k": "Block",
+          "items": [
+            {"k": "Return", "value": {"k": "False"}}
+          ]
+        }
+      }
+    ]
+  }
+}
